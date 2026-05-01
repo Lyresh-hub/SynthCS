@@ -19,11 +19,13 @@ require("dotenv").config({ path: path.join(__dirname, ".env") });
 const FRONTEND_URL = process.env.FRONTEND_URL || "http://localhost:5173";
 const JWT_SECRET   = process.env.JWT_SECRET   || "synthgen-dev-secret";
 
-const ALLOWED_ORIGINS = [
-  FRONTEND_URL,
-  "http://localhost:5173",
-  "http://localhost:4173",
-].filter(Boolean);
+function isAllowedOrigin(origin) {
+  if (!origin) return true;
+  if (origin.startsWith("http://localhost")) return true;
+  if (origin.endsWith(".vercel.app")) return true;
+  if (origin === FRONTEND_URL) return true;
+  return false;
+}
 
 // ── Mailer ────────────────────────────────────────────────────────────────────
 const mailer = nodemailer.createTransport({
@@ -69,10 +71,7 @@ async function sendVerificationEmail(to, token) {
 
 const app = express();
 app.use(cors({
-  origin: (origin, cb) => {
-    if (!origin || ALLOWED_ORIGINS.includes(origin)) return cb(null, true);
-    cb(new Error(`CORS: origin ${origin} not allowed`));
-  },
+  origin: (origin, cb) => cb(null, isAllowedOrigin(origin)),
   credentials: true,
 }));
 app.use(express.json());
