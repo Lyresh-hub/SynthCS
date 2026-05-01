@@ -6,8 +6,8 @@ from ctgan import CTGAN
 from sklearn.model_selection import train_test_split
 
 
-# Maximum rows used to train CTGAN (prevents OOM on huge datasets)
-_MAX_TRAINING_ROWS = 50_000
+# Keep training set small enough to fit in Railway's 512 MB RAM limit
+_MAX_TRAINING_ROWS = 5_000
 
 
 def _detect_discrete_columns(df: pd.DataFrame) -> list[str]:
@@ -104,7 +104,7 @@ def expand_template_with_ctgan(dataset_path: str, row_count: int) -> str:
         synthetic = df.sample(row_count, replace=True).reset_index(drop=True)
     else:
         discrete_columns = _detect_discrete_columns(ctgan_df)
-        ctgan = CTGAN(epochs=100, verbose=True)
+        ctgan = CTGAN(epochs=10, batch_size=100, verbose=True)
         ctgan.fit(ctgan_df, discrete_columns)
         synthetic = ctgan.sample(row_count)
 
@@ -164,7 +164,7 @@ def generate_synthetic_data(dataset_path: str, changes: list[dict], row_count: i
     discrete_columns = _detect_discrete_columns(train_df)
 
     # Train CTGAN on the 80% training set only
-    ctgan = CTGAN(epochs=100, verbose=True)
+    ctgan = CTGAN(epochs=10, batch_size=100, verbose=True)
     ctgan.fit(train_df, discrete_columns)
 
     # Generate the requested number of rows

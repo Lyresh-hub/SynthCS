@@ -111,8 +111,8 @@ def generate(req: GenerateRequest):
     if not os.path.isdir(dataset_path):
         raise HTTPException(status_code=404, detail="Dataset not found. Please download it first.")
 
-    if not (10_000 <= req.row_count <= 100_000):
-        raise HTTPException(status_code=400, detail="row_count must be between 10000 and 100000.")
+    if not (1_000 <= req.row_count <= 100_000):
+        raise HTTPException(status_code=400, detail="row_count must be between 1000 and 100000.")
 
     changes = [c.model_dump() for c in req.changes]
 
