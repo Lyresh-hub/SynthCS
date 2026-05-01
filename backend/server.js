@@ -1,7 +1,3 @@
-// Force IPv4 for all DNS lookups — Railway's IPv6 can't reach smtp.gmail.com
-const dns = require("dns");
-dns.setDefaultResultOrder("ipv4first");
-
 const express = require("express");
 const cors = require("cors");
 const bcrypt = require("bcrypt");
@@ -13,7 +9,7 @@ const passport = require("passport");
 const GitHubStrategy = require("passport-github2").Strategy;
 const GoogleStrategy = require("passport-google-oauth20").Strategy;
 const jwt = require("jsonwebtoken");
-const nodemailer = require("nodemailer");
+const { Resend } = require("resend");
 const pool = require("./db");
 const Anthropic = require("@anthropic-ai/sdk");
 // const Groq = require("groq-sdk"); // kept for reference
@@ -31,29 +27,20 @@ function isAllowedOrigin(origin) {
   return false;
 }
 
-// ── Mailer ────────────────────────────────────────────────────────────────────
-const mailer = nodemailer.createTransport({
-  host:   process.env.SMTP_HOST || "smtp.gmail.com",
-  port:   Number(process.env.SMTP_PORT) || 465,
-  secure: Number(process.env.SMTP_PORT) === 587 ? false : true,
-  auth: {
-    user: process.env.SMTP_USER,
-    pass: process.env.SMTP_PASS,
-  },
-  connectionTimeout: 20_000,
-  greetingTimeout:   15_000,
-  socketTimeout:     20_000,
-});
+// ── Email (Resend HTTP API — no SMTP ports needed) ────────────────────────────
+const resend = new Resend(process.env.RESEND_API_KEY);
 
-const SMTP_READY = !!(process.env.SMTP_USER && process.env.SMTP_PASS);
-if (!SMTP_READY) console.log("⚠️  Email verification disabled — SMTP_USER / SMTP_PASS not set in .env");
+const EMAIL_READY = !!process.env.RESEND_API_KEY;
+if (!EMAIL_READY) console.log("⚠️  Email verification disabled — RESEND_API_KEY not set");
 
 async function sendVerificationEmail(to, token) {
-  const BASE  = process.env.BACKEND_URL || `http://localhost:${process.env.PORT || 5000}`;
-  const link  = `${BASE}/verify-email?token=${token}`;
-  await mailer.sendMail({
-    from:    process.env.SMTP_FROM || "SynthCS <no-reply@synthcs.app>",
-    to,
+  const BASE = process.env.BACKEND_URL || `http://localhost:${process.env.PORT || 5000}`;
+  const link = `${BASE}/verify-email?token=${token}`;
+  const from = process.env.RESEND_FROM || "SynthCS <onboarding@resend.dev>";
+
+  const { error } = await resend.emails.send({
+    from,
+    to: [to],
     subject: "Verify your SynthCS account",
     html: `
       <div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:32px 24px">
@@ -74,6 +61,8 @@ async function sendVerificationEmail(to, token) {
       </div>
     `,
   });
+
+  if (error) throw new Error(error.message);
 }
 
 const app = express();
@@ -285,11 +274,11 @@ app.post("/signup", async (req, res) => {
     const result = await pool.query(
       `INSERT INTO users (full_name, email, password, email_verified, verification_token)
        VALUES ($1, $2, $3, $4, $5) RETURNING id, full_name, email, created_at`,
-      [full_name, email, hashed, !SMTP_READY, SMTP_READY ? token : null]
+      [full_name, email, hashed, !EMAIL_READY, EMAIL_READY ? token : null]
     );
     const user = result.rows[0];
 
-    if (SMTP_READY) {
+    if (EMAIL_READY) {
       // Respond immediately — send email in the background so signup doesn't hang
       res.status(201).json({ pending_verification: true, email });
       sendVerificationEmail(email, token).catch((e) =>
@@ -298,7 +287,7 @@ app.post("/signup", async (req, res) => {
       return;
     }
 
-    // SMTP not configured → auto-verify and return session immediately
+    // Email not configured → auto-verify and return session immediately
     res.status(201).json({ id: user.id, full_name: user.full_name, email: user.email });
   } catch (err) {
     if (err.code === "23505") return res.status(400).json({ error: "Email already exists" });
