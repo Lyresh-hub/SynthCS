@@ -1,5 +1,5 @@
 [phases.setup]
-nixPkgs = ["python312", "python312Packages.pip"]
+nixPkgs = ["python312", "gcc", "libffi"]
 
 [start]
 cmd = "uvicorn main:app --host 0.0.0.0 --port $PORT"
