@@ -28,12 +28,11 @@ function isAllowedOrigin(origin) {
 }
 
 // ── Email (Resend HTTP API — no SMTP ports needed) ────────────────────────────
-const resend = new Resend(process.env.RESEND_API_KEY);
-
 const EMAIL_READY = !!process.env.RESEND_API_KEY;
 if (!EMAIL_READY) console.log("⚠️  Email verification disabled — RESEND_API_KEY not set");
 
 async function sendVerificationEmail(to, token) {
+  const resend = new Resend(process.env.RESEND_API_KEY);
   const BASE = process.env.BACKEND_URL || `http://localhost:${process.env.PORT || 5000}`;
   const link = `${BASE}/verify-email?token=${token}`;
   const from = process.env.RESEND_FROM || "SynthCS <onboarding@resend.dev>";
