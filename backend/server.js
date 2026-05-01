@@ -29,17 +29,17 @@ function isAllowedOrigin(origin) {
 
 // ── Mailer ────────────────────────────────────────────────────────────────────
 const mailer = nodemailer.createTransport({
-  host:             process.env.SMTP_HOST || "smtp.gmail.com",
-  port:             Number(process.env.SMTP_PORT) || 587,
-  secure:           false,
-  family:           4,   // force IPv4 — Railway IPv6 can't reach smtp.gmail.com
+  host:   process.env.SMTP_HOST || "smtp.gmail.com",
+  port:   Number(process.env.SMTP_PORT) || 465,
+  secure: Number(process.env.SMTP_PORT) === 587 ? false : true,
+  family: 4,   // force IPv4 — Railway IPv6 can't reach smtp.gmail.com
   auth: {
     user: process.env.SMTP_USER,
     pass: process.env.SMTP_PASS,
   },
-  connectionTimeout: 10_000,
-  greetingTimeout:   10_000,
-  socketTimeout:     15_000,
+  connectionTimeout: 20_000,
+  greetingTimeout:   15_000,
+  socketTimeout:     20_000,
 });
 
 const SMTP_READY = !!(process.env.SMTP_USER && process.env.SMTP_PASS);
