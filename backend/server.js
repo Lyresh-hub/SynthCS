@@ -9,7 +9,7 @@ const passport = require("passport");
 const GitHubStrategy = require("passport-github2").Strategy;
 const GoogleStrategy = require("passport-google-oauth20").Strategy;
 const jwt = require("jsonwebtoken");
-const { Resend } = require("resend");
+// Brevo (transactional email — no SMTP ports needed)
 const pool = require("./db");
 const Anthropic = require("@anthropic-ai/sdk");
 // const Groq = require("groq-sdk"); // kept for reference
@@ -27,41 +27,49 @@ function isAllowedOrigin(origin) {
   return false;
 }
 
-// ── Email (Resend HTTP API — no SMTP ports needed) ────────────────────────────
-const EMAIL_READY = !!process.env.RESEND_API_KEY;
-if (!EMAIL_READY) console.log("⚠️  Email verification disabled — RESEND_API_KEY not set");
+// ── Email (Brevo HTTP API — no SMTP ports needed) ─────────────────────────────
+const EMAIL_READY = !!process.env.BREVO_API_KEY;
+if (!EMAIL_READY) console.log("⚠️  Email verification disabled — BREVO_API_KEY not set");
 
 async function sendVerificationEmail(to, token) {
-  const resend = new Resend(process.env.RESEND_API_KEY);
   const BASE = process.env.BACKEND_URL || `http://localhost:${process.env.PORT || 5000}`;
   const link = `${BASE}/verify-email?token=${token}`;
-  const from = process.env.RESEND_FROM || "SynthCS <onboarding@resend.dev>";
 
-  const { error } = await resend.emails.send({
-    from,
-    to: [to],
-    subject: "Verify your SynthCS account",
-    html: `
-      <div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:32px 24px">
-        <h2 style="color:#6d28d9;margin-bottom:8px">Confirm your email</h2>
-        <p style="color:#374151;font-size:15px;line-height:1.6">
-          Thanks for signing up for <strong>SynthCS</strong>. Click the button below to verify
-          your email address and activate your account.
-        </p>
-        <a href="${link}"
-           style="display:inline-block;margin:24px 0;padding:12px 28px;background:#7c3aed;color:#fff;
-                  border-radius:8px;text-decoration:none;font-weight:600;font-size:14px">
-          Verify Email Address
-        </a>
-        <p style="color:#9ca3af;font-size:12px">
-          If you didn't create an account, you can safely ignore this email.<br>
-          This link expires in 24 hours.
-        </p>
-      </div>
-    `,
+  const res = await fetch("https://api.brevo.com/v3/smtp/email", {
+    method: "POST",
+    headers: {
+      "api-key": process.env.BREVO_API_KEY,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      sender: { name: "SynthCS", email: process.env.BREVO_SENDER || "202311726@gordoncollege.edu.ph" },
+      to: [{ email: to }],
+      subject: "Verify your SynthCS account",
+      htmlContent: `
+        <div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:32px 24px">
+          <h2 style="color:#6d28d9;margin-bottom:8px">Confirm your email</h2>
+          <p style="color:#374151;font-size:15px;line-height:1.6">
+            Thanks for signing up for <strong>SynthCS</strong>. Click the button below to verify
+            your email address and activate your account.
+          </p>
+          <a href="${link}"
+             style="display:inline-block;margin:24px 0;padding:12px 28px;background:#7c3aed;color:#fff;
+                    border-radius:8px;text-decoration:none;font-weight:600;font-size:14px">
+            Verify Email Address
+          </a>
+          <p style="color:#9ca3af;font-size:12px">
+            If you didn't create an account, you can safely ignore this email.<br>
+            This link expires in 24 hours.
+          </p>
+        </div>
+      `,
+    }),
   });
 
-  if (error) throw new Error(error.message);
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`Brevo error ${res.status}: ${body}`);
+  }
 }
 
 const app = express();
