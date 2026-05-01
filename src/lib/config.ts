@@ -2,8 +2,8 @@
 
 export const NODE_API   = import.meta.env.DEV
   ? "http://localhost:5000"
-  : "https://nodejs-production-7171.up.railway.app";
+  : "https://synthcs-production.up.railway.app";
 
 export const PYTHON_API = import.meta.env.DEV
   ? "http://localhost:8000"
-  : "https://synthcs-production.up.railway.app";
+  : "https://heroic-playfulness.up.railway.app";
