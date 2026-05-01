@@ -1,0 +1,162 @@
+import { useState, useEffect } from "react";
+import { useLocation, Link, useRoute } from "wouter";
+import {
+  LayoutDashboard, Layers, Download,
+  Bell, Plus, Zap, FileJson, Settings,
+} from "lucide-react";
+import { cn } from "../lib/utils";
+
+const navItems = [
+  { label: "Dashboard",     icon: LayoutDashboard, href: "/dashboard" },
+  { label: "Schema Builder", icon: Layers,         href: "/schema-builder" },
+  { label: "Saved Schemas",  icon: FileJson,       href: "/saved-schemas", indent: true },
+  { label: "Downloads",     icon: Download,        href: "/downloads" },
+];
+
+function getInitials(name: string) {
+  return name.split(" ").map((w) => w[0]).join("").slice(0, 2).toUpperCase();
+}
+
+export default function Layout({ children }: { children: React.ReactNode }) {
+  const [location, setLocation] = useLocation();
+  const [isAccountPage] = useRoute("/user-accounts");
+  const [isDownloadsPage] = useRoute("/downloads");
+  const [isSavedSchemasPage] = useRoute("/saved-schemas");
+  const [isSchemaBuilderPage] = useRoute("/schema-builder");
+  const [isAdminPage] = useRoute("/admin");
+  const [isAdminUsersPage] = useRoute("/admin/users");
+
+  const userName = localStorage.getItem("user_name") ?? "User";
+
+  const isAnyAdminPage = isAdminPage || isAdminUsersPage;
+
+  const [logoClicks, setLogoClicks] = useState(0);
+  useEffect(() => {
+    if (logoClicks === 0) return;
+    const t = setTimeout(() => setLogoClicks(0), 2000);
+    return () => clearTimeout(t);
+  }, [logoClicks]);
+
+  function handleLogoClick() {
+    const next = logoClicks + 1;
+    if (next >= 5) { setLogoClicks(0); setLocation("/admin"); }
+    else setLogoClicks(next);
+  }
+  const userInitials = getInitials(userName);
+
+  return (
+    <div className="flex h-screen overflow-hidden bg-gray-50">
+      {/* Sidebar */}
+      <aside className="w-56 flex-shrink-0 border-r border-gray-200 bg-white flex flex-col">
+        {/* Logo */}
+        <div className="flex items-center gap-2.5 px-4 py-4 border-b border-gray-100 cursor-pointer select-none"
+             onClick={handleLogoClick}>
+          <div className="w-8 h-8 rounded-lg bg-purple-600 flex items-center justify-center">
+            <Zap className="w-4 h-4 text-white" />
+          </div>
+          <div className="leading-tight">
+            <div className="text-sm font-bold text-gray-900">SynthCS</div>
+            <div className="text-[10px] text-gray-400">
+              {logoClicks > 0 ? `${5 - logoClicks} more…` : "Data Generator"}
+            </div>
+          </div>
+        </div>
+
+        {/* Nav */}
+        <nav className="flex-1 p-3 space-y-0.5 flex flex-col">
+          {navItems.map((item) => {
+            const Icon = item.icon;
+            const isActive = location === item.href;
+            return (
+              <Link key={item.href} href={item.href}>
+                <div className={cn(
+                  "flex items-center gap-2.5 px-3 py-2 rounded-md text-sm font-medium cursor-pointer transition-colors",
+                  item.indent ? "ml-4 text-xs" : "",
+                  isActive
+                    ? "bg-purple-50 text-purple-700"
+                    : "text-gray-600 hover:bg-gray-50 hover:text-gray-900"
+                )}>
+                  <Icon className={cn(item.indent ? "w-3.5 h-3.5" : "w-4 h-4", isActive ? "text-purple-600" : "text-gray-400")} />
+                  {item.label}
+                </div>
+              </Link>
+            );
+          })}
+
+        </nav>
+
+        {/* User — clicks through to Account Settings */}
+        <div className="p-3 border-t border-gray-100">
+          <Link href="/user-accounts">
+            <div className={cn(
+              "flex items-center gap-2 px-3 py-2 rounded-md cursor-pointer transition-colors",
+              isAccountPage ? "bg-purple-50" : "bg-gray-50 hover:bg-gray-100"
+            )}>
+              <div className={cn(
+                "w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold flex-shrink-0",
+                isAccountPage ? "bg-purple-600 text-white" : "bg-purple-100 text-purple-600"
+              )}>
+                {userInitials}
+              </div>
+              <div className="leading-tight flex-1 min-w-0">
+                <div className={cn("text-xs font-medium truncate", isAccountPage ? "text-purple-700" : "text-gray-800")}>
+                  {userName}
+                </div>
+                <div className="text-[10px] text-gray-400">Free Plan</div>
+              </div>
+              <Settings className={cn("w-3 h-3 flex-shrink-0", isAccountPage ? "text-purple-500" : "text-gray-400")} />
+            </div>
+          </Link>
+        </div>
+      </aside>
+
+      {/* Main area */}
+      <div className="flex-1 flex flex-col overflow-hidden">
+        {/* Header */}
+        <header className="h-14 border-b border-gray-200 bg-white flex items-center justify-between px-6 flex-shrink-0">
+          <div>
+            <h1 className="text-base font-semibold text-gray-900">
+              {isAccountPage    ? "Account Settings"
+                : isAdminPage       ? "Admin — Overview"
+                : isAdminUsersPage  ? "Admin — User Management"
+                : navItems.find((n) => n.href === location)?.label ?? "Dashboard"}
+            </h1>
+            <p className="text-xs text-gray-400">
+              {isAccountPage   ? "Manage your account information, settings, and usage."
+                : isAdminPage      ? "Platform analytics and statistics"
+                : isAdminUsersPage ? "Manage user accounts and permissions"
+                : "Generate and manage synthetic datasets"}
+            </p>
+          </div>
+          {!isAccountPage && !isDownloadsPage && !isSavedSchemasPage && !isSchemaBuilderPage && !isAnyAdminPage && (
+            <div className="flex items-center gap-3">
+              <div className="relative">
+                <input
+                  type="search"
+                  placeholder="Search schemas..."
+                  className="text-sm bg-gray-50 border border-gray-200 rounded-md pl-8 pr-3 py-1.5 w-52 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent placeholder:text-gray-400"
+                />
+                <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                </svg>
+              </div>
+              <button className="relative w-8 h-8 flex items-center justify-center rounded-md hover:bg-gray-100 transition-colors">
+                <Bell className="w-4 h-4 text-gray-500" />
+                <span className="absolute top-1.5 right-1.5 w-1.5 h-1.5 rounded-full bg-purple-600" />
+              </button>
+              <button className="flex items-center gap-1.5 px-3 py-1.5 bg-purple-600 text-white text-xs font-medium rounded-md hover:bg-purple-700 transition-colors">
+                <Plus className="w-3.5 h-3.5" />
+                New Dataset
+              </button>
+            </div>
+          )}
+        </header>
+
+        {/* Page content */}
+        <main className="flex-1 overflow-auto p-6">
+          {children}
+        </main>
+      </div>
+    </div>
+  );
+}
