@@ -2,26 +2,16 @@ import os
 import glob
 import pandas as pd
 import numpy as np
-from ctgan import CTGAN
+from scipy import stats
 from sklearn.model_selection import train_test_split
 
 
-# Keep training set small enough to fit in Railway's 512 MB RAM limit
-_MAX_TRAINING_ROWS = 5_000
+_MAX_TRAINING_ROWS = 20_000
 
 
-def _detect_discrete_columns(df: pd.DataFrame) -> list[str]:
-    discrete = []
-    for col in df.columns:
-        if df[col].dtype == object or str(df[col].dtype) == "bool":
-            discrete.append(col)
-        elif df[col].dtype in ("int64", "int32", "int16", "int8") and df[col].nunique() <= 30:
-            discrete.append(col)
-    return discrete
-
+# ── helpers ──────────────────────────────────────────────────────────────────
 
 def _encode_dates(df: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
-    """Convert datetime-like columns to integer ordinals for CTGAN."""
     date_cols = []
     for col in df.columns:
         if "datetime" in str(df[col].dtype):
@@ -67,15 +57,73 @@ def _cast_column(series: pd.Series, new_type: str) -> pd.Series:
     return series
 
 
-def expand_template_with_ctgan(dataset_path: str, row_count: int) -> str:
-    """
-    Train CTGAN on the faker-generated template (template.csv) and
-    scale up to row_count synthetic rows.
+# ── Gaussian Copula synthesizer ───────────────────────────────────────────────
 
-    High-cardinality string columns (UUIDs, emails, phones, etc.) are excluded
-    from CTGAN training — they'd each need 200 categories which crashes the model.
-    Those columns are re-populated by sampling from the template after generation.
+def _gaussian_copula_sample(df: pd.DataFrame, n: int) -> pd.DataFrame:
     """
+    Synthesise n rows from df using a Gaussian copula.
+
+    Numeric columns: marginal distribution is preserved via the empirical CDF;
+    inter-column correlations are captured with a Gaussian copula.
+
+    Categorical columns: sampled i.i.d. from the empirical frequency distribution.
+    """
+    num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+    cat_cols = df.select_dtypes(exclude=[np.number]).columns.tolist()
+
+    synthetic = pd.DataFrame(index=range(n))
+
+    # ── categorical columns ──────────────────────────────────────────────────
+    for col in cat_cols:
+        counts = df[col].value_counts(dropna=True)
+        probs  = counts / counts.sum()
+        synthetic[col] = np.random.choice(probs.index, size=n, p=probs.values)
+
+    # ── numeric columns via Gaussian copula ─────────────────────────────────
+    if num_cols:
+        data = df[num_cols].copy()
+
+        # Convert each column to standard-normal scores via its empirical CDF
+        # (adding small jitter breaks ties without changing the distribution)
+        normal_scores = np.empty((len(data), len(num_cols)))
+        for i, col in enumerate(num_cols):
+            vals = data[col].values.astype(float)
+            rank = stats.rankdata(vals + np.random.normal(0, 1e-9, len(vals)))
+            u = rank / (len(rank) + 1)          # uniform [0,1]
+            normal_scores[:, i] = stats.norm.ppf(u)
+
+        # Fit correlation matrix and make it positive-definite
+        corr = np.corrcoef(normal_scores, rowvar=False)
+        corr = np.clip(corr, -0.999, 0.999)
+        np.fill_diagonal(corr, 1.0)
+        # Nearest symmetric PD via eigenvalue clip
+        eigvals, eigvecs = np.linalg.eigh(corr)
+        eigvals = np.clip(eigvals, 1e-6, None)
+        corr_pd = eigvecs @ np.diag(eigvals) @ eigvecs.T
+
+        try:
+            L = np.linalg.cholesky(corr_pd)
+        except np.linalg.LinAlgError:
+            L = np.eye(len(num_cols))
+
+        # Sample correlated standard normals, convert to uniform, then to
+        # original marginals via empirical quantile interpolation
+        Z = np.random.randn(n, len(num_cols)) @ L.T
+        U = stats.norm.cdf(Z)
+
+        for i, col in enumerate(num_cols):
+            sorted_vals = np.sort(df[col].dropna().values.astype(float))
+            quantile_pts = np.linspace(0, 1, len(sorted_vals))
+            synthetic[col] = np.interp(U[:, i], quantile_pts, sorted_vals)
+
+    # Restore original column order
+    return synthetic.reindex(columns=df.columns)
+
+
+# ── public API ────────────────────────────────────────────────────────────────
+
+def expand_template_with_ctgan(dataset_path: str, row_count: int) -> str:
+    """Scale up a 200-row faker template to row_count rows."""
     template_path = os.path.join(dataset_path, "template.csv")
     if not os.path.exists(template_path):
         raise FileNotFoundError("template.csv not found. Generate a template first.")
@@ -91,30 +139,7 @@ def expand_template_with_ctgan(dataset_path: str, row_count: int) -> str:
             median_val = df[col].median()
             df[col] = df[col].fillna(median_val if pd.notna(median_val) else 0)
 
-    n = len(df)
-    # Columns where almost every value is unique can't be learned by CTGAN
-    high_card_cols = [
-        col for col in df.columns
-        if df[col].dtype == object and df[col].nunique() >= n * 0.7
-    ]
-    ctgan_df = df.drop(columns=high_card_cols)
-
-    if ctgan_df.empty or len(ctgan_df.columns) == 0:
-        # Nothing left to model — sample directly from template
-        synthetic = df.sample(row_count, replace=True).reset_index(drop=True)
-    else:
-        discrete_columns = _detect_discrete_columns(ctgan_df)
-        ctgan = CTGAN(epochs=10, batch_size=100, verbose=True)
-        ctgan.fit(ctgan_df, discrete_columns)
-        synthetic = ctgan.sample(row_count)
-
-        # Re-attach high-cardinality columns by sampling from template values
-        for col in high_card_cols:
-            synthetic[col] = np.random.choice(df[col].values, row_count, replace=True)
-
-        # Restore original column order
-        synthetic = synthetic.reindex(columns=df.columns)
-
+    synthetic = _gaussian_copula_sample(df, row_count)
     synthetic = _decode_dates(synthetic, date_cols)
 
     output_path = os.path.join(dataset_path, "synthetic_output.csv")
@@ -124,9 +149,8 @@ def expand_template_with_ctgan(dataset_path: str, row_count: int) -> str:
 
 def generate_synthetic_data(dataset_path: str, changes: list[dict], row_count: int) -> str:
     """
-    Train CTGAN on the original downloaded CSV, generate `row_count` rows,
-    then apply ONLY the user-specified changes (rename / type-cast / nullable).
-    Everything else in the output is left exactly as CTGAN produced it.
+    Synthesise row_count rows from the downloaded Kaggle CSV using a Gaussian
+    copula, then apply any user-specified column renames / type casts.
     """
     csv_files = glob.glob(os.path.join(dataset_path, "**", "*.csv"), recursive=True)
     csv_files += glob.glob(os.path.join(dataset_path, "*.csv"))
@@ -136,17 +160,12 @@ def generate_synthetic_data(dataset_path: str, changes: list[dict], row_count: i
     csv_path = max(csv_files, key=os.path.getsize)
     df = pd.read_csv(csv_path)
 
-    # Sample to keep training time reasonable
     if len(df) > _MAX_TRAINING_ROWS:
         df = df.sample(_MAX_TRAINING_ROWS, random_state=42).reset_index(drop=True)
 
-    # Drop columns that are entirely null
     df = df.dropna(axis=1, how="all")
-
-    # Encode date columns to ordinals
     df, date_cols = _encode_dates(df)
 
-    # Fill remaining nulls per column type
     for col in df.columns:
         if df[col].dtype == object:
             df[col] = df[col].fillna("unknown")
@@ -154,60 +173,41 @@ def generate_synthetic_data(dataset_path: str, changes: list[dict], row_count: i
             median_val = df[col].median()
             df[col] = df[col].fillna(median_val if pd.notna(median_val) else 0)
 
-    # ── 80/20 split: train on 80%, hold out 20% for validation ──────────────
+    # 80/20 split — keep a held-out test set for the validation endpoint
     train_df, test_df = train_test_split(df, test_size=0.2, random_state=42)
-    # Decode dates so test_set.csv has the same format as synthetic_output.csv
     _decode_dates(test_df.copy(), date_cols).to_csv(
         os.path.join(dataset_path, "test_set.csv"), index=False
     )
 
-    discrete_columns = _detect_discrete_columns(train_df)
-
-    # Train CTGAN on the 80% training set only
-    ctgan = CTGAN(epochs=10, batch_size=100, verbose=True)
-    ctgan.fit(train_df, discrete_columns)
-
-    # Generate the requested number of rows
-    synthetic = ctgan.sample(row_count)
-
-    # Restore date columns to human-readable strings
+    synthetic = _gaussian_copula_sample(train_df, row_count)
     synthetic = _decode_dates(synthetic, date_cols)
 
-    # -----------------------------------------------------------------------
-    # Apply ONLY user-specified changes — nothing else is touched.
-    # -----------------------------------------------------------------------
-    rename_map: dict[str, str] = {}
-    type_cast_map: dict[str, str] = {}
-    enforce_not_null: list[str] = []
+    # ── apply user-specified changes ─────────────────────────────────────────
+    rename_map:        dict[str, str] = {}
+    type_cast_map:     dict[str, str] = {}
+    enforce_not_null:  list[str]      = []
 
     for change in changes:
-        orig = change["original_name"]
-        new = change["new_name"]
-        orig_type = change["original_type"]
-        new_type = change["new_type"]
-        nullable = change["nullable"]
+        orig, new       = change["original_name"], change["new_name"]
+        orig_type, new_type = change["original_type"], change["new_type"]
+        nullable        = change["nullable"]
 
         if orig != new:
             rename_map[orig] = new
-
         if orig_type != new_type:
             type_cast_map[orig] = new_type
-
         if not nullable:
             enforce_not_null.append(orig)
 
-    # Apply type casts (using original column names before rename)
     for orig_col, target_type in type_cast_map.items():
         if orig_col in synthetic.columns:
             synthetic[orig_col] = _cast_column(synthetic[orig_col], target_type)
 
-    # Enforce non-nullable: drop rows where specified columns are null
     if enforce_not_null:
         existing = [c for c in enforce_not_null if c in synthetic.columns]
         if existing:
             synthetic = synthetic.dropna(subset=existing)
 
-    # Rename columns last (so above steps can use original names)
     if rename_map:
         synthetic = synthetic.rename(columns=rename_map)
 
