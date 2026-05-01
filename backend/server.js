@@ -19,6 +19,12 @@ require("dotenv").config({ path: path.join(__dirname, ".env") });
 const FRONTEND_URL = process.env.FRONTEND_URL || "http://localhost:5173";
 const JWT_SECRET   = process.env.JWT_SECRET   || "synthgen-dev-secret";
 
+const ALLOWED_ORIGINS = [
+  FRONTEND_URL,
+  "http://localhost:5173",
+  "http://localhost:4173",
+].filter(Boolean);
+
 // ── Mailer ────────────────────────────────────────────────────────────────────
 const mailer = nodemailer.createTransport({
   host:   process.env.SMTP_HOST || "smtp.gmail.com",
@@ -62,7 +68,13 @@ async function sendVerificationEmail(to, token) {
 }
 
 const app = express();
-app.use(cors({ origin: FRONTEND_URL, credentials: true }));
+app.use(cors({
+  origin: (origin, cb) => {
+    if (!origin || ALLOWED_ORIGINS.includes(origin)) return cb(null, true);
+    cb(new Error(`CORS: origin ${origin} not allowed`));
+  },
+  credentials: true,
+}));
 app.use(express.json());
 
 // Session — only used during the OAuth handshake (10-minute window)
