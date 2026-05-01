@@ -6,4 +6,4 @@ export const NODE_API   = import.meta.env.DEV
 
 export const PYTHON_API = import.meta.env.DEV
   ? "http://localhost:8000"
-  : "https://heroic-playfulness.up.railway.app";
+  : "https://python-service-production-e8a4.up.railway.app";
