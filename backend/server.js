@@ -29,13 +29,16 @@ function isAllowedOrigin(origin) {
 
 // ── Mailer ────────────────────────────────────────────────────────────────────
 const mailer = nodemailer.createTransport({
-  host:   process.env.SMTP_HOST || "smtp.gmail.com",
-  port:   Number(process.env.SMTP_PORT) || 587,
-  secure: false,
+  host:             process.env.SMTP_HOST || "smtp.gmail.com",
+  port:             Number(process.env.SMTP_PORT) || 587,
+  secure:           false,
   auth: {
     user: process.env.SMTP_USER,
     pass: process.env.SMTP_PASS,
   },
+  connectionTimeout: 10_000,
+  greetingTimeout:   10_000,
+  socketTimeout:     15_000,
 });
 
 const SMTP_READY = !!(process.env.SMTP_USER && process.env.SMTP_PASS);
@@ -283,10 +286,12 @@ app.post("/signup", async (req, res) => {
     const user = result.rows[0];
 
     if (SMTP_READY) {
-      await sendVerificationEmail(email, token).catch((e) =>
+      // Respond immediately — send email in the background so signup doesn't hang
+      res.status(201).json({ pending_verification: true, email });
+      sendVerificationEmail(email, token).catch((e) =>
         console.error("Email send failed:", e.message)
       );
-      return res.status(201).json({ pending_verification: true, email });
+      return;
     }
 
     // SMTP not configured → auto-verify and return session immediately
