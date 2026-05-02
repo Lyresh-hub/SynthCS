@@ -2,7 +2,7 @@ import { useState, useEffect, Fragment } from "react";
 import { useLocation } from "wouter";
 import {
   Plus, Trash2, GripVertical, Layers,
-  Search, Download, RefreshCw, AlertCircle, Save, Sparkles, ChevronDown, ChevronRight,
+  Search, Download, RefreshCw, AlertCircle, Save, ChevronDown, ChevronRight, Sparkles,
 } from "lucide-react";
 
 import { NODE_API, PYTHON_API } from "../lib/config";
@@ -910,15 +910,6 @@ export default function SchemaBuilder() {
                         </td>
                         <td className="py-2 px-2">
                           <div className="flex items-center gap-1">
-                            <button
-                              onClick={() => handleAiSuggestField(table.id, field)}
-                              disabled={aiFieldLoading === field.id}
-                              title="Let AI suggest type & constraints based on field name and description"
-                              className="text-purple-300 hover:text-purple-600 transition-colors disabled:opacity-50">
-                              {aiFieldLoading === field.id
-                                ? <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                                : <Sparkles className="w-3.5 h-3.5" />}
-                            </button>
                             <button onClick={() => removeField(table.id, field.id)}
                               className="text-gray-300 hover:text-red-500 transition-colors">
                               <Trash2 className="w-3.5 h-3.5" />
