@@ -13,7 +13,7 @@ const loginSchema = z.object({
 });
 type LoginFormValues = z.infer<typeof loginSchema>;
 
-type View = "login" | "forgot" | "forgot-sent";
+type View = "login" | "forgot" | "forgot-sent" | "reset";
 
 export default function Login() {
   const [, setLocation]   = useLocation();
@@ -24,15 +24,25 @@ export default function Login() {
   const [isPending, setIsPending]       = useState(false);
   const [showPassword, setShowPassword] = useState(false);
 
-  const [forgotEmail, setForgotEmail]   = useState("");
-  const [forgotError, setForgotError]   = useState("");
+  const [forgotEmail, setForgotEmail]     = useState("");
+  const [forgotError, setForgotError]     = useState("");
   const [forgotLoading, setForgotLoading] = useState(false);
+
+  const [resetToken, setResetToken]       = useState("");
+  const [resetPass, setResetPass]         = useState("");
+  const [resetConfirm, setResetConfirm]   = useState("");
+  const [showReset, setShowReset]         = useState(false);
+  const [showResetConfirm, setShowResetConfirm] = useState(false);
+  const [resetError, setResetError]       = useState("");
+  const [resetLoading, setResetLoading]   = useState(false);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     if (params.get("oauth_error")) setServerError(decodeURIComponent(params.get("oauth_error")!));
     if (params.get("reset")    === "1") setSuccessMsg("Password reset! You can now sign in with your new password.");
     if (params.get("verified") === "1") setSuccessMsg("Email verified! You can now sign in.");
+    const token = params.get("token");
+    if (token) { setResetToken(token); setView("reset"); }
   }, []);
 
   const { register, handleSubmit, formState: { errors } } = useForm<LoginFormValues>({
@@ -80,6 +90,30 @@ export default function Login() {
     }
   };
 
+  const onReset = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setResetError("");
+    if (resetPass.length < 8) return setResetError("Password must be at least 8 characters.");
+    if (resetPass !== resetConfirm) return setResetError("Passwords do not match.");
+    setResetLoading(true);
+    try {
+      const res  = await fetch(`${BACKEND}/reset-password`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token: resetToken, password: resetPass }),
+      });
+      const json = await res.json();
+      if (!res.ok) return setResetError(json.error ?? "Something went wrong.");
+      window.history.replaceState({}, "", "/login");
+      setView("login");
+      setSuccessMsg("Password reset! You can now sign in with your new password.");
+    } catch {
+      setResetError("Could not reach the server. Try again.");
+    } finally {
+      setResetLoading(false);
+    }
+  };
+
   const leftPanel = (
     <div className="hidden lg:flex lg:w-[45%] flex-col items-center justify-center bg-[#1E1347] relative overflow-hidden px-12">
       <div className="absolute top-[-20%] left-[-20%] w-[70%] h-[70%] rounded-full bg-purple-600/20 blur-[130px] pointer-events-none" />
@@ -97,11 +131,13 @@ export default function Login() {
           Synthetic Data Generator
         </p>
         <h2 className="text-3xl font-bold text-white leading-[1.2] tracking-tight">
-          {view === "login" ? "Welcome back" : "Reset password"}
+          {view === "login" ? "Welcome back" : view === "reset" ? "Set new password" : "Reset password"}
         </h2>
         <p className="mt-4 text-purple-200/55 text-[14px] leading-relaxed max-w-[280px]">
           {view === "login"
             ? "Sign in to access your synthetic datasets, schemas, and generation history."
+            : view === "reset"
+            ? "Choose a strong new password for your account."
             : "Enter your email and we'll send you a link to reset your password."}
         </p>
         <div className="mt-8 w-full max-w-[280px] space-y-2.5">
@@ -239,6 +275,53 @@ export default function Login() {
                 <button type="submit" disabled={forgotLoading}
                   className="w-full bg-purple-600 hover:bg-purple-700 disabled:opacity-60 text-white font-semibold py-2.5 rounded-lg text-sm transition-colors">
                   {forgotLoading ? "Sending…" : "Send Reset Link"}
+                </button>
+              </form>
+            </>
+          )}
+
+          {/* ── Reset password form ── */}
+          {view === "reset" && (
+            <>
+              <div className="mb-6">
+                <h2 className="text-2xl font-bold text-gray-900">Set a new password</h2>
+                <p className="text-sm text-gray-500 mt-1">Choose a strong password for your account.</p>
+              </div>
+
+              {resetError && (
+                <div className="mb-4 px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-sm text-red-600">
+                  {resetError}
+                </div>
+              )}
+
+              <form onSubmit={onReset} className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">New Password</label>
+                  <div className="relative">
+                    <input type={showReset ? "text" : "password"} required value={resetPass}
+                      onChange={(e) => setResetPass(e.target.value)} placeholder="At least 8 characters"
+                      className="w-full border border-gray-200 rounded-lg px-3 py-2 pr-10 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500" />
+                    <button type="button" onClick={() => setShowReset(!showReset)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                      {showReset ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </button>
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Confirm Password</label>
+                  <div className="relative">
+                    <input type={showResetConfirm ? "text" : "password"} required value={resetConfirm}
+                      onChange={(e) => setResetConfirm(e.target.value)} placeholder="Re-enter your password"
+                      className="w-full border border-gray-200 rounded-lg px-3 py-2 pr-10 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500" />
+                    <button type="button" onClick={() => setShowResetConfirm(!showResetConfirm)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                      {showResetConfirm ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </button>
+                  </div>
+                </div>
+                <button type="submit" disabled={resetLoading}
+                  className="w-full bg-purple-600 hover:bg-purple-700 disabled:opacity-60 text-white font-semibold py-2.5 rounded-lg text-sm transition-colors">
+                  {resetLoading ? "Saving…" : "Reset Password"}
                 </button>
               </form>
             </>
