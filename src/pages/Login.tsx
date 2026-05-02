@@ -149,24 +149,6 @@ export default function Login() {
           </p>
           <h2 className="text-3xl font-bold text-white leading-[1.2] tracking-tight">{leftTitle}</h2>
           <p className="mt-4 text-purple-200/55 text-[14px] leading-relaxed max-w-[280px]">{leftSub}</p>
-          <div className="mt-8 w-full max-w-[280px] space-y-2.5">
-            <div className="h-px bg-white/10 rounded-full" />
-            <div className="h-px bg-white/7 rounded-full w-4/5 mx-auto" />
-            <div className="h-px bg-white/5 rounded-full w-3/5 mx-auto" />
-          </div>
-          {view === "login" && (
-            <div className="mt-8 flex gap-8">
-              {[{ value: "238", label: "Datasets" }, { value: "133", label: "Schemas" }, { value: "220", label: "Downloads" }].map((s) => (
-                <div key={s.label} className="text-center">
-                  <p className="text-2xl font-bold text-white">{s.value}</p>
-                  <p className="text-purple-300/50 text-[11px] mt-0.5">{s.label}</p>
-                </div>
-              ))}
-            </div>
-          )}
-          <p className="mt-8 text-purple-300/30 text-[11px] tracking-wide">
-            Trusted by data engineers and ML teams worldwide
-          </p>
         </div>
       </div>
 

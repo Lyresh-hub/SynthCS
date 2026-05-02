@@ -1,11 +1,15 @@
+/* Ini-import ang mga built-in styles ng Tailwind — base, components, at utilities */
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
+/* Base styles — mga default na estilo na applicable sa buong app */
 @layer base {
+  /* Tinitiyak na kasama ang padding at border sa lahat ng element width */
   * {
     box-sizing: border-box;
   }
+  /* Default na font, background color, at text color ng buong page */
   body {
     font-family: "Inter", system-ui, sans-serif;
     background-color: #f5f5f7;
@@ -15,11 +19,14 @@
   }
 }
 
+/* Custom utility classes — mga pwedeng gamitin kahit saan sa app */
 @layer utilities {
+  /* Itinatago ang scrollbar pero gumagana pa rin ang pag-scroll */
   .scrollbar-hide {
-    -ms-overflow-style: none;
-    scrollbar-width: none;
+    -ms-overflow-style: none;  /* para sa Internet Explorer at Edge */
+    scrollbar-width: none;     /* para sa Firefox */
   }
+  /* Para sa Chrome, Safari, at ibang webkit browsers */
   .scrollbar-hide::-webkit-scrollbar {
     display: none;
   }
