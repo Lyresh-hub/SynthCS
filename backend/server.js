@@ -24,6 +24,8 @@ function isAllowedOrigin(origin) {
   if (origin.startsWith("http://localhost")) return true;
   if (origin.endsWith(".vercel.app")) return true;
   if (origin === FRONTEND_URL) return true;
+  if (origin === "https://synthcs.site") return true;
+  if (origin === "https://www.synthcs.site") return true;
   return false;
 }
 
