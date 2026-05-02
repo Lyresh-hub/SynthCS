@@ -1,7 +1,5 @@
 import Signup from "./pages/signup";
 import Login from "./pages/Login";
-import ForgotPassword from "./pages/ForgotPassword";
-import ResetPassword from "./pages/ResetPassword";
 import AuthCallback from "./pages/AuthCallback";
 import { Switch, Route } from "wouter";
 import Layout from "./components/Layout";
@@ -38,9 +36,7 @@ export default function App() {
       {/* Public routes */}
       <Route path="/" component={Signup} />
       <Route path="/login" component={Login} />
-      <Route path="/forgot-password" component={ForgotPassword} />
-      <Route path="/reset-password" component={ResetPassword} />
-      <Route path="/auth/callback" component={AuthCallback} />
+<Route path="/auth/callback" component={AuthCallback} />
 
       {/* Admin routes — separate dark layout */}
       <Route path="/admin">
