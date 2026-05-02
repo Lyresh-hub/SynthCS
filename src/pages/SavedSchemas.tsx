@@ -5,6 +5,7 @@ import ConfirmDialog from "../components/ConfirmDialog";
 
 import { NODE_API } from "../lib/config";
 
+// TypeScript type para sa hugis ng schema data na galing sa backend
 interface Schema {
   id: string;
   name: string;
@@ -13,6 +14,7 @@ interface Schema {
   created_at: string;
 }
 
+// Tinutukoy natin ang kategorya ng schema base sa pangalan nito — para sa color badge
 function inferType(name: string) {
   const n = name.toLowerCase();
   if (/health|hospital|patient|medical|clinic/.test(n))
@@ -28,12 +30,14 @@ export default function SavedSchemas() {
   const [, setLocation] = useLocation();
   const userId = localStorage.getItem("user_id") ?? "";
 
-  const [schemas, setSchemas] = useState<Schema[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-  const [search, setSearch] = useState("");
+  // Naka-track dito yung lista ng schemas, loading state, error, search text, at schema na ide-delete
+  const [schemas, setSchemas]           = useState<Schema[]>([]);
+  const [loading, setLoading]           = useState(true);
+  const [error, setError]               = useState("");
+  const [search, setSearch]             = useState("");
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
 
+  // Kinukuha ang lahat ng schemas ng user mula sa backend
   const fetchSchemas = async () => {
     if (!userId) { setLoading(false); return; }
     setLoading(true);
@@ -48,8 +52,10 @@ export default function SavedSchemas() {
     }
   };
 
+  // Kapag na-load ang page, agad kinukuha ang schemas
   useEffect(() => { fetchSchemas(); }, []);
 
+  // Kapag kinumpirma ang delete, tinatanggal ang schema sa backend at sa local state
   const confirmDelete = async () => {
     if (!deleteTarget) return;
     await fetch(`${NODE_API}/api/schemas/${deleteTarget}`, { method: "DELETE" });
@@ -59,6 +65,7 @@ export default function SavedSchemas() {
 
   return (
     <div className="space-y-4">
+      {/* Confirmation dialog — lalabas kapag pinindot ang delete button ng isang schema */}
       <ConfirmDialog
         open={deleteTarget !== null}
         title="Delete schema?"
@@ -68,7 +75,8 @@ export default function SavedSchemas() {
         onConfirm={confirmDelete}
         onCancel={() => setDeleteTarget(null)}
       />
-      {/* Header */}
+
+      {/* Header — may refresh button, search bar, at New Schema button */}
       <div className="flex items-center justify-between">
         <div>
           <p className="text-xs text-gray-400">Your saved schema templates from Schema Builder</p>
@@ -96,22 +104,26 @@ export default function SavedSchemas() {
         </div>
       </div>
 
+      {/* Kapag hindi naka-login, iparamdam sa user na kailangan mag-sign in */}
       {!userId && (
         <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm text-amber-700">
           Sign in to see your saved schemas.
         </div>
       )}
 
+      {/* Error message kapag nabigong ma-fetch ang schemas */}
       {error && (
         <div className="bg-red-50 border border-red-200 rounded-xl p-4 text-sm text-red-600">{error}</div>
       )}
 
+      {/* Spinning loader habang naglo-load */}
       {loading && (
         <div className="bg-white border border-gray-100 rounded-xl p-10 flex justify-center">
           <RefreshCw className="w-5 h-5 text-purple-500 animate-spin" />
         </div>
       )}
 
+      {/* Table ng mga schemas — lalabas lang kapag tapos na mag-load at walang error */}
       {!loading && !error && userId && (
         <div className="bg-white border border-gray-100 rounded-xl overflow-hidden shadow-sm">
           {schemas.length === 0 ? (
@@ -137,6 +149,7 @@ export default function SavedSchemas() {
                 </tr>
               </thead>
               <tbody>
+                {/* Fini-filter ang mga schema base sa search text bago i-render */}
                 {schemas.filter((s) => s.name.toLowerCase().includes(search.toLowerCase())).map((schema) => {
                   const { type, color } = inferType(schema.name);
                   const fieldCount = Array.isArray(schema.fields) ? schema.fields.length : 0;
@@ -150,6 +163,7 @@ export default function SavedSchemas() {
                       </td>
                       <td className="py-3 px-4 text-xs text-gray-500">{schema.table_name || "—"}</td>
                       <td className="py-3 px-4">
+                        {/* Color-coded badge para sa kategorya ng schema */}
                         <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${color}`}>{type}</span>
                       </td>
                       <td className="py-3 px-4 text-xs text-gray-500">{fieldCount} fields</td>
@@ -160,6 +174,7 @@ export default function SavedSchemas() {
                       </td>
                       <td className="py-3 px-4 text-right">
                         <div className="flex items-center justify-end gap-2">
+                          {/* "Use" button — nagbubukas ng schema sa Schema Builder */}
                           <button
                             onClick={() => setLocation(`/schema-builder?load=${schema.id}`)}
                             className="flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-purple-600 bg-purple-50 hover:bg-purple-100 rounded-md transition-colors"
@@ -167,6 +182,7 @@ export default function SavedSchemas() {
                           >
                             <Play className="w-3 h-3" /> Use
                           </button>
+                          {/* Delete button — nagtatanong muna bago talaga tanggalin */}
                           <button
                             onClick={() => setDeleteTarget(schema.id)}
                             className="p-1 text-gray-300 hover:text-red-500 transition-colors"

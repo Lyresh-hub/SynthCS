@@ -182,27 +182,7 @@ export default function Signup() {
           <p className="mt-4 text-purple-200/55 text-[14px] leading-relaxed max-w-[280px]">
             Create realistic synthetic datasets for testing, AI training, and development — without exposing real data.
           </p>
-          <div className="mt-8 w-full max-w-[280px] space-y-2.5">
-            <div className="h-px bg-white/10 rounded-full" />
-            <div className="h-px bg-white/7 rounded-full w-4/5 mx-auto" />
-            <div className="h-px bg-white/5 rounded-full w-3/5 mx-auto" />
-          </div>
-          <div className="mt-10 flex gap-8">
-            {[
-              { value: "238", label: "Datasets" },
-              { value: "133", label: "Schemas" },
-              { value: "220", label: "Downloads" },
-            ].map((s) => (
-              <div key={s.label} className="text-center">
-                <p className="text-2xl font-bold text-white">{s.value}</p>
-                <p className="text-purple-300/50 text-[11px] mt-0.5">{s.label}</p>
-              </div>
-            ))}
-          </div>
         </div>
-        <p className="absolute bottom-8 left-0 right-0 text-center text-purple-300/30 text-[11px] tracking-wide z-10">
-          Trusted by data engineers and ML teams worldwide
-        </p>
       </div>
 
       {/* ── Right form panel ── */}

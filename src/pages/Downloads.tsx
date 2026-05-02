@@ -5,22 +5,24 @@ import ConfirmDialog from "../components/ConfirmDialog";
 
 import { NODE_API, PYTHON_API } from "../lib/config";
 
-
+// TypeScript type para sa hugis ng dataset data mula sa backend
 interface Dataset {
   id: string;
   name: string;
   kaggle_ref: string | null;
-  python_dataset_id: string | null;
+  python_dataset_id: string | null; // ID na ginagamit para i-access ang file sa Python service
   row_count: number;
   status: string;
   created_at: string;
   expires_at: string;
 }
 
+// Kinukuwenta kung ilang araw na lang bago mag-expire ang dataset
 function daysRemaining(expiresAt: string): number {
   return Math.max(0, Math.ceil((new Date(expiresAt).getTime() - Date.now()) / 86_400_000));
 }
 
+// Color-coded badge para ipakita kung gaano na kalalapit ang expiry ng dataset
 function ExpiryBadge({ expiresAt }: { expiresAt: string }) {
   const days = daysRemaining(expiresAt);
   if (days <= 3)
@@ -31,15 +33,16 @@ function ExpiryBadge({ expiresAt }: { expiresAt: string }) {
 }
 
 export default function Downloads() {
-  const [datasets, setDatasets] = useState<Dataset[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-  const [search, setSearch] = useState("");
+  const [datasets, setDatasets]       = useState<Dataset[]>([]);
+  const [loading, setLoading]         = useState(true);
+  const [error, setError]             = useState("");
+  const [search, setSearch]           = useState("");
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
 
   const userId = localStorage.getItem("user_id");
   const [, setLocation] = useLocation();
 
+  // Ginagawa nating URL parameters ang dataset info para mapasa sa DataPreview page
   const handlePreview = (ds: Dataset) => {
     const q = new URLSearchParams({
       id:   ds.python_dataset_id ?? "",
@@ -50,6 +53,7 @@ export default function Downloads() {
     setLocation(`/preview?${q}`);
   };
 
+  // Kinukuha ang lahat ng datasets ng user mula sa Node.js backend
   const fetchDatasets = async () => {
     if (!userId) { setLoading(false); return; }
     try {
@@ -63,8 +67,10 @@ export default function Downloads() {
     }
   };
 
+  // Kapag na-load ang page, agad kinukuha ang datasets
   useEffect(() => { fetchDatasets(); }, []);
 
+  // Tinatanggal ang dataset sa backend at inaalis sa local list
   const confirmDelete = async () => {
     if (!deleteTarget) return;
     await fetch(`${NODE_API}/api/datasets/${deleteTarget}`, { method: "DELETE" });
@@ -72,6 +78,7 @@ export default function Downloads() {
     setDeleteTarget(null);
   };
 
+  // Fini-filter ang datasets base sa search text — naghahanap sa pangalan at kaggle ref
   const filtered = datasets.filter((d) =>
     d.name.toLowerCase().includes(search.toLowerCase()) ||
     (d.kaggle_ref ?? "").toLowerCase().includes(search.toLowerCase())
@@ -79,6 +86,7 @@ export default function Downloads() {
 
   return (
     <div className="space-y-4">
+      {/* Confirmation dialog — lalabas kapag pinindot ang delete button */}
       <ConfirmDialog
         open={deleteTarget !== null}
         title="Delete dataset?"
@@ -88,7 +96,8 @@ export default function Downloads() {
         onConfirm={confirmDelete}
         onCancel={() => setDeleteTarget(null)}
       />
-      {/* Header */}
+
+      {/* Header — may refresh button at search bar */}
       <div className="flex items-center justify-between">
         <div>
           <p className="text-xs text-gray-400">Generated datasets · available for 30 days</p>
@@ -110,26 +119,26 @@ export default function Downloads() {
         </div>
       </div>
 
-      {/* Not logged in */}
+      {/* Lalabas kapag hindi naka-login */}
       {!userId && (
         <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm text-amber-700">
           Sign in to see your generated datasets.
         </div>
       )}
 
-      {/* Error */}
+      {/* Lalabas kapag nagkaroon ng error sa pag-fetch */}
       {error && (
         <div className="bg-red-50 border border-red-200 rounded-xl p-4 text-sm text-red-600">{error}</div>
       )}
 
-      {/* Loading */}
+      {/* Spinning loader habang naglo-load */}
       {loading && (
         <div className="bg-white border border-gray-100 rounded-xl p-10 flex justify-center">
           <RefreshCw className="w-5 h-5 text-purple-500 animate-spin" />
         </div>
       )}
 
-      {/* Table */}
+      {/* Table ng mga datasets — lalabas lang kapag tapos na mag-load at may user */}
       {!loading && !error && userId && (
         <div className="bg-white border border-gray-100 rounded-xl overflow-hidden shadow-sm">
           {filtered.length === 0 ? (
@@ -180,12 +189,14 @@ export default function Downloads() {
                       })}
                     </td>
                     <td className="py-3 px-4">
+                      {/* Color-coded badge — pula kapag malapit na mag-expire */}
                       <ExpiryBadge expiresAt={ds.expires_at} />
                     </td>
                     <td className="py-3 px-4">
                       <div className="flex items-center gap-1.5 justify-end">
                         {ds.python_dataset_id ? (
                           <>
+                            {/* Preview button — nagbubukas ng DataPreview page */}
                             <button
                               onClick={() => handlePreview(ds)}
                               className="flex items-center gap-1 px-2.5 py-1 border border-purple-200 rounded-md text-xs font-medium text-purple-600 hover:bg-purple-50 transition-colors"
@@ -193,6 +204,7 @@ export default function Downloads() {
                             >
                               <Eye className="w-3 h-3" /> Preview
                             </button>
+                            {/* Download link — direktang nagda-download ng file mula sa Python service */}
                             <a
                               href={`${PYTHON_API}/api/download/${ds.python_dataset_id}`}
                               download
@@ -204,6 +216,7 @@ export default function Downloads() {
                         ) : (
                           <span className="text-xs text-gray-300">No file</span>
                         )}
+                        {/* Delete button */}
                         <button
                           onClick={() => setDeleteTarget(ds.id)}
                           className="p-1 text-gray-300 hover:text-red-500 transition-colors"
@@ -221,7 +234,7 @@ export default function Downloads() {
         </div>
       )}
 
-      {/* Expiry legend */}
+      {/* Legend para maintindihan ang color coding ng expiry badges */}
       {filtered.length > 0 && (
         <p className="text-xs text-gray-400 flex items-center gap-3">
           <span className="text-green-600">● &gt;7 days</span>

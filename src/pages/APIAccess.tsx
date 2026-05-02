@@ -1,20 +1,23 @@
 import { useState } from "react";
 import { Copy, RefreshCw, Eye, EyeOff, Key, Zap } from "lucide-react";
 
+// Listahan ng mga API endpoints na pwedeng gamitin ng user — static lang muna ito
 const endpoints = [
-  { method: "GET", path: "/api/v1/generate", desc: "Generate a dataset on the fly", color: "bg-green-100 text-green-700" },
-  { method: "POST", path: "/api/v1/schemas", desc: "Create a new saved schema", color: "bg-blue-100 text-blue-700" },
-  { method: "GET", path: "/api/v1/schemas/:id", desc: "Retrieve a saved schema", color: "bg-green-100 text-green-700" },
-  { method: "DELETE", path: "/api/v1/datasets/:id", desc: "Delete a generated dataset", color: "bg-red-100 text-red-700" },
-  { method: "GET", path: "/api/v1/downloads", desc: "List all available downloads", color: "bg-green-100 text-green-700" },
+  { method: "GET",    path: "/api/v1/generate",      desc: "Generate a dataset on the fly",      color: "bg-green-100 text-green-700" },
+  { method: "POST",   path: "/api/v1/schemas",        desc: "Create a new saved schema",          color: "bg-blue-100 text-blue-700" },
+  { method: "GET",    path: "/api/v1/schemas/:id",    desc: "Retrieve a saved schema",            color: "bg-green-100 text-green-700" },
+  { method: "DELETE", path: "/api/v1/datasets/:id",   desc: "Delete a generated dataset",         color: "bg-red-100 text-red-700" },
+  { method: "GET",    path: "/api/v1/downloads",      desc: "List all available downloads",       color: "bg-green-100 text-green-700" },
 ];
 
+// Placeholder API key — hindi pa ito konektado sa actual na backend endpoint
 const API_KEY = "sk-synthgen-a4f2b9c1e8d3f7g0h5i6j2k1l9m8n7o6p5q4r3s2t1u0v";
 
 export default function APIAccess() {
-  const [showKey, setShowKey] = useState(false);
-  const [copied, setCopied] = useState(false);
+  const [showKey, setShowKey] = useState(false);   // kung true, makikita ang buong API key
+  const [copied, setCopied]   = useState(false);   // pansamantalang nagpapakita ng "Copied!" text
 
+  // Kinokopya natin ang API key sa clipboard at pinapakita ang "Copied!" ng 1.5 segundo
   const handleCopy = () => {
     navigator.clipboard.writeText(API_KEY);
     setCopied(true);
@@ -27,6 +30,7 @@ export default function APIAccess() {
         <p className="text-xs text-gray-400">Integrate SynthGen directly into your apps</p>
       </div>
 
+      {/* Card ng API Key — may show/hide at copy button */}
       <div className="bg-white border border-gray-100 rounded-xl p-5 shadow-sm space-y-4">
         <div className="flex items-center gap-2">
           <div className="w-7 h-7 rounded-lg bg-purple-50 flex items-center justify-center">
@@ -36,6 +40,7 @@ export default function APIAccess() {
         </div>
         <div className="flex items-center gap-2">
           <div className="flex-1 flex items-center border border-gray-200 rounded-md bg-gray-50 px-3 py-2 gap-2">
+            {/* Kapag nakatago, nagpapakita ng 14 characters + mga bullet dots para may privacy */}
             <code className="text-xs text-gray-800 font-mono flex-1 truncate">
               {showKey ? API_KEY : API_KEY.slice(0, 14) + "•".repeat(34)}
             </code>
@@ -50,11 +55,13 @@ export default function APIAccess() {
             <RefreshCw className="w-3.5 h-3.5" />Regenerate
           </button>
         </div>
+        {/* Babala para hindi ilantad ang API key sa public */}
         <div className="text-xs text-yellow-800 bg-yellow-50 border border-yellow-200 rounded-md px-3 py-2">
           Keep your API key secret. Never expose it in client-side code or version control.
         </div>
       </div>
 
+      {/* Listahan ng available API endpoints — may color-coded HTTP method badge */}
       <div className="bg-white border border-gray-100 rounded-xl p-5 shadow-sm space-y-4">
         <div className="flex items-center gap-2">
           <div className="w-7 h-7 rounded-lg bg-purple-50 flex items-center justify-center">
@@ -73,6 +80,7 @@ export default function APIAccess() {
         </div>
       </div>
 
+      {/* Halimbawa ng paggamit ng API gamit ang curl command */}
       <div className="bg-white border border-gray-100 rounded-xl p-5 shadow-sm">
         <h3 className="text-sm font-semibold text-gray-900 mb-3">Quick Example</h3>
         <pre className="text-xs bg-gray-900 text-green-400 rounded-lg p-4 overflow-auto font-mono leading-relaxed">

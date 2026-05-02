@@ -1,9 +1,10 @@
+// Ini-import natin lahat ng pages na magagamit sa app
 import Signup from "./pages/signup";
 import Login from "./pages/Login";
 import AuthCallback from "./pages/AuthCallback";
-import { Switch, Route } from "wouter";
-import Layout from "./components/Layout";
-import AdminLayout from "./components/AdminLayout";
+import { Switch, Route } from "wouter"; // ito yung ginagamit namin para sa routing (katulad ng React Router)
+import Layout from "./components/Layout";           // yung pangunahing layout na may sidebar at header
+import AdminLayout from "./components/AdminLayout"; // hiwalay na layout para sa admin pages (madilim)
 import Dashboard from "./pages/Dashboard";
 import SchemaBuilder from "./pages/SchemaBuilder";
 import SavedSchemas from "./pages/SavedSchemas";
@@ -15,6 +16,7 @@ import UserAccounts from "./pages/UserAccounts";
 import AdminPanel from "./pages/AdminPanel";
 import AdminUsers from "./pages/AdminUsers";
 
+// Ito yung lalabas kapag pumunta ang user sa URL na hindi namin kilala
 function NotFound() {
   return (
     <div className="flex flex-col items-center justify-center min-h-[60vh] text-center">
@@ -32,13 +34,15 @@ function NotFound() {
 
 export default function App() {
   return (
+    // Yung Switch ay nagre-render lang ng unang route na nagtutugma sa kasalukuyang URL
     <Switch>
-      {/* Public routes */}
+      {/* Mga public routes — pwedeng i-access kahit hindi naka-login */}
       <Route path="/" component={Signup} />
       <Route path="/login" component={Login} />
-<Route path="/auth/callback" component={AuthCallback} />
+      {/* Dito napupunta ang browser pagkatapos mag-login sa GitHub o Google */}
+      <Route path="/auth/callback" component={AuthCallback} />
 
-      {/* Admin routes — separate dark layout */}
+      {/* Admin routes — nakabalot sa AdminLayout para may madilim na design */}
       <Route path="/admin">
         <AdminLayout>
           <AdminPanel />
@@ -50,7 +54,7 @@ export default function App() {
         </AdminLayout>
       </Route>
 
-      {/* Regular user routes */}
+      {/* Regular user routes — lahat nakabalot sa Layout na may sidebar */}
       <Route>
         <Layout>
           <Switch>
@@ -62,6 +66,7 @@ export default function App() {
             <Route path="/api-access" component={APIAccess} />
             <Route path="/privacy-mode" component={PrivacyMode} />
             <Route path="/user-accounts" component={UserAccounts} />
+            {/* Catch-all: kapag wala talagang nagtugmang route, ipakita ang 404 */}
             <Route component={NotFound} />
           </Switch>
         </Layout>

@@ -9,6 +9,7 @@ import { cn } from "../lib/utils";
 
 import { NODE_API } from "../lib/config";
 
+// Mga TypeScript types para malaman natin ang hugis ng data na galing sa backend
 interface Schema {
   id: string;
   name: string;
@@ -26,6 +27,7 @@ interface Dataset {
   expires_at: string;
 }
 
+// Mga output format na pwedeng piliin ng user
 const outputFormats = [
   { id: "csv",   label: "CSV",   icon: FileSpreadsheet },
   { id: "json",  label: "JSON",  icon: FileJson },
@@ -33,6 +35,7 @@ const outputFormats = [
   { id: "excel", label: "Excel", icon: FileSpreadsheet },
 ];
 
+// Ginagawa nating mas readable ang date — hal. "2m ago", "3h ago", "May 2"
 function timeAgo(dateStr: string): string {
   const diff = Date.now() - new Date(dateStr).getTime();
   const mins = Math.floor(diff / 60000);
@@ -45,6 +48,7 @@ function timeAgo(dateStr: string): string {
   return new Date(dateStr).toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
+// Tinutukoy natin kung anong emoji ang angkop base sa pangalan ng dataset
 function categoryIcon(name: string): string {
   const n = name.toLowerCase();
   if (/health|hospital|patient|medical/.test(n)) return "🏥";
@@ -55,6 +59,7 @@ function categoryIcon(name: string): string {
   return "🗂️";
 }
 
+// Ginagawang mas maikli ang malalaking bilang — hal. 1500 → "1.5K", 2000000 → "2.0M"
 function formatRows(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 1_000)     return `${(n / 1_000).toFixed(1)}K`;
@@ -65,15 +70,18 @@ export default function Dashboard() {
   const [, setLocation] = useLocation();
   const userId = localStorage.getItem("user_id") ?? "";
 
+  // Naka-store dito yung schemas at datasets ng user, at yung loading state
   const [schemas, setSchemas]   = useState<Schema[]>([]);
   const [datasets, setDatasets] = useState<Dataset[]>([]);
   const [loading, setLoading]   = useState(true);
 
+  // Para sa Quick Generate section — yung rows slider, selected schema, at output format
   const [rows, setRows]                 = useState(10000);
   const [selectedSchemaId, setSelectedSchemaId] = useState<string>("");
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [selectedFormat, setSelectedFormat] = useState("csv");
 
+  // Kinukuha natin sabay-sabay ang schemas at datasets para mas mabilis
   const fetchData = async () => {
     if (!userId) { setLoading(false); return; }
     setLoading(true);
@@ -89,12 +97,15 @@ export default function Dashboard() {
     }
   };
 
+  // Kapag na-load ang page, agad nating kinukuha ang data ng user
   useEffect(() => { fetchData(); }, [userId]);
 
-  const totalRows     = datasets.reduce((sum, d) => sum + (d.row_count ?? 0), 0);
+  // Mga computed values para sa stats cards at recent lists
+  const totalRows      = datasets.reduce((sum, d) => sum + (d.row_count ?? 0), 0);
   const recentDatasets = datasets.slice(0, 5);
   const recentSchemas  = schemas.slice(0, 4);
 
+  // Mga stats na ipinakita sa tuktok ng dashboard — nagbabago depende sa data
   const statsCards = [
     { label: "Datasets Generated", value: loading ? "—" : datasets.length.toLocaleString(), icon: Database },
     { label: "Total Records",      value: loading ? "—" : formatRows(totalRows),             icon: TrendingUp },
@@ -104,7 +115,7 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-5">
-      {/* Stats */}
+      {/* Stats cards sa tuktok — nagpapakita ng overview ng activity ng user */}
       <div className="grid grid-cols-4 gap-4">
         {statsCards.map((stat) => {
           const Icon = stat.icon;
@@ -124,7 +135,7 @@ export default function Dashboard() {
       </div>
 
       <div className="grid grid-cols-5 gap-4">
-        {/* Quick Generate */}
+        {/* Quick Generate card — dito pwede agad mag-generate ng dataset */}
         <div className="col-span-3 bg-white border border-gray-100 rounded-xl p-5 shadow-sm">
           <div className="flex items-center gap-2 mb-4">
             <div className="w-7 h-7 rounded-lg bg-purple-50 flex items-center justify-center">
@@ -134,7 +145,7 @@ export default function Dashboard() {
           </div>
 
           <div className="space-y-4">
-            {/* Schema picker */}
+            {/* Dropdown para pumili ng saved schema — kapag walang pinili, new schema ang gagawin */}
             <div>
               <label className="text-xs font-medium text-gray-500 block mb-1.5">Saved Schema</label>
               <div className="relative">
@@ -180,7 +191,7 @@ export default function Dashboard() {
               </div>
             </div>
 
-            {/* Row slider */}
+            {/* Slider para pumili kung ilang rows ang ige-generate — 10K hanggang 100K */}
             <div>
               <div className="flex justify-between mb-1.5">
                 <label className="text-xs font-medium text-gray-500">Rows</label>
@@ -196,7 +207,7 @@ export default function Dashboard() {
               </div>
             </div>
 
-            {/* Output format */}
+            {/* Mga format buttons — CSV, JSON, SQL, Excel */}
             <div>
               <label className="text-xs font-medium text-gray-500 block mb-1.5">Output Format</label>
               <div className="grid grid-cols-4 gap-2">
@@ -221,7 +232,7 @@ export default function Dashboard() {
               </div>
             </div>
 
-            {/* Generate button */}
+            {/* Generate button — kapag may selected schema, dun pupunta; kung wala, Schema Builder */}
             <button
               onClick={() => setLocation(selectedSchemaId ? `/schema-builder?load=${selectedSchemaId}` : "/schema-builder")}
               className="w-full flex items-center justify-center gap-2 py-2.5 bg-purple-600 text-white text-sm font-medium rounded-md hover:bg-purple-700 transition-colors"
@@ -235,7 +246,7 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* Saved Schemas */}
+        {/* Saved Schemas card — mabilis na listahan ng mga naka-save na schema */}
         <div className="col-span-2 bg-white border border-gray-100 rounded-xl p-5 shadow-sm">
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-2">
@@ -252,6 +263,7 @@ export default function Dashboard() {
             </button>
           </div>
 
+          {/* Loading spinner, empty state, o lista ng schemas */}
           {loading ? (
             <div className="flex justify-center py-6">
               <RefreshCw className="w-4 h-4 text-purple-400 animate-spin" />
@@ -277,6 +289,7 @@ export default function Dashboard() {
             </div>
           )}
 
+          {/* Button para gumawa ng bagong schema */}
           <button
             onClick={() => setLocation("/schema-builder")}
             className="w-full mt-3 flex items-center justify-center gap-1.5 py-2 border border-dashed border-gray-200 rounded-lg text-xs text-gray-400 hover:border-purple-300 hover:text-purple-600 transition-colors"
@@ -286,7 +299,7 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* Recent Datasets */}
+      {/* Recent Datasets section — listahan ng mga pinakabagong nagawang dataset */}
       <div className="bg-white border border-gray-100 rounded-xl p-5 shadow-sm">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-sm font-semibold text-gray-900">Recent Datasets</h2>
@@ -298,6 +311,7 @@ export default function Dashboard() {
           </button>
         </div>
 
+        {/* Nagpapakita ng spinner habang naglo-load, empty state, o lista ng datasets */}
         {loading ? (
           <div className="flex justify-center py-6">
             <RefreshCw className="w-4 h-4 text-purple-400 animate-spin" />
@@ -313,6 +327,7 @@ export default function Dashboard() {
           <div className="space-y-1">
             {recentDatasets.map((ds) => (
               <div key={ds.id} className="flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-gray-50 cursor-pointer transition-colors group">
+                {/* Emoji icon na depende sa kategorya ng dataset */}
                 <div className="w-8 h-8 rounded-lg bg-gray-50 flex items-center justify-center text-base flex-shrink-0">
                   {categoryIcon(ds.name)}
                 </div>
@@ -325,6 +340,7 @@ export default function Dashboard() {
                 <div className="flex items-center gap-3">
                   <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-green-100 text-green-700">CSV</span>
                   <span className="text-xs text-gray-400 w-16 text-right">{timeAgo(ds.created_at)}</span>
+                  {/* Download button na lumalabas lang kapag naka-hover sa row */}
                   <button
                     onClick={() => setLocation("/downloads")}
                     className="w-6 h-6 rounded flex items-center justify-center hover:bg-gray-100 text-gray-400 hover:text-gray-700 transition-colors opacity-0 group-hover:opacity-100"
