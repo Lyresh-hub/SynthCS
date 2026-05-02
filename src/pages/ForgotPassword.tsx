@@ -1,4 +1,4 @@
-import { useState } from "react";
+﻿import { useState } from "react";
 import { Link } from "wouter";
 import { NODE_API as BACKEND } from "../lib/config";
 
@@ -32,7 +32,7 @@ export default function ForgotPassword() {
         <div className="absolute top-[-20%] left-[-20%] w-[70%] h-[70%] rounded-full bg-purple-600/20 blur-[130px] pointer-events-none" />
         <div className="absolute bottom-[-15%] right-[-15%] w-[60%] h-[60%] rounded-full bg-violet-500/15 blur-[110px] pointer-events-none" />
         <div className="relative z-10 flex flex-col items-center text-center">
-          <img src="/synthcs-logo.svg" alt="SynthCS logo"
+          <img src="/synthcs-logo.png" alt="SynthCS logo"
             className="w-36 h-36 mb-6 drop-shadow-[0_0_32px_rgba(123,47,190,0.6)]" />
           <h1 className="text-4xl font-bold tracking-tight">
             <span className="text-transparent bg-clip-text bg-gradient-to-r from-cyan-300 via-violet-300 to-purple-400">
@@ -94,7 +94,7 @@ export default function ForgotPassword() {
                   disabled={loading}
                   className="w-full bg-purple-600 hover:bg-purple-700 disabled:opacity-60 text-white font-semibold py-2.5 rounded-lg text-sm transition-colors"
                 >
-                  {loading ? "Sending…" : "Send Reset Link"}
+                  {loading ? "Sendingâ€¦" : "Send Reset Link"}
                 </button>
               </form>
 
@@ -111,3 +111,4 @@ export default function ForgotPassword() {
     </div>
   );
 }
+

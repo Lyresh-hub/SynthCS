@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+﻿import { useState, useEffect } from "react";
 import { useLocation, Link } from "wouter";
 import { z } from "zod";
 import { useForm } from "react-hook-form";
@@ -13,9 +13,9 @@ const loginSchema = z.object({
 });
 type LoginFormValues = z.infer<typeof loginSchema>;
 
-// forgot → user enters email
-// forgot-code → user enters 6-digit code + new password
-// login → normal sign-in
+// forgot â†’ user enters email
+// forgot-code â†’ user enters 6-digit code + new password
+// login â†’ normal sign-in
 type View = "login" | "forgot" | "forgot-code";
 
 export default function Login() {
@@ -131,13 +131,13 @@ export default function Login() {
 
   return (
     <div className="min-h-screen flex">
-      {/* ── Left panel ── */}
+      {/* â”€â”€ Left panel â”€â”€ */}
       <div className="hidden lg:flex lg:w-[45%] flex-col items-center justify-center bg-[#1E1347] relative overflow-hidden px-12">
         <div className="absolute top-[-20%] left-[-20%] w-[70%] h-[70%] rounded-full bg-purple-600/20 blur-[130px] pointer-events-none" />
         <div className="absolute bottom-[-15%] right-[-15%] w-[60%] h-[60%] rounded-full bg-violet-500/15 blur-[110px] pointer-events-none" />
         <div className="absolute top-[50%] left-[50%] -translate-x-1/2 -translate-y-1/2 w-[80%] h-[80%] rounded-full bg-indigo-900/30 blur-[80px] pointer-events-none" />
         <div className="relative z-10 flex flex-col items-center text-center">
-          <img src="/synthcs-logo.svg" alt="SynthCS logo"
+          <img src="/synthcs-logo.png" alt="SynthCS logo"
             className="w-36 h-36 mb-6 drop-shadow-[0_0_32px_rgba(123,47,190,0.6)]" />
           <h1 className="text-4xl font-bold tracking-tight">
             <span className="text-transparent bg-clip-text bg-gradient-to-r from-cyan-300 via-violet-300 to-purple-400">
@@ -170,21 +170,21 @@ export default function Login() {
         </p>
       </div>
 
-      {/* ── Right panel ── */}
+      {/* â”€â”€ Right panel â”€â”€ */}
       <div className="flex-1 flex flex-col items-center justify-center bg-white px-8 py-12">
         <div className="lg:hidden flex flex-col items-center mb-8">
-          <img src="/synthcs-logo.svg" alt="SynthCS" className="w-16 h-16 mb-2" />
+          <img src="/synthcs-logo.png" alt="SynthCS" className="w-16 h-16 mb-2" />
           <span className="font-bold text-lg text-gray-900">SynthCS</span>
         </div>
 
         <div className="w-full max-w-md">
 
-          {/* ── Login ── */}
+          {/* â”€â”€ Login â”€â”€ */}
           {view === "login" && (
             <>
               <div className="mb-6">
                 <h2 className="text-2xl font-bold text-gray-900">Sign in to your account</h2>
-                <p className="text-sm text-gray-500 mt-1">Welcome back — enter your credentials to continue</p>
+                <p className="text-sm text-gray-500 mt-1">Welcome back â€” enter your credentials to continue</p>
               </div>
               {successMsg && (
                 <div className="mb-4 px-3 py-2 bg-green-50 border border-green-200 rounded-lg text-sm text-green-700">
@@ -224,7 +224,7 @@ export default function Login() {
                 </div>
                 <button type="submit" disabled={isPending}
                   className="w-full bg-purple-600 hover:bg-purple-700 disabled:opacity-60 text-white font-semibold py-2.5 rounded-lg text-sm transition-colors mt-1">
-                  {isPending ? "Signing in…" : "Sign In"}
+                  {isPending ? "Signing inâ€¦" : "Sign In"}
                 </button>
               </form>
               <p className="mt-5 text-center text-sm text-gray-500">
@@ -234,7 +234,7 @@ export default function Login() {
             </>
           )}
 
-          {/* ── Forgot: enter email ── */}
+          {/* â”€â”€ Forgot: enter email â”€â”€ */}
           {view === "forgot" && (
             <>
               <button onClick={() => setView("login")}
@@ -261,13 +261,13 @@ export default function Login() {
                 </div>
                 <button type="submit" disabled={forgotLoading}
                   className="w-full bg-purple-600 hover:bg-purple-700 disabled:opacity-60 text-white font-semibold py-2.5 rounded-lg text-sm transition-colors">
-                  {forgotLoading ? "Sending…" : "Send Code"}
+                  {forgotLoading ? "Sendingâ€¦" : "Send Code"}
                 </button>
               </form>
             </>
           )}
 
-          {/* ── Forgot: enter code + new password ── */}
+          {/* â”€â”€ Forgot: enter code + new password â”€â”€ */}
           {view === "forgot-code" && (
             <>
               <button onClick={() => setView("forgot")}
@@ -319,7 +319,7 @@ export default function Login() {
                 </div>
                 <button type="submit" disabled={resetLoading}
                   className="w-full bg-purple-600 hover:bg-purple-700 disabled:opacity-60 text-white font-semibold py-2.5 rounded-lg text-sm transition-colors">
-                  {resetLoading ? "Saving…" : "Reset Password"}
+                  {resetLoading ? "Savingâ€¦" : "Reset Password"}
                 </button>
               </form>
             </>
@@ -330,3 +330,4 @@ export default function Login() {
     </div>
   );
 }
+
