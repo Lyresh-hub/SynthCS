@@ -9,10 +9,10 @@ import { NODE_API as BACKEND } from "../lib/config";
 
 const passwordRules = [
   { label: "At least 8 characters",      test: (p: string) => p.length >= 8 },
-  { label: "One uppercase letter (Aâ€“Z)",  test: (p: string) => /[A-Z]/.test(p) },
-  { label: "One lowercase letter (aâ€“z)",  test: (p: string) => /[a-z]/.test(p) },
-  { label: "One number (0â€“9)",            test: (p: string) => /[0-9]/.test(p) },
-  { label: "One special character (!@#$â€¦)", test: (p: string) => /[^A-Za-z0-9]/.test(p) },
+  { label: "One uppercase letter (A-Z)",  test: (p: string) => /[A-Z]/.test(p) },
+  { label: "One lowercase letter (a-z)",  test: (p: string) => /[a-z]/.test(p) },
+  { label: "One number (0-9)",            test: (p: string) => /[0-9]/.test(p) },
+  { label: "One special character (!@#$...)", test: (p: string) => /[^A-Za-z0-9]/.test(p) },
 ];
 
 const signupSchema = z
@@ -121,7 +121,7 @@ export default function Signup() {
     <div className="min-h-screen flex items-center justify-center bg-white px-6">
       <div className="w-full max-w-md text-center space-y-5">
         <div className="w-16 h-16 rounded-full bg-purple-100 flex items-center justify-center mx-auto text-3xl">
-          âœ‰ï¸
+          ✉️
         </div>
         <h2 className="text-2xl font-bold text-gray-900">Check your inbox</h2>
         <p className="text-sm text-gray-500 leading-relaxed">
@@ -129,8 +129,8 @@ export default function Signup() {
           Click it to activate your account.
         </p>
         <div className="bg-purple-50 border border-purple-100 rounded-xl p-4 text-xs text-purple-700 text-left space-y-1">
-          <p>â€¢ Check your spam/junk folder if you don't see it.</p>
-          <p>â€¢ The link expires in 24 hours.</p>
+          <p>• Check your spam/junk folder if you don't see it.</p>
+          <p>• The link expires in 24 hours.</p>
         </div>
         <p className="text-sm text-gray-400">
           Didn't receive it?{" "}
@@ -139,7 +139,7 @@ export default function Signup() {
             disabled={resendStatus !== "idle"}
             className="text-purple-600 font-medium hover:underline disabled:opacity-50"
           >
-            {resendStatus === "sending" ? "Sendingâ€¦" : resendStatus === "sent" ? "Sent!" : "Resend email"}
+            {resendStatus === "sending" ? "Sending…" : resendStatus === "sent" ? "Sent!" : "Resend email"}
           </button>
         </p>
         <p className="text-sm text-gray-400">
@@ -153,7 +153,7 @@ export default function Signup() {
 
   return (
     <div className="min-h-screen flex">
-      {/* â”€â”€ Left showcase panel â”€â”€ */}
+      {/* ── Left showcase panel ── */}
       <div className="hidden lg:flex lg:w-[45%] flex-col items-center justify-center bg-[#1E1347] relative overflow-hidden px-12">
         <div className="absolute top-[-20%] left-[-20%] w-[70%] h-[70%] rounded-full bg-purple-600/20 blur-[130px] pointer-events-none" />
         <div className="absolute bottom-[-15%] right-[-15%] w-[60%] h-[60%] rounded-full bg-violet-500/15 blur-[110px] pointer-events-none" />
@@ -180,7 +180,7 @@ export default function Signup() {
             </span>
           </h2>
           <p className="mt-4 text-purple-200/55 text-[14px] leading-relaxed max-w-[280px]">
-            Create realistic synthetic datasets for testing, AI training, and development â€” without exposing real data.
+            Create realistic synthetic datasets for testing, AI training, and development — without exposing real data.
           </p>
           <div className="mt-8 w-full max-w-[280px] space-y-2.5">
             <div className="h-px bg-white/10 rounded-full" />
@@ -205,7 +205,7 @@ export default function Signup() {
         </p>
       </div>
 
-      {/* â”€â”€ Right form panel â”€â”€ */}
+      {/* ── Right form panel ── */}
       <div className="flex-1 flex flex-col items-center justify-center bg-white px-8 py-12">
         <div className="lg:hidden flex flex-col items-center mb-8">
           <img src="/synthcs-logo.png" alt="SynthCS" className="w-16 h-16 mb-2" />
@@ -324,7 +324,7 @@ export default function Signup() {
               disabled={isPending}
               className="w-full bg-purple-600 hover:bg-purple-700 disabled:opacity-60 text-white font-semibold py-2.5 rounded-lg text-sm transition-colors mt-1"
             >
-              {isPending ? "Creating accountâ€¦" : "Create Account"}
+              {isPending ? "Creating account…" : "Create Account"}
             </button>
           </form>
 

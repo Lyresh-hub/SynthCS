@@ -13,9 +13,9 @@ const loginSchema = z.object({
 });
 type LoginFormValues = z.infer<typeof loginSchema>;
 
-// forgot â†’ user enters email
-// forgot-code â†’ user enters 6-digit code + new password
-// login â†’ normal sign-in
+// forgot → user enters email
+// forgot-code → user enters 6-digit code + new password
+// login → normal sign-in
 type View = "login" | "forgot" | "forgot-code";
 
 export default function Login() {
@@ -131,7 +131,7 @@ export default function Login() {
 
   return (
     <div className="min-h-screen flex">
-      {/* â”€â”€ Left panel â”€â”€ */}
+      {/* ── Left panel ── */}
       <div className="hidden lg:flex lg:w-[45%] flex-col items-center justify-center bg-[#1E1347] relative overflow-hidden px-12">
         <div className="absolute top-[-20%] left-[-20%] w-[70%] h-[70%] rounded-full bg-purple-600/20 blur-[130px] pointer-events-none" />
         <div className="absolute bottom-[-15%] right-[-15%] w-[60%] h-[60%] rounded-full bg-violet-500/15 blur-[110px] pointer-events-none" />
@@ -170,7 +170,7 @@ export default function Login() {
         </p>
       </div>
 
-      {/* â”€â”€ Right panel â”€â”€ */}
+      {/* ── Right panel ── */}
       <div className="flex-1 flex flex-col items-center justify-center bg-white px-8 py-12">
         <div className="lg:hidden flex flex-col items-center mb-8">
           <img src="/synthcs-logo.png" alt="SynthCS" className="w-16 h-16 mb-2" />
@@ -179,12 +179,12 @@ export default function Login() {
 
         <div className="w-full max-w-md">
 
-          {/* â”€â”€ Login â”€â”€ */}
+          {/* ── Login ── */}
           {view === "login" && (
             <>
               <div className="mb-6">
                 <h2 className="text-2xl font-bold text-gray-900">Sign in to your account</h2>
-                <p className="text-sm text-gray-500 mt-1">Welcome back â€” enter your credentials to continue</p>
+                <p className="text-sm text-gray-500 mt-1">Welcome back — enter your credentials to continue</p>
               </div>
               {successMsg && (
                 <div className="mb-4 px-3 py-2 bg-green-50 border border-green-200 rounded-lg text-sm text-green-700">
@@ -224,7 +224,7 @@ export default function Login() {
                 </div>
                 <button type="submit" disabled={isPending}
                   className="w-full bg-purple-600 hover:bg-purple-700 disabled:opacity-60 text-white font-semibold py-2.5 rounded-lg text-sm transition-colors mt-1">
-                  {isPending ? "Signing inâ€¦" : "Sign In"}
+                  {isPending ? "Signing in…" : "Sign In"}
                 </button>
               </form>
               <p className="mt-5 text-center text-sm text-gray-500">
@@ -234,7 +234,7 @@ export default function Login() {
             </>
           )}
 
-          {/* â”€â”€ Forgot: enter email â”€â”€ */}
+          {/* ── Forgot: enter email ── */}
           {view === "forgot" && (
             <>
               <button onClick={() => setView("login")}
@@ -261,13 +261,13 @@ export default function Login() {
                 </div>
                 <button type="submit" disabled={forgotLoading}
                   className="w-full bg-purple-600 hover:bg-purple-700 disabled:opacity-60 text-white font-semibold py-2.5 rounded-lg text-sm transition-colors">
-                  {forgotLoading ? "Sendingâ€¦" : "Send Code"}
+                  {forgotLoading ? "Sending…" : "Send Code"}
                 </button>
               </form>
             </>
           )}
 
-          {/* â”€â”€ Forgot: enter code + new password â”€â”€ */}
+          {/* ── Forgot: enter code + new password ── */}
           {view === "forgot-code" && (
             <>
               <button onClick={() => setView("forgot")}
@@ -319,7 +319,7 @@ export default function Login() {
                 </div>
                 <button type="submit" disabled={resetLoading}
                   className="w-full bg-purple-600 hover:bg-purple-700 disabled:opacity-60 text-white font-semibold py-2.5 rounded-lg text-sm transition-colors">
-                  {resetLoading ? "Savingâ€¦" : "Reset Password"}
+                  {resetLoading ? "Saving…" : "Reset Password"}
                 </button>
               </form>
             </>

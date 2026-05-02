@@ -122,7 +122,7 @@ export default function ResetPassword() {
               disabled={loading}
               className="w-full bg-purple-600 hover:bg-purple-700 disabled:opacity-60 text-white font-semibold py-2.5 rounded-lg text-sm transition-colors"
             >
-              {loading ? "Savingâ€¦" : "Reset Password"}
+              {loading ? "Saving…" : "Reset Password"}
             </button>
           </form>
         </div>
