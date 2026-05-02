@@ -6,6 +6,8 @@ import { NODE_API } from "../lib/config";
 
 interface User {
   id: string;
+  first_name: string;
+  last_name: string;
   full_name: string;
   email: string;
   username: string | null;
@@ -185,14 +187,18 @@ export default function UserAccounts() {
       const data = await res.json();
       if (!res.ok) return data.error ?? "Update failed";
       setUser(data);
-      if (patch.full_name) localStorage.setItem("user_name", patch.full_name);
+      if (patch.first_name || patch.last_name) {
+        const fn = patch.first_name ?? user?.first_name ?? "";
+        const ln = patch.last_name  ?? user?.last_name  ?? "";
+        localStorage.setItem("user_name", `${fn} ${ln}`.trim());
+      }
       return null;
     } catch {
       return "Network error";
     }
   }
 
-  const userName = user?.full_name ?? localStorage.getItem("user_name") ?? "User";
+  const userName = user ? `${user.first_name} ${user.last_name}`.trim() : localStorage.getItem("user_name") ?? "User";
   const userEmail = user?.email ?? "—";
 
 
@@ -233,9 +239,15 @@ export default function UserAccounts() {
 
           <EditableField
             icon="👤"
-            label="FULL NAME"
-            value={userName}
-            onSave={(val) => updateUser({ full_name: val })}
+            label="FIRST NAME"
+            value={user?.first_name ?? ""}
+            onSave={(val) => updateUser({ first_name: val })}
+          />
+          <EditableField
+            icon="👤"
+            label="LAST NAME"
+            value={user?.last_name ?? ""}
+            onSave={(val) => updateUser({ last_name: val })}
           />
           <div style={styles.fieldRow}>
             <div style={styles.fieldLeft}>

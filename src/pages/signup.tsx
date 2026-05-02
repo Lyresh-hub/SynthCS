@@ -17,7 +17,8 @@ const passwordRules = [
 
 const signupSchema = z
   .object({
-    fullName: z.string().min(2, "Full name must be at least 2 characters"),
+    firstName: z.string().min(2, "First name must be at least 2 characters"),
+    lastName:  z.string().min(2, "Last name must be at least 2 characters"),
     email: z.string().email("Please enter a valid email address"),
     password: z.string()
       .min(8,          "Password must be at least 8 characters")
@@ -62,7 +63,8 @@ export default function Signup() {
   } = useForm<SignupFormValues>({
     resolver: zodResolver(signupSchema),
     defaultValues: {
-      fullName: "",
+      firstName: "",
+      lastName:  "",
       email: "",
       password: "",
       confirmPassword: "",
@@ -78,7 +80,8 @@ export default function Signup() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          full_name: data.fullName,
+          first_name: data.firstName,
+          last_name:  data.lastName,
           email: data.email,
           password: data.password,
         }),
@@ -98,7 +101,7 @@ export default function Signup() {
         return;
       }
       localStorage.setItem("user_id", json.id);
-      localStorage.setItem("user_name", json.full_name);
+      localStorage.setItem("user_name", json.full_name ?? `${json.first_name} ${json.last_name}`);
       setLocation("/dashboard");
     } catch {
       setServerError("Could not reach the server. Make sure the backend is running.");
@@ -205,15 +208,26 @@ export default function Signup() {
           )}
 
           <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
-            {/* Full Name */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Full Name</label>
-              <input
-                {...register("fullName")}
-                placeholder="John Doe"
-                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
-              />
-              {errors.fullName && <p className="mt-1 text-xs text-red-500">{errors.fullName.message}</p>}
+            {/* First Name + Last Name */}
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">First Name</label>
+                <input
+                  {...register("firstName")}
+                  placeholder="John"
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
+                />
+                {errors.firstName && <p className="mt-1 text-xs text-red-500">{errors.firstName.message}</p>}
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Last Name</label>
+                <input
+                  {...register("lastName")}
+                  placeholder="Doe"
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
+                />
+                {errors.lastName && <p className="mt-1 text-xs text-red-500">{errors.lastName.message}</p>}
+              </div>
             </div>
 
             {/* Email */}

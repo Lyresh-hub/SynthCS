@@ -202,6 +202,15 @@ async function initDB() {
     await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin           BOOLEAN DEFAULT FALSE`).catch(() => {});
     await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_token         VARCHAR(255)`).catch(() => {});
     await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_token_expires TIMESTAMP`).catch(() => {});
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS first_name VARCHAR(100)`).catch(() => {});
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_name  VARCHAR(100) NOT NULL DEFAULT ''`).catch(() => {});
+    // Migrate existing full_name data into first_name / last_name
+    await pool.query(`
+      UPDATE users
+      SET first_name = CASE WHEN full_name LIKE '% %' THEN SPLIT_PART(full_name, ' ', 1) ELSE full_name END,
+          last_name  = CASE WHEN full_name LIKE '% %' THEN TRIM(SUBSTRING(full_name FROM POSITION(' ' IN full_name) + 1)) ELSE '' END
+      WHERE first_name IS NULL AND full_name IS NOT NULL
+    `).catch(() => {});
     // Mark accounts that existed before email verification was introduced as already verified
     await pool.query(`UPDATE users SET email_verified = TRUE WHERE email_verified = FALSE AND verification_token IS NULL`).catch(() => {});
 
@@ -272,9 +281,12 @@ async function findOrCreateOAuthUser(provider, providerId, profile) {
   // 3. Brand-new user
   if (!userId) {
     const displayName = profile.displayName || profile.username || "User";
+    const parts = displayName.split(" ");
+    const oFirstName = parts[0] || displayName;
+    const oLastName  = parts.slice(1).join(" ") || "";
     const newUser = await pool.query(
-      "INSERT INTO users (full_name, email) VALUES ($1, $2) RETURNING id",
-      [displayName, email]
+      "INSERT INTO users (full_name, first_name, last_name, email) VALUES ($1, $2, $3, $4) RETURNING id",
+      [displayName, oFirstName, oLastName, email]
     );
     userId = newUser.rows[0].id;
   }
@@ -355,22 +367,22 @@ app.get("/", (_req, res) => res.json({ status: "Backend running" }));
 // SIGNUP (email + password)
 app.post("/signup", async (req, res) => {
   try {
-    const { full_name, email, password } = req.body;
-    if (!full_name || !email || !password)
-      return res.status(400).json({ error: "full_name, email, and password are required" });
+    const { first_name, last_name, email, password } = req.body;
+    if (!first_name || !last_name || !email || !password)
+      return res.status(400).json({ error: "first_name, last_name, email, and password are required" });
 
+    const full_name = `${first_name} ${last_name}`.trim();
     const hashed = await bcrypt.hash(password, 10);
     const token  = crypto.randomUUID();
 
     const result = await pool.query(
-      `INSERT INTO users (full_name, email, password, email_verified, verification_token)
-       VALUES ($1, $2, $3, $4, $5) RETURNING id, full_name, email, created_at`,
-      [full_name, email, hashed, !EMAIL_READY, EMAIL_READY ? token : null]
+      `INSERT INTO users (first_name, last_name, full_name, email, password, email_verified, verification_token)
+       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id, first_name, last_name, full_name, email, created_at`,
+      [first_name, last_name, full_name, email, hashed, !EMAIL_READY, EMAIL_READY ? token : null]
     );
     const user = result.rows[0];
 
     if (EMAIL_READY) {
-      // Respond immediately — send email in the background so signup doesn't hang
       res.status(201).json({ pending_verification: true, email });
       sendVerificationEmail(email, token).catch((e) =>
         console.error("Email send failed:", e.message)
@@ -378,8 +390,7 @@ app.post("/signup", async (req, res) => {
       return;
     }
 
-    // Email not configured → auto-verify and return session immediately
-    res.status(201).json({ id: user.id, full_name: user.full_name, email: user.email });
+    res.status(201).json({ id: user.id, first_name: user.first_name, last_name: user.last_name, full_name: user.full_name, email: user.email });
   } catch (err) {
     if (err.code === "23505") return res.status(400).json({ error: "Email already exists" });
     console.error("Signup error:", err.message);
@@ -497,7 +508,7 @@ app.post("/login", async (req, res) => {
     if (!user.email_verified)
       return res.status(403).json({ error: "unverified", message: "Please verify your email before logging in." });
 
-    res.json({ id: user.id, full_name: user.full_name, email: user.email, is_admin: user.is_admin || false });
+    res.json({ id: user.id, first_name: user.first_name, last_name: user.last_name, full_name: user.full_name, email: user.email, is_admin: user.is_admin || false });
   } catch (err) {
     console.error("Login error:", err.message);
     res.status(500).json({ error: "Server error" });
@@ -532,7 +543,7 @@ app.get("/auth/google/callback",
 app.get("/api/users/:id", async (req, res) => {
   try {
     const result = await pool.query(
-      "SELECT id, full_name, email, username, created_at FROM users WHERE id = $1",
+      "SELECT id, first_name, last_name, full_name, email, username, created_at FROM users WHERE id = $1",
       [req.params.id]
     );
     if (result.rows.length === 0) return res.status(404).json({ error: "User not found" });
@@ -545,12 +556,20 @@ app.get("/api/users/:id", async (req, res) => {
 
 app.put("/api/users/:id", async (req, res) => {
   try {
-    const { full_name, email, username, new_password, current_password } = req.body;
+    const { first_name, last_name, email, username, new_password, current_password } = req.body;
     const updates = [];
     const values = [];
     let idx = 1;
 
-    if (full_name !== undefined) { updates.push(`full_name = $${idx++}`); values.push(full_name); }
+    if (first_name !== undefined) { updates.push(`first_name = $${idx++}`); values.push(first_name); }
+    if (last_name  !== undefined) { updates.push(`last_name = $${idx++}`);  values.push(last_name); }
+    if (first_name !== undefined || last_name !== undefined) {
+      updates.push(`full_name = $${idx++}`);
+      const curUser = await pool.query("SELECT first_name, last_name FROM users WHERE id = $1", [req.params.id]);
+      const fn = first_name ?? curUser.rows[0]?.first_name ?? "";
+      const ln = last_name  ?? curUser.rows[0]?.last_name  ?? "";
+      values.push(`${fn} ${ln}`.trim());
+    }
     if (email     !== undefined) { updates.push(`email = $${idx++}`);     values.push(email); }
     if (username  !== undefined) { updates.push(`username = $${idx++}`);  values.push(username); }
 
@@ -568,7 +587,7 @@ app.put("/api/users/:id", async (req, res) => {
 
     values.push(req.params.id);
     const result = await pool.query(
-      `UPDATE users SET ${updates.join(", ")} WHERE id = $${idx} RETURNING id, full_name, email, username, created_at`,
+      `UPDATE users SET ${updates.join(", ")} WHERE id = $${idx} RETURNING id, first_name, last_name, full_name, email, username, created_at`,
       values
     );
     if (result.rowCount === 0) return res.status(404).json({ error: "User not found" });
@@ -677,7 +696,7 @@ app.get("/api/admin/analytics", requireAdmin, async (req, res) => {
       `),
       // Top 5 users by schema + dataset activity
       pool.query(`
-        SELECT u.id, u.full_name, u.email,
+        SELECT u.id, COALESCE(u.first_name || ' ' || u.last_name, u.full_name) AS full_name, u.email,
                COUNT(DISTINCT s.id)::int                    AS schema_count,
                COUNT(DISTINCT d.id)::int                    AS dataset_count,
                COALESCE(SUM(d.row_count), 0)::int           AS total_rows
@@ -690,12 +709,13 @@ app.get("/api/admin/analytics", requireAdmin, async (req, res) => {
       `),
       // 5 most recent signups
       pool.query(`
-        SELECT full_name, email, created_at
+        SELECT COALESCE(first_name || ' ' || last_name, full_name) AS full_name, email, created_at
         FROM users ORDER BY created_at DESC LIMIT 5
       `),
       // 5 most recent schemas with owner name
       pool.query(`
-        SELECT s.name, s.table_name, s.created_at, u.full_name AS user_name
+        SELECT s.name, s.table_name, s.created_at,
+               COALESCE(u.first_name || ' ' || u.last_name, u.full_name) AS user_name
         FROM schemas s
         JOIN users u ON u.id = s.user_id
         ORDER BY s.created_at DESC LIMIT 5
@@ -725,7 +745,7 @@ app.get("/api/admin/analytics", requireAdmin, async (req, res) => {
 app.get("/api/admin/users", requireAdmin, async (req, res) => {
   try {
     const result = await pool.query(`
-      SELECT u.id, u.full_name, u.email, u.username, u.email_verified, u.is_admin, u.created_at,
+      SELECT u.id, u.first_name, u.last_name, COALESCE(u.first_name || ' ' || u.last_name, u.full_name) AS full_name, u.email, u.username, u.email_verified, u.is_admin, u.created_at,
              COUNT(s.id)::int AS schema_count
       FROM users u
       LEFT JOIN schemas s ON s.user_id = u.id
