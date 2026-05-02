@@ -155,7 +155,7 @@ export default function Login() {
             <div className="h-px bg-white/5 rounded-full w-3/5 mx-auto" />
           </div>
           {view === "login" && (
-            <div className="mt-10 flex gap-8">
+            <div className="mt-8 flex gap-8">
               {[{ value: "238", label: "Datasets" }, { value: "133", label: "Schemas" }, { value: "220", label: "Downloads" }].map((s) => (
                 <div key={s.label} className="text-center">
                   <p className="text-2xl font-bold text-white">{s.value}</p>
@@ -164,10 +164,10 @@ export default function Login() {
               ))}
             </div>
           )}
+          <p className="mt-8 text-purple-300/30 text-[11px] tracking-wide">
+            Trusted by data engineers and ML teams worldwide
+          </p>
         </div>
-        <p className="absolute bottom-8 left-0 right-0 text-center text-purple-300/30 text-[11px] tracking-wide z-10">
-          Trusted by data engineers and ML teams worldwide
-        </p>
       </div>
 
       {/* ── Right panel ── */}
