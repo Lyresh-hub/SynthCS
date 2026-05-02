@@ -102,6 +102,58 @@ async function sendVerificationEmail(to, token) {
   }
 }
 
+async function sendPasswordResetEmail(to, token) {
+  const BASE  = process.env.BACKEND_URL || `http://localhost:${process.env.PORT || 5000}`;
+  const link  = `${process.env.FRONTEND_URL || "http://localhost:5173"}/reset-password?token=${token}`;
+  const sender = process.env.GMAIL_SENDER || "christianboluntate5@gmail.com";
+
+  const htmlBody = `
+    <div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:32px 24px">
+      <h2 style="color:#6d28d9;margin-bottom:8px">Reset your password</h2>
+      <p style="color:#374151;font-size:15px;line-height:1.6">
+        We received a request to reset your <strong>SynthCS</strong> password.
+        Click the button below to choose a new one.
+      </p>
+      <a href="${link}"
+         style="display:inline-block;margin:24px 0;padding:12px 28px;background:#7c3aed;color:#fff;
+                border-radius:8px;text-decoration:none;font-weight:600;font-size:14px">
+        Reset Password
+      </a>
+      <p style="color:#9ca3af;font-size:12px">
+        If you didn't request this, you can safely ignore this email.<br>
+        This link expires in 1 hour.
+      </p>
+    </div>`;
+
+  const rawEmail = [
+    `From: SynthCS <${sender}>`,
+    `To: ${to}`,
+    `Subject: Reset your SynthCS password`,
+    `MIME-Version: 1.0`,
+    `Content-Type: text/html; charset=UTF-8`,
+    ``,
+    htmlBody,
+  ].join("\r\n");
+
+  const encoded = Buffer.from(rawEmail)
+    .toString("base64")
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
+
+  const accessToken = await getGmailAccessToken();
+  const res = await fetch("https://gmail.googleapis.com/gmail/v1/users/me/messages/send", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ raw: encoded }),
+  });
+
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`Gmail API error ${res.status}: ${body}`);
+  }
+}
+
 const app = express();
 app.use(cors({
   origin: (origin, cb) => cb(null, isAllowedOrigin(origin)),
@@ -148,6 +200,8 @@ async function initDB() {
     await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified     BOOLEAN DEFAULT FALSE`).catch(() => {});
     await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS verification_token VARCHAR(255)`).catch(() => {});
     await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin           BOOLEAN DEFAULT FALSE`).catch(() => {});
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_token         VARCHAR(255)`).catch(() => {});
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_token_expires TIMESTAMP`).catch(() => {});
     // Mark accounts that existed before email verification was introduced as already verified
     await pool.query(`UPDATE users SET email_verified = TRUE WHERE email_verified = FALSE AND verification_token IS NULL`).catch(() => {});
 
@@ -370,6 +424,57 @@ app.post("/resend-verification", async (req, res) => {
     res.json({ ok: true });
   } catch (err) {
     console.error("Resend verification error:", err.message);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+// FORGOT PASSWORD
+app.post("/forgot-password", async (req, res) => {
+  const { email } = req.body;
+  if (!email) return res.status(400).json({ error: "email is required" });
+  try {
+    const result = await pool.query("SELECT * FROM users WHERE email = $1", [email]);
+    if (result.rows.length === 0) return res.json({ ok: true }); // don't leak existence
+
+    const token   = crypto.randomUUID();
+    const expires = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+    await pool.query(
+      "UPDATE users SET reset_token = $1, reset_token_expires = $2 WHERE email = $3",
+      [token, expires, email]
+    );
+
+    if (EMAIL_READY) {
+      sendPasswordResetEmail(email, token).catch((e) =>
+        console.error("Password reset email failed:", e.message)
+      );
+    }
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("Forgot password error:", err.message);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+// RESET PASSWORD
+app.post("/reset-password", async (req, res) => {
+  const { token, password } = req.body;
+  if (!token || !password) return res.status(400).json({ error: "token and password are required" });
+  try {
+    const result = await pool.query(
+      "SELECT * FROM users WHERE reset_token = $1 AND reset_token_expires > NOW()",
+      [token]
+    );
+    if (result.rows.length === 0)
+      return res.status(400).json({ error: "Invalid or expired reset link" });
+
+    const hashed = await bcrypt.hash(password, 10);
+    await pool.query(
+      "UPDATE users SET password = $1, reset_token = NULL, reset_token_expires = NULL WHERE reset_token = $2",
+      [hashed, token]
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("Reset password error:", err.message);
     res.status(500).json({ error: "Server error" });
   }
 });

@@ -17,6 +17,7 @@ type LoginFormValues = z.infer<typeof loginSchema>;
 export default function Login() {
   const [, setLocation] = useLocation();
   const [serverError, setServerError] = useState("");
+  const [successMsg, setSuccessMsg]   = useState("");
   const [isPending, setIsPending]     = useState(false);
   const [showPassword, setShowPassword] = useState(false);
 
@@ -24,6 +25,8 @@ export default function Login() {
     const params = new URLSearchParams(window.location.search);
     const oauthError = params.get("oauth_error");
     if (oauthError) setServerError(decodeURIComponent(oauthError));
+    if (params.get("reset") === "1") setSuccessMsg("Password reset! You can now sign in with your new password.");
+    if (params.get("verified") === "1") setSuccessMsg("Email verified! You can now sign in.");
   }, []);
 
   const {
@@ -117,6 +120,11 @@ export default function Login() {
             <p className="text-sm text-gray-500 mt-1">Welcome back — enter your credentials to continue</p>
           </div>
 
+          {successMsg && (
+            <div className="mb-4 px-3 py-2 bg-green-50 border border-green-200 rounded-lg text-sm text-green-700">
+              {successMsg}
+            </div>
+          )}
           {serverError && (
             <div className="mb-4 px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-sm text-red-600">
               {serverError}
@@ -150,6 +158,11 @@ export default function Login() {
                 </button>
               </div>
               {errors.password && <p className="mt-1 text-xs text-red-500">{errors.password.message}</p>}
+              <div className="text-right mt-1">
+                <Link href="/forgot-password" className="text-xs text-purple-600 hover:underline">
+                  Forgot password?
+                </Link>
+              </div>
             </div>
 
             <button
