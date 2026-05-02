@@ -102,9 +102,7 @@ async function sendVerificationEmail(to, token) {
   }
 }
 
-async function sendPasswordResetEmail(to, token) {
-  const BASE  = process.env.BACKEND_URL || `http://localhost:${process.env.PORT || 5000}`;
-  const link  = `${process.env.FRONTEND_URL || "http://localhost:5173"}/login?token=${token}`;
+async function sendPasswordResetEmail(to, code) {
   const sender = process.env.GMAIL_SENDER || "christianboluntate5@gmail.com";
 
   const htmlBody = `
@@ -112,16 +110,16 @@ async function sendPasswordResetEmail(to, token) {
       <h2 style="color:#6d28d9;margin-bottom:8px">Reset your password</h2>
       <p style="color:#374151;font-size:15px;line-height:1.6">
         We received a request to reset your <strong>SynthCS</strong> password.
-        Click the button below to choose a new one.
+        Enter the code below on the sign-in page to set a new password.
       </p>
-      <a href="${link}"
-         style="display:inline-block;margin:24px 0;padding:12px 28px;background:#7c3aed;color:#fff;
-                border-radius:8px;text-decoration:none;font-weight:600;font-size:14px">
-        Reset Password
-      </a>
+      <div style="margin:24px 0;text-align:center">
+        <span style="display:inline-block;padding:16px 32px;background:#f3f0ff;border:2px solid #7c3aed;
+                     border-radius:12px;font-size:32px;font-weight:700;letter-spacing:8px;color:#6d28d9">
+          ${code}
+        </span>
+      </div>
       <p style="color:#9ca3af;font-size:12px">
-        If you didn't request this, you can safely ignore this email.<br>
-        This link expires in 1 hour.
+        This code expires in 10 minutes. If you didn't request this, you can safely ignore this email.
       </p>
     </div>`;
 
@@ -428,7 +426,7 @@ app.post("/resend-verification", async (req, res) => {
   }
 });
 
-// FORGOT PASSWORD
+// FORGOT PASSWORD — sends 6-digit code
 app.post("/forgot-password", async (req, res) => {
   const { email } = req.body;
   if (!email) return res.status(400).json({ error: "email is required" });
@@ -436,15 +434,15 @@ app.post("/forgot-password", async (req, res) => {
     const result = await pool.query("SELECT * FROM users WHERE email = $1", [email]);
     if (result.rows.length === 0) return res.json({ ok: true }); // don't leak existence
 
-    const token   = crypto.randomUUID();
-    const expires = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+    const code    = Math.floor(100000 + Math.random() * 900000).toString();
+    const expires = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
     await pool.query(
       "UPDATE users SET reset_token = $1, reset_token_expires = $2 WHERE email = $3",
-      [token, expires, email]
+      [code, expires, email]
     );
 
     if (EMAIL_READY) {
-      sendPasswordResetEmail(email, token).catch((e) =>
+      sendPasswordResetEmail(email, code).catch((e) =>
         console.error("Password reset email failed:", e.message)
       );
     }
@@ -455,22 +453,22 @@ app.post("/forgot-password", async (req, res) => {
   }
 });
 
-// RESET PASSWORD
+// RESET PASSWORD — accepts { email, code, password }
 app.post("/reset-password", async (req, res) => {
-  const { token, password } = req.body;
-  if (!token || !password) return res.status(400).json({ error: "token and password are required" });
+  const { email, code, password } = req.body;
+  if (!email || !code || !password) return res.status(400).json({ error: "email, code, and password are required" });
   try {
     const result = await pool.query(
-      "SELECT * FROM users WHERE reset_token = $1 AND reset_token_expires > NOW()",
-      [token]
+      "SELECT * FROM users WHERE email = $1 AND reset_token = $2 AND reset_token_expires > NOW()",
+      [email, code]
     );
     if (result.rows.length === 0)
-      return res.status(400).json({ error: "Invalid or expired reset link" });
+      return res.status(400).json({ error: "Invalid or expired code" });
 
     const hashed = await bcrypt.hash(password, 10);
     await pool.query(
-      "UPDATE users SET password = $1, reset_token = NULL, reset_token_expires = NULL WHERE reset_token = $2",
-      [hashed, token]
+      "UPDATE users SET password = $1, reset_token = NULL, reset_token_expires = NULL WHERE email = $2",
+      [hashed, email]
     );
     res.json({ ok: true });
   } catch (err) {
