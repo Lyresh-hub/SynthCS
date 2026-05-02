@@ -9,7 +9,7 @@ const passport = require("passport");
 const GitHubStrategy = require("passport-github2").Strategy;
 const GoogleStrategy = require("passport-google-oauth20").Strategy;
 const jwt = require("jsonwebtoken");
-// Brevo (transactional email — no SMTP ports needed)
+// Gmail API (sends via HTTPS — no SMTP ports needed)
 const pool = require("./db");
 const Anthropic = require("@anthropic-ai/sdk");
 // const Groq = require("groq-sdk"); // kept for reference
@@ -27,48 +27,78 @@ function isAllowedOrigin(origin) {
   return false;
 }
 
-// ── Email (Brevo HTTP API — no SMTP ports needed) ─────────────────────────────
-const EMAIL_READY = !!process.env.BREVO_API_KEY;
-if (!EMAIL_READY) console.log("⚠️  Email verification disabled — BREVO_API_KEY not set");
+// ── Email (Gmail API over HTTPS — no SMTP ports needed) ──────────────────────
+const EMAIL_READY = !!(process.env.GMAIL_CLIENT_ID && process.env.GMAIL_CLIENT_SECRET && process.env.GMAIL_REFRESH_TOKEN);
+if (!EMAIL_READY) console.log("⚠️  Email verification disabled — Gmail API credentials not set");
+
+async function getGmailAccessToken() {
+  const res = await fetch("https://oauth2.googleapis.com/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      client_id:     process.env.GMAIL_CLIENT_ID,
+      client_secret: process.env.GMAIL_CLIENT_SECRET,
+      refresh_token: process.env.GMAIL_REFRESH_TOKEN,
+      grant_type:    "refresh_token",
+    }),
+  });
+  const data = await res.json();
+  if (!data.access_token) throw new Error("Failed to get Gmail access token: " + JSON.stringify(data));
+  return data.access_token;
+}
 
 async function sendVerificationEmail(to, token) {
-  const BASE = process.env.BACKEND_URL || `http://localhost:${process.env.PORT || 5000}`;
-  const link = `${BASE}/verify-email?token=${token}`;
+  const BASE   = process.env.BACKEND_URL || `http://localhost:${process.env.PORT || 5000}`;
+  const link   = `${BASE}/verify-email?token=${token}`;
+  const sender = process.env.GMAIL_SENDER || "christianboluntate5@gmail.com";
 
-  const res = await fetch("https://api.brevo.com/v3/smtp/email", {
+  const htmlBody = `
+    <div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:32px 24px">
+      <h2 style="color:#6d28d9;margin-bottom:8px">Confirm your email</h2>
+      <p style="color:#374151;font-size:15px;line-height:1.6">
+        Thanks for signing up for <strong>SynthCS</strong>. Click the button below to verify
+        your email address and activate your account.
+      </p>
+      <a href="${link}"
+         style="display:inline-block;margin:24px 0;padding:12px 28px;background:#7c3aed;color:#fff;
+                border-radius:8px;text-decoration:none;font-weight:600;font-size:14px">
+        Verify Email Address
+      </a>
+      <p style="color:#9ca3af;font-size:12px">
+        If you didn't create an account, you can safely ignore this email.<br>
+        This link expires in 24 hours.
+      </p>
+    </div>`;
+
+  const rawEmail = [
+    `From: SynthCS <${sender}>`,
+    `To: ${to}`,
+    `Subject: Verify your SynthCS account`,
+    `MIME-Version: 1.0`,
+    `Content-Type: text/html; charset=UTF-8`,
+    ``,
+    htmlBody,
+  ].join("\r\n");
+
+  const encoded = Buffer.from(rawEmail)
+    .toString("base64")
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
+
+  const accessToken = await getGmailAccessToken();
+  const res = await fetch("https://gmail.googleapis.com/gmail/v1/users/me/messages/send", {
     method: "POST",
     headers: {
-      "api-key": process.env.BREVO_API_KEY,
+      Authorization:  `Bearer ${accessToken}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({
-      sender: { name: "SynthCS", email: process.env.BREVO_SENDER || "202311726@gordoncollege.edu.ph" },
-      to: [{ email: to }],
-      subject: "Verify your SynthCS account",
-      htmlContent: `
-        <div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:32px 24px">
-          <h2 style="color:#6d28d9;margin-bottom:8px">Confirm your email</h2>
-          <p style="color:#374151;font-size:15px;line-height:1.6">
-            Thanks for signing up for <strong>SynthCS</strong>. Click the button below to verify
-            your email address and activate your account.
-          </p>
-          <a href="${link}"
-             style="display:inline-block;margin:24px 0;padding:12px 28px;background:#7c3aed;color:#fff;
-                    border-radius:8px;text-decoration:none;font-weight:600;font-size:14px">
-            Verify Email Address
-          </a>
-          <p style="color:#9ca3af;font-size:12px">
-            If you didn't create an account, you can safely ignore this email.<br>
-            This link expires in 24 hours.
-          </p>
-        </div>
-      `,
-    }),
+    body: JSON.stringify({ raw: encoded }),
   });
 
   if (!res.ok) {
     const body = await res.text();
-    throw new Error(`Brevo error ${res.status}: ${body}`);
+    throw new Error(`Gmail API error ${res.status}: ${body}`);
   }
 }
 
