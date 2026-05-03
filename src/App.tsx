@@ -2,8 +2,9 @@
 import Signup from "./pages/signup";
 import Login from "./pages/Login";
 import AuthCallback from "./pages/AuthCallback";
-import { Switch, Route, Router } from "wouter"; // ito yung ginagamit namin para sa routing
-import { useState, useCallback, useEffect } from "react";
+import { Switch, Route, Router } from "wouter";
+import { memoryLocation } from "wouter/memory-location"; // routing sa memory — URL bar palaging domain lang
+import { useEffect } from "react";
 import Layout from "./components/Layout";
 import AdminLayout from "./components/AdminLayout";
 import Dashboard from "./pages/Dashboard";
@@ -17,26 +18,9 @@ import UserAccounts from "./pages/UserAccounts";
 import AdminPanel from "./pages/AdminPanel";
 import AdminUsers from "./pages/AdminUsers";
 
-// Custom location hook — ang route ay naka-imbak sa memory lang, hindi makikita sa URL bar
-// Kaya palaging "synthcs.site" lang ang makikita, kahit anong page ka pumunta
-function useHiddenLocation(): [string, (to: string) => void] {
-  const [path, setPath] = useState(() => {
-    return sessionStorage.getItem("app_path") || "/";
-  });
-
-  // Agad itago ang path sa URL bar kahit sa unang pagkakataon na mag-load ang page
-  useEffect(() => {
-    window.history.replaceState(null, "", "/");
-  }, []);
-
-  const navigate = useCallback((to: string) => {
-    setPath(to);
-    sessionStorage.setItem("app_path", to);
-    window.history.replaceState(null, "", "/"); // palaging "/" lang ang makikita sa URL bar
-  }, []);
-
-  return [path, navigate];
-}
+// Ginagawa natin ang memory-based router — routes ay naka-store sa memory, hindi sa URL
+// Kaya palaging "synthcs.site" lang ang makikita sa address bar kahit saan ka pumunta
+const { hook } = memoryLocation({ path: "/" });
 
 // Ito yung lalabas kapag pumunta ang user sa URL na hindi namin kilala
 function NotFound() {
@@ -47,17 +31,18 @@ function NotFound() {
       <p className="text-sm text-gray-500 mb-5">
         The page you're looking for doesn't exist.
       </p>
-      <a href="/" className="px-4 py-2 bg-purple-600 text-white rounded-md text-sm font-medium hover:bg-purple-700 transition-colors">
-        Go to Dashboard
-      </a>
     </div>
   );
 }
 
 export default function App() {
+  // Sa bawat render, tinatago natin ang URL para palaging domain lang ang makikita
+  useEffect(() => {
+    window.history.replaceState(null, "", "/");
+  });
+
   return (
-    // Ginagamit natin ang custom hook — URL bar ay palaging "synthcs.site" lang, walang makikitang path
-    <Router hook={useHiddenLocation}>
+    <Router hook={hook}>
       <Switch>
         {/* Mga public routes — pwedeng i-access kahit hindi naka-login */}
         <Route path="/" component={Signup} />
