@@ -19,7 +19,10 @@ const signupSchema = z
   .object({
     firstName: z.string().min(2, "First name must be at least 2 characters"),
     lastName:  z.string().min(2, "Last name must be at least 2 characters"),
-    email: z.string().email("Please enter a valid email address"),
+    email: z.string().email("Please enter a valid email address")
+      .refine((e) => e.endsWith("@gordoncollege.edu.ph"), {
+        message: "Only Gordon College email addresses (@gordoncollege.edu.ph) are allowed.",
+      }),
     password: z.string()
       .min(8,          "Password must be at least 8 characters")
       .regex(/[A-Z]/,  "Password must contain at least one uppercase letter")

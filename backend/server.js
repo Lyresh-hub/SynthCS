@@ -362,6 +362,11 @@ async function requireAdmin(req, res, next) {
 
 // ── Routes ────────────────────────────────────────────────────────────────────
 
+// Helper para i-check kung Gordon College email ang ginamit
+function isAllowedEmail(email) {
+  return typeof email === "string" && email.endsWith("@gordoncollege.edu.ph");
+}
+
 app.get("/", (_req, res) => res.json({ status: "Backend running" }));
 
 // SIGNUP (email + password)
@@ -370,6 +375,8 @@ app.post("/signup", async (req, res) => {
     const { first_name, last_name, email, password } = req.body;
     if (!first_name || !last_name || !email || !password)
       return res.status(400).json({ error: "first_name, last_name, email, and password are required" });
+    if (!isAllowedEmail(email))
+      return res.status(403).json({ error: "Only Gordon College email addresses (@gordoncollege.edu.ph) are allowed." });
 
     const full_name = `${first_name} ${last_name}`.trim();
     const hashed = await bcrypt.hash(password, 10);
@@ -496,6 +503,8 @@ app.post("/login", async (req, res) => {
     const { email, password } = req.body;
     if (!email || !password)
       return res.status(400).json({ error: "email and password are required" });
+    if (!isAllowedEmail(email))
+      return res.status(403).json({ error: "Only Gordon College email addresses (@gordoncollege.edu.ph) are allowed." });
 
     const result = await pool.query("SELECT * FROM users WHERE email = $1", [email]);
     if (result.rows.length === 0)
