@@ -203,7 +203,7 @@ export default function SchemaBuilder() {
           id:           `llm${i}`,
           name:         f.name,
           type:         f.type,
-          null_rate:    typeof f.null_rate === "number" ? f.null_rate : 0,
+          null_rate:    typeof f.null_rate === "number" ? Math.round(Math.min(50, Math.max(0, f.null_rate))) : 0,
           originalName: f.name,
           originalType: f.type,
           description:  f.description ?? "",
