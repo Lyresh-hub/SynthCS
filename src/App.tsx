@@ -2,7 +2,7 @@
 import Signup from "./pages/signup";
 import Login from "./pages/Login";
 import AuthCallback from "./pages/AuthCallback";
-import { Switch, Route, Router } from "wouter";
+import { Switch, Route, Router, useLocation } from "wouter";
 // memoryLocation — ito yung puso ng URL hiding feature natin.
 // Normally, ang wouter ay nagba-base sa browser URL (e.g. synthcs.site/downloads) para malaman
 // kung anong page ang ipapakita. Pero with memoryLocation, ang current page ay naka-store
@@ -29,6 +29,8 @@ import AdminUsers from "./pages/AdminUsers";
 // "synthcs.site/login?verified=1" — kailangan nating ma-detect ito bago maitago ng replaceState.
 // Kapag may nahanap na params, dinadala natin ang user sa tamang page (login, signup, etc.)
 // instead na palagi na lang sa "/" (signup page).
+// Kung naka-login ang user at may naandang page sa sessionStorage (hal. nag-refresh),
+// dinadala siya pabalik doon instead na sa signup.
 function getInitialPath() {
   const params = new URLSearchParams(window.location.search);
   if (params.get("verified"))    return `/login?verified=1`;
@@ -38,7 +40,23 @@ function getInitialPath() {
     const base  = `/login?error=${encodeURIComponent(params.get("error")!)}`;
     return email ? `${base}&email=${encodeURIComponent(email)}` : base;
   }
+  const userId   = localStorage.getItem("user_id");
+  const lastPath = sessionStorage.getItem("last_path");
+  if (userId && lastPath) return lastPath;
   return "/";
+}
+
+// Naka-loob sa Router para ma-access ang memory location — sine-save ang current page
+// sa sessionStorage para kapag nag-refresh ang user, mabalik siya sa tamang page.
+const PUBLIC_PATHS = new Set(["/", "/login", "/auth/callback"]);
+function LocationPersist() {
+  const [location] = useLocation();
+  useEffect(() => {
+    if (localStorage.getItem("user_id") && !PUBLIC_PATHS.has(location)) {
+      sessionStorage.setItem("last_path", location);
+    }
+  }, [location]);
+  return null;
 }
 
 const { hook } = memoryLocation({ path: getInitialPath() });
@@ -71,6 +89,7 @@ export default function App() {
     // Dito pinasok natin ang memory hook sa Router — ito na ang mag-hahandle ng lahat ng navigation
     // sa loob ng app. Kahit mag-click ka ng link o mag-submit ng form, sa memory nangyayari lahat.
     <Router hook={hook}>
+      <LocationPersist />
       <Switch>
         {/* Mga public routes — pwedeng i-access kahit hindi naka-login */}
         <Route path="/" component={Signup} />
