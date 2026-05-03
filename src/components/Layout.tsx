@@ -14,7 +14,7 @@ const navItems = [
   { label: "Downloads",     icon: Download,        href: "/downloads" },
 ];
 
-// Ginagawa natin yung dalawang initials galing sa buong pangalan — hal. "Juan dela Cruz" → "JD"
+// Ginagawa natin yung dalawang initials galing sa buong pangalan — hal. "Juan dela Cruz" = "JD"
 function getInitials(name: string) {
   return name.split(" ").map((w) => w[0]).join("").slice(0, 2).toUpperCase();
 }
@@ -113,7 +113,6 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                 <div className={cn("text-xs font-medium truncate", isAccountPage ? "text-purple-700" : "text-gray-800")}>
                   {userName}
                 </div>
-                <div className="text-[10px] text-gray-400">Free Plan</div>
               </div>
               <Settings className={cn("w-3 h-3 flex-shrink-0", isAccountPage ? "text-purple-500" : "text-gray-400")} />
             </div>
