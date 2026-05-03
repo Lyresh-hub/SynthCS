@@ -27,6 +27,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     localStorage.removeItem("user_id");
     localStorage.removeItem("user_name");
     localStorage.removeItem("is_admin");
+    localStorage.removeItem("last_path");
     setLocation("/login");
   }
 
