@@ -43,6 +43,9 @@ export default function Login() {
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [resetError, setResetError]             = useState("");
   const [resetLoading, setResetLoading]         = useState(false);
+  // codeVerified — true kapag na-confirm na ang code, pwede na mag-type ng bagong password
+  const [codeVerified, setCodeVerified]         = useState(false);
+  const [verifyLoading, setVerifyLoading]       = useState(false);
 
   // Timer para sa OTP — 60 segundo lang bago mag-expire ang code
   const [timer, setTimer]           = useState(60);
@@ -99,6 +102,26 @@ export default function Login() {
       setForgotError("Could not reach the server. Try again.");
     } finally {
       setForgotLoading(false);
+    }
+  };
+
+  const onVerifyCode = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setResetError("");
+    setVerifyLoading(true);
+    try {
+      const res  = await fetch(`${BACKEND}/verify-reset-code`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: forgotEmail, code: resetCode }),
+      });
+      const json = await res.json();
+      if (!res.ok) return setResetError(json.error ?? "Invalid or expired code.");
+      setCodeVerified(true);
+    } catch {
+      setResetError("Could not reach the server. Try again.");
+    } finally {
+      setVerifyLoading(false);
     }
   };
 
@@ -161,6 +184,7 @@ export default function Login() {
       });
       setResetCode("");
       setCodeExpired(false);
+      setCodeVerified(false);
       setResendMsg("New code sent! Check your email.");
       setTimer(60);
       timerRef.current = setInterval(() => {
@@ -182,13 +206,16 @@ export default function Login() {
 
   const leftTitle = view === "login" ? "Welcome back"
     : view === "forgot" ? "Reset password"
+    : codeVerified ? "Set new password"
     : "Enter your code";
 
   const leftSub = view === "login"
     ? "Sign in to access your synthetic datasets, schemas, and generation history."
     : view === "forgot"
     ? "Enter your email and we'll send you a 6-digit reset code."
-    : "Check your email for the 6-digit code and enter your new password below.";
+    : codeVerified
+    ? "Code verified. Now set your new password."
+    : "Check your email for the 6-digit code. You'll set your new password after.";
 
   return (
     <div className="min-h-screen flex">
@@ -310,17 +337,17 @@ export default function Login() {
             </>
           )}
 
-          {/* ── Forgot: enter code + new password ── */}
-          {view === "forgot-code" && (
+          {/* ── Forgot: enter code (step 1) ── */}
+          {view === "forgot-code" && !codeVerified && (
             <>
-              <button onClick={() => setView("forgot")}
+              <button onClick={() => { setView("forgot"); setCodeVerified(false); setResetCode(""); setResetError(""); }}
                 className="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700 mb-6">
                 <ArrowLeft className="h-4 w-4" /> Back
               </button>
               <div className="mb-6">
                 <h2 className="text-2xl font-bold text-gray-900">Enter your code</h2>
                 <p className="text-sm text-gray-500 mt-1">
-                  We sent a 6-digit code to <strong>{forgotEmail}</strong>. Enter it below along with your new password.
+                  We sent a 6-digit code to <strong>{forgotEmail}</strong>. Enter it to continue.
                 </p>
               </div>
               {resetError && (
@@ -328,9 +355,9 @@ export default function Login() {
                   {resetError}
                 </div>
               )}
-              {/* Timer display — nagpapakita kung ilang segundo na lang bago mag-expire */}
+              {/* Timer — nagpapakita kung ilang segundo na lang bago mag-expire ang code */}
               <div className={`flex items-center justify-between text-sm mb-3 px-1 ${codeExpired ? "text-red-500" : "text-gray-500"}`}>
-                <span>{codeExpired ? "Code expired." : `Code expires in:`}</span>
+                <span>{codeExpired ? "Code expired." : "Code expires in:"}</span>
                 {!codeExpired && (
                   <span className={`font-mono font-bold ${timer <= 10 ? "text-red-500" : "text-purple-600"}`}>
                     0:{timer.toString().padStart(2, "0")}
@@ -338,7 +365,7 @@ export default function Login() {
                 )}
               </div>
 
-              {/* Resend button — lalabas lang kapag expired na ang code */}
+              {/* Resend — lalabas lang kapag expired na */}
               {codeExpired && (
                 <button type="button" onClick={handleResend} disabled={resendLoading}
                   className="w-full mb-3 py-2 border border-purple-300 text-purple-600 rounded-lg text-sm font-medium hover:bg-purple-50 disabled:opacity-50 transition-colors">
@@ -352,7 +379,7 @@ export default function Login() {
                 </div>
               )}
 
-              <form onSubmit={onReset} className="space-y-4">
+              <form onSubmit={onVerifyCode} className="space-y-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">6-Digit Code</label>
                   <input type="text" required maxLength={6} value={resetCode}
@@ -361,6 +388,35 @@ export default function Login() {
                     disabled={codeExpired}
                     className={`w-full border rounded-lg px-3 py-2 text-sm text-center tracking-[0.5em] font-mono text-lg focus:outline-none focus:ring-2 focus:ring-purple-500 ${codeExpired ? "border-red-200 bg-red-50 text-red-300" : "border-gray-200"}`} />
                 </div>
+                <button type="submit" disabled={verifyLoading || codeExpired || resetCode.length < 6}
+                  className="w-full bg-purple-600 hover:bg-purple-700 disabled:opacity-60 text-white font-semibold py-2.5 rounded-lg text-sm transition-colors">
+                  {verifyLoading ? "Verifying…" : "Verify Code"}
+                </button>
+              </form>
+            </>
+          )}
+
+          {/* ── Forgot: set new password (step 2 — lalabas lang kapag verified na ang code) ── */}
+          {view === "forgot-code" && codeVerified && (
+            <>
+              <div className="mb-6">
+                <div className="flex items-center gap-2 mb-1">
+                  <div className="w-5 h-5 rounded-full bg-green-100 flex items-center justify-center">
+                    <svg className="w-3 h-3 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                    </svg>
+                  </div>
+                  <span className="text-sm text-green-600 font-medium">Code verified</span>
+                </div>
+                <h2 className="text-2xl font-bold text-gray-900">Set new password</h2>
+                <p className="text-sm text-gray-500 mt-1">Choose a strong password for your account.</p>
+              </div>
+              {resetError && (
+                <div className="mb-4 px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-sm text-red-600">
+                  {resetError}
+                </div>
+              )}
+              <form onSubmit={onReset} className="space-y-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">New Password</label>
                   <div className="relative">
@@ -385,7 +441,7 @@ export default function Login() {
                     </button>
                   </div>
                 </div>
-                <button type="submit" disabled={resetLoading || codeExpired}
+                <button type="submit" disabled={resetLoading}
                   className="w-full bg-purple-600 hover:bg-purple-700 disabled:opacity-60 text-white font-semibold py-2.5 rounded-lg text-sm transition-colors">
                   {resetLoading ? "Saving…" : "Reset Password"}
                 </button>
