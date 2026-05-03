@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { useLocation, Link, useRoute } from "wouter";
 import {
   LayoutDashboard, Layers, Download,
-  Bell, Plus, Zap, FileJson, Settings,
+  Bell, Plus, FileJson, Settings,
 } from "lucide-react";
 import { cn } from "../lib/utils";
 
@@ -61,15 +61,13 @@ export default function Layout({ children }: { children: React.ReactNode }) {
         {/* Logo — may easter egg na nakatago dito (5 clicks = admin) */}
         <div className="flex items-center gap-2.5 px-4 py-4 border-b border-gray-100 cursor-pointer select-none"
              onClick={handleLogoClick}>
-          <div className="w-8 h-8 rounded-lg bg-purple-600 flex items-center justify-center">
-            <Zap className="w-4 h-4 text-white" />
-          </div>
+          <img src="/synthcs-logo.png" alt="SynthCS" className="w-8 h-8 rounded-lg object-cover" />
           <div className="leading-tight">
             <div className="text-sm font-bold text-gray-900">SynthCS</div>
             {/* Kapag nag-click na, nagpapakita ng countdown para malaman ng user */}
-            <div className="text-[10px] text-gray-400">
-              {logoClicks > 0 ? `${5 - logoClicks} more…` : "Data Generator"}
-            </div>
+            {logoClicks > 0 && (
+              <div className="text-[10px] text-gray-400">{5 - logoClicks} more…</div>
+            )}
           </div>
         </div>
 
