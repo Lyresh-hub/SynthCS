@@ -3,7 +3,13 @@ import Signup from "./pages/signup";
 import Login from "./pages/Login";
 import AuthCallback from "./pages/AuthCallback";
 import { Switch, Route, Router } from "wouter";
-import { memoryLocation } from "wouter/memory-location"; // routing sa memory — URL bar palaging domain lang
+// memoryLocation — ito yung puso ng URL hiding feature natin.
+// Normally, ang wouter ay nagba-base sa browser URL (e.g. synthcs.site/downloads) para malaman
+// kung anong page ang ipapakita. Pero with memoryLocation, ang current page ay naka-store
+// sa MEMORY ng browser (hindi sa URL) — kaya kahit mag-navigate ka sa Downloads o Dashboard,
+// ang URL bar ay hindi magbabago. Ito yung ginagamit ng malalaking apps para itago ang routes.
+import { memoryLocation } from "wouter/memory-location";
+// useEffect — ginagamit natin ito para mag-execute ng code pagkatapos mag-render ng component
 import { useEffect } from "react";
 import Layout from "./components/Layout";
 import AdminLayout from "./components/AdminLayout";
@@ -18,8 +24,10 @@ import UserAccounts from "./pages/UserAccounts";
 import AdminPanel from "./pages/AdminPanel";
 import AdminUsers from "./pages/AdminUsers";
 
-// Ginagawa natin ang memory-based router — routes ay naka-store sa memory, hindi sa URL
-// Kaya palaging "synthcs.site" lang ang makikita sa address bar kahit saan ka pumunta
+// Dito natin ginagawa ang memory-based router.
+// Ang { path: "/" } ay sinasabi nating simulan sa root page (signup) kapag nag-open ng app.
+// Yung "hook" na lalabas dito ay yung custom na function na gagamitin ng Router
+// para malaman kung anong page ang kasalukuyang binubuksan — pero sa memory na, hindi sa URL.
 const { hook } = memoryLocation({ path: "/" });
 
 // Ito yung lalabas kapag pumunta ang user sa URL na hindi namin kilala
@@ -36,12 +44,19 @@ function NotFound() {
 }
 
 export default function App() {
-  // Sa bawat render, tinatago natin ang URL para palaging domain lang ang makikita
+  // Ito yung pangalawang bahagi ng URL hiding.
+  // Kahit naka-memory routing na tayo, may pagkakataon pa rin na mag-appear ang path sa URL bar
+  // (hal. kapag may redirect galing sa OAuth o sa ibang external source).
+  // Kaya sa bawat render ng App, pinipilit nating palitan ang URL ng "/" lang
+  // gamit ang window.history.replaceState — para siguradong domain lang palagi ang makikita.
+  // replaceState ay hindi nag-re-reload ng page — bina-"baluktot" lang niya ang URL bar.
   useEffect(() => {
     window.history.replaceState(null, "", "/");
   });
 
   return (
+    // Dito pinasok natin ang memory hook sa Router — ito na ang mag-hahandle ng lahat ng navigation
+    // sa loob ng app. Kahit mag-click ka ng link o mag-submit ng form, sa memory nangyayari lahat.
     <Router hook={hook}>
       <Switch>
         {/* Mga public routes — pwedeng i-access kahit hindi naka-login */}
