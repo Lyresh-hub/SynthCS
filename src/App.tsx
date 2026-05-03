@@ -3,7 +3,7 @@ import Signup from "./pages/signup";
 import Login from "./pages/Login";
 import AuthCallback from "./pages/AuthCallback";
 import { Switch, Route, Router } from "wouter"; // ito yung ginagamit namin para sa routing
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import Layout from "./components/Layout";
 import AdminLayout from "./components/AdminLayout";
 import Dashboard from "./pages/Dashboard";
@@ -21,14 +21,18 @@ import AdminUsers from "./pages/AdminUsers";
 // Kaya palaging "synthcs.site" lang ang makikita, kahit anong page ka pumunta
 function useHiddenLocation(): [string, (to: string) => void] {
   const [path, setPath] = useState(() => {
-    // Kunin ang path na naka-store sa sessionStorage para hindi mawala sa refresh
     return sessionStorage.getItem("app_path") || "/";
   });
 
+  // Agad itago ang path sa URL bar kahit sa unang pagkakataon na mag-load ang page
+  useEffect(() => {
+    window.history.replaceState(null, "", "/");
+  }, []);
+
   const navigate = useCallback((to: string) => {
     setPath(to);
-    sessionStorage.setItem("app_path", to); // i-save para hindi mawala kapag nag-click sa ibang bagay
-    window.history.replaceState(null, "", "/"); // panatilihing "/" lang ang makikita sa URL bar
+    sessionStorage.setItem("app_path", to);
+    window.history.replaceState(null, "", "/"); // palaging "/" lang ang makikita sa URL bar
   }, []);
 
   return [path, navigate];
