@@ -59,15 +59,21 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       {/* Sidebar */}
       <aside className="w-56 flex-shrink-0 border-r border-gray-200 bg-white flex flex-col">
         {/* Logo — may easter egg na nakatago dito (5 clicks = admin) */}
-        <div className="flex items-center gap-2.5 px-4 py-4 border-b border-gray-100 cursor-pointer select-none"
-             onClick={handleLogoClick}>
-          <img src="/synthcs-logo.png" alt="SynthCS" className="w-8 h-8 rounded-lg object-cover" />
+        <div
+          className="flex items-center gap-3 px-4 py-3.5 cursor-pointer select-none border-b border-gray-100 bg-gradient-to-r from-purple-50 to-white"
+          onClick={handleLogoClick}
+        >
+          <div className="relative flex-shrink-0">
+            <div className="absolute inset-0 rounded-xl bg-purple-400/20 blur-sm" />
+            <img src="/synthcs-logo.png" alt="SynthCS" className="relative w-9 h-9 rounded-xl object-cover shadow-sm ring-1 ring-purple-200" />
+          </div>
           <div className="leading-tight">
-            <div className="text-sm font-bold text-gray-900">SynthCS</div>
-            {/* Kapag nag-click na, nagpapakita ng countdown para malaman ng user */}
-            {logoClicks > 0 && (
-              <div className="text-[10px] text-gray-400">{5 - logoClicks} more…</div>
-            )}
+            <div className="text-sm font-extrabold tracking-tight bg-gradient-to-r from-purple-700 to-violet-500 bg-clip-text text-transparent">
+              SynthCS
+            </div>
+            <div className="text-[9px] font-medium text-purple-400/70 tracking-widest uppercase">
+              {logoClicks > 0 ? `${5 - logoClicks} more…` : "Data Generator"}
+            </div>
           </div>
         </div>
 
