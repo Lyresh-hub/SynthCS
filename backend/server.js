@@ -200,8 +200,9 @@ async function initDB() {
     await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified     BOOLEAN DEFAULT FALSE`).catch(() => {});
     await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS verification_token VARCHAR(255)`).catch(() => {});
     await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin           BOOLEAN DEFAULT FALSE`).catch(() => {});
-    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_token         VARCHAR(255)`).catch(() => {});
-    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_token_expires TIMESTAMP`).catch(() => {});
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_token                  VARCHAR(255)`).catch(() => {});
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_token_expires          TIMESTAMP`).catch(() => {});
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS verification_token_expires   TIMESTAMPTZ`).catch(() => {});
     await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS first_name VARCHAR(100)`).catch(() => {});
     await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_name  VARCHAR(100) NOT NULL DEFAULT ''`).catch(() => {});
     // Migrate existing full_name data into first_name / last_name
@@ -383,9 +384,9 @@ app.post("/signup", async (req, res) => {
     const token  = crypto.randomUUID();
 
     const result = await pool.query(
-      `INSERT INTO users (first_name, last_name, full_name, email, password, email_verified, verification_token)
-       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id, first_name, last_name, full_name, email, created_at`,
-      [first_name, last_name, full_name, email, hashed, !EMAIL_READY, EMAIL_READY ? token : null]
+      `INSERT INTO users (first_name, last_name, full_name, email, password, email_verified, verification_token, verification_token_expires)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id, first_name, last_name, full_name, email, created_at`,
+      [first_name, last_name, full_name, email, hashed, !EMAIL_READY, EMAIL_READY ? token : null, EMAIL_READY ? new Date(Date.now() + 24 * 60 * 60 * 1000) : null]
     );
     const user = result.rows[0];
 
@@ -410,13 +411,25 @@ app.get("/verify-email", async (req, res) => {
   const { token } = req.query;
   if (!token) return res.redirect(`${FRONTEND_URL}/login?error=invalid_token`);
   try {
-    const result = await pool.query(
-      `UPDATE users SET email_verified = TRUE, verification_token = NULL
-       WHERE verification_token = $1 RETURNING id`,
+    // Find the user with this token first, regardless of expiry
+    const found = await pool.query(
+      "SELECT * FROM users WHERE verification_token = $1",
       [token]
     );
-    if (result.rowCount === 0)
+    if (found.rows.length === 0)
       return res.redirect(`${FRONTEND_URL}/login?error=invalid_token`);
+
+    const user = found.rows[0];
+
+    // If token is expired, redirect with the user's email so frontend can pre-fill the resend form
+    if (user.verification_token_expires && new Date(user.verification_token_expires) < new Date())
+      return res.redirect(`${FRONTEND_URL}/login?error=expired_token&email=${encodeURIComponent(user.email)}`);
+
+    // Valid — verify the account
+    await pool.query(
+      "UPDATE users SET email_verified = TRUE, verification_token = NULL, verification_token_expires = NULL WHERE id = $1",
+      [user.id]
+    );
     res.redirect(`${FRONTEND_URL}/login?verified=1`);
   } catch (err) {
     console.error("Verify email error:", err.message);
@@ -436,8 +449,12 @@ app.post("/resend-verification", async (req, res) => {
     const user = result.rows[0];
     if (user.email_verified) return res.json({ ok: true });
 
-    const token = crypto.randomUUID();
-    await pool.query("UPDATE users SET verification_token = $1 WHERE id = $2", [token, user.id]);
+    const token   = crypto.randomUUID();
+    const expires = new Date(Date.now() + 24 * 60 * 60 * 1000);
+    await pool.query(
+      "UPDATE users SET verification_token = $1, verification_token_expires = $2 WHERE id = $3",
+      [token, expires, user.id]
+    );
     await sendVerificationEmail(email, token);
     res.json({ ok: true });
   } catch (err) {

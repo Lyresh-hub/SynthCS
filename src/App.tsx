@@ -33,7 +33,11 @@ function getInitialPath() {
   const params = new URLSearchParams(window.location.search);
   if (params.get("verified"))    return `/login?verified=1`;
   if (params.get("oauth_error")) return `/?oauth_error=${encodeURIComponent(params.get("oauth_error")!)}`;
-  if (params.get("error"))       return `/login?error=${encodeURIComponent(params.get("error")!)}`;
+  if (params.get("error")) {
+    const email = params.get("email");
+    const base  = `/login?error=${encodeURIComponent(params.get("error")!)}`;
+    return email ? `${base}&email=${encodeURIComponent(email)}` : base;
+  }
   return "/";
 }
 

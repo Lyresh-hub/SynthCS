@@ -19,7 +19,8 @@ type LoginFormValues = z.infer<typeof loginSchema>;
 // forgot → user enters email
 // forgot-code → user enters 6-digit code + new password
 // login → normal sign-in
-type View = "login" | "forgot" | "forgot-code";
+// expired-link → verification link expired, user can request a new one
+type View = "login" | "forgot" | "forgot-code" | "expired-link";
 
 export default function Login() {
   const [, setLocation] = useLocation();
@@ -29,6 +30,11 @@ export default function Login() {
   const [successMsg, setSuccessMsg]   = useState("");
   const [isPending, setIsPending]     = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+
+  // expired-link view
+  const [expiredEmail, setExpiredEmail]             = useState("");
+  const [expiredIsInvalid, setExpiredIsInvalid]     = useState(false);
+  const [resendExpiredStatus, setResendExpiredStatus] = useState<"idle"|"sending"|"sent">("idle");
 
   // forgot step 1
   const [forgotEmail, setForgotEmail]     = useState("");
@@ -58,6 +64,13 @@ export default function Login() {
     const params = new URLSearchParams(window.location.search);
     if (params.get("oauth_error")) setServerError(decodeURIComponent(params.get("oauth_error")!));
     if (params.get("verified") === "1") setSuccessMsg("Email verified! You can now sign in.");
+    const error = params.get("error");
+    if (error === "expired_token" || error === "invalid_token") {
+      setExpiredIsInvalid(error === "invalid_token");
+      const emailParam = params.get("email");
+      if (emailParam) setExpiredEmail(decodeURIComponent(emailParam));
+      setView("expired-link");
+    }
   }, []);
 
   const { register, handleSubmit, formState: { errors } } = useForm<LoginFormValues>({
@@ -206,6 +219,7 @@ export default function Login() {
 
   const leftTitle = view === "login" ? "Welcome back"
     : view === "forgot" ? "Reset password"
+    : view === "expired-link" ? "Verification link"
     : codeVerified ? "Set new password"
     : "Enter your code";
 
@@ -213,6 +227,8 @@ export default function Login() {
     ? "Sign in to access your synthetic datasets, schemas, and generation history."
     : view === "forgot"
     ? "Enter your email and we'll send you a 6-digit reset code."
+    : view === "expired-link"
+    ? "Your verification link has expired. Request a new one to activate your account."
     : codeVerified
     ? "Code verified. Now set your new password."
     : "Check your email for the 6-digit code. You'll set your new password after.";
@@ -446,6 +462,68 @@ export default function Login() {
                   {resetLoading ? "Saving…" : "Reset Password"}
                 </button>
               </form>
+            </>
+          )}
+
+          {/* ── Expired / invalid verification link ── */}
+          {view === "expired-link" && (
+            <>
+              <div className="flex flex-col items-center text-center mb-6">
+                <div className="w-14 h-14 rounded-full bg-amber-100 flex items-center justify-center text-2xl mb-4">
+                  ⏰
+                </div>
+                <h2 className="text-2xl font-bold text-gray-900">
+                  {expiredIsInvalid ? "Invalid link" : "Link expired"}
+                </h2>
+                <p className="text-sm text-gray-500 mt-2 max-w-sm leading-relaxed">
+                  {expiredIsInvalid
+                    ? "This verification link is invalid or has already been used."
+                    : "This verification link has expired. Links are only valid for 24 hours."}
+                  {" "}Enter your email below to receive a new one.
+                </p>
+              </div>
+
+              {resendExpiredStatus === "sent" ? (
+                <div className="px-4 py-3 bg-green-50 border border-green-200 rounded-xl text-sm text-green-700 text-center">
+                  New verification link sent! Check your inbox.
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Email Address</label>
+                    <input
+                      type="email"
+                      value={expiredEmail}
+                      onChange={(e) => setExpiredEmail(e.target.value)}
+                      placeholder="john@gordoncollege.edu.ph"
+                      className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
+                    />
+                  </div>
+                  <button
+                    onClick={async () => {
+                      if (!expiredEmail) return;
+                      setResendExpiredStatus("sending");
+                      await fetch(`${BACKEND}/resend-verification`, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ email: expiredEmail }),
+                      }).catch(() => {});
+                      setResendExpiredStatus("sent");
+                    }}
+                    disabled={resendExpiredStatus === "sending" || !expiredEmail}
+                    className="w-full bg-purple-600 hover:bg-purple-700 disabled:opacity-60 text-white font-semibold py-2.5 rounded-lg text-sm transition-colors"
+                  >
+                    {resendExpiredStatus === "sending" ? "Sending…" : "Resend Verification Email"}
+                  </button>
+                </div>
+              )}
+
+              <p className="mt-5 text-center text-sm text-gray-400">
+                Already verified?{" "}
+                <button onClick={() => setView("login")} className="text-purple-600 font-medium hover:underline">
+                  Sign in
+                </button>
+              </p>
             </>
           )}
 
