@@ -455,7 +455,7 @@ app.post("/forgot-password", async (req, res) => {
     if (result.rows.length === 0) return res.json({ ok: true }); // don't leak existence
 
     const code    = Math.floor(100000 + Math.random() * 900000).toString();
-    const expires = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+    const expires = new Date(Date.now() + 1 * 60 * 1000); // 1 minute — same as frontend timer
     await pool.query(
       "UPDATE users SET reset_token = $1, reset_token_expires = $2 WHERE email = $3",
       [code, expires, email]

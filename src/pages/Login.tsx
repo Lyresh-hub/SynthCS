@@ -1,4 +1,4 @@
-﻿import { useState, useEffect } from "react";
+﻿import { useState, useEffect, useRef } from "react";
 import { useLocation, Link } from "wouter";
 import { z } from "zod";
 import { useForm } from "react-hook-form";
@@ -43,6 +43,13 @@ export default function Login() {
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [resetError, setResetError]             = useState("");
   const [resetLoading, setResetLoading]         = useState(false);
+
+  // Timer para sa OTP — 60 segundo lang bago mag-expire ang code
+  const [timer, setTimer]           = useState(60);
+  const [codeExpired, setCodeExpired] = useState(false);
+  const [resendLoading, setResendLoading] = useState(false);
+  const [resendMsg, setResendMsg]     = useState("");
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -119,6 +126,57 @@ export default function Login() {
       setResetError("Could not reach the server. Try again.");
     } finally {
       setResetLoading(false);
+    }
+  };
+
+  // Kapag pumunta sa "forgot-code" view, simulan ang 60-segundo countdown
+  useEffect(() => {
+    if (view !== "forgot-code") return;
+    setTimer(60);
+    setCodeExpired(false);
+    setResendMsg("");
+    timerRef.current = setInterval(() => {
+      setTimer((t) => {
+        if (t <= 1) {
+          clearInterval(timerRef.current!);
+          setCodeExpired(true);
+          return 0;
+        }
+        return t - 1;
+      });
+    }, 1000);
+    return () => clearInterval(timerRef.current!);
+  }, [view]);
+
+  // Kapag nag-request ng bagong code, i-reset ang timer at i-resend ang email
+  const handleResend = async () => {
+    setResendLoading(true);
+    setResendMsg("");
+    setResetError("");
+    try {
+      await fetch(`${BACKEND}/forgot-password`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: forgotEmail }),
+      });
+      setResetCode("");
+      setCodeExpired(false);
+      setResendMsg("New code sent! Check your email.");
+      setTimer(60);
+      timerRef.current = setInterval(() => {
+        setTimer((t) => {
+          if (t <= 1) {
+            clearInterval(timerRef.current!);
+            setCodeExpired(true);
+            return 0;
+          }
+          return t - 1;
+        });
+      }, 1000);
+    } catch {
+      setResetError("Could not resend. Try again.");
+    } finally {
+      setResendLoading(false);
     }
   };
 
@@ -270,13 +328,38 @@ export default function Login() {
                   {resetError}
                 </div>
               )}
+              {/* Timer display — nagpapakita kung ilang segundo na lang bago mag-expire */}
+              <div className={`flex items-center justify-between text-sm mb-3 px-1 ${codeExpired ? "text-red-500" : "text-gray-500"}`}>
+                <span>{codeExpired ? "Code expired." : `Code expires in:`}</span>
+                {!codeExpired && (
+                  <span className={`font-mono font-bold ${timer <= 10 ? "text-red-500" : "text-purple-600"}`}>
+                    0:{timer.toString().padStart(2, "0")}
+                  </span>
+                )}
+              </div>
+
+              {/* Resend button — lalabas lang kapag expired na ang code */}
+              {codeExpired && (
+                <button type="button" onClick={handleResend} disabled={resendLoading}
+                  className="w-full mb-3 py-2 border border-purple-300 text-purple-600 rounded-lg text-sm font-medium hover:bg-purple-50 disabled:opacity-50 transition-colors">
+                  {resendLoading ? "Sending…" : "Resend New Code"}
+                </button>
+              )}
+
+              {resendMsg && (
+                <div className="mb-3 px-3 py-2 bg-green-50 border border-green-200 rounded-lg text-sm text-green-700">
+                  {resendMsg}
+                </div>
+              )}
+
               <form onSubmit={onReset} className="space-y-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">6-Digit Code</label>
                   <input type="text" required maxLength={6} value={resetCode}
                     onChange={(e) => setResetCode(e.target.value.replace(/\D/g, ""))}
                     placeholder="000000"
-                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-center tracking-[0.5em] font-mono text-lg focus:outline-none focus:ring-2 focus:ring-purple-500" />
+                    disabled={codeExpired}
+                    className={`w-full border rounded-lg px-3 py-2 text-sm text-center tracking-[0.5em] font-mono text-lg focus:outline-none focus:ring-2 focus:ring-purple-500 ${codeExpired ? "border-red-200 bg-red-50 text-red-300" : "border-gray-200"}`} />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">New Password</label>
@@ -302,7 +385,7 @@ export default function Login() {
                     </button>
                   </div>
                 </div>
-                <button type="submit" disabled={resetLoading}
+                <button type="submit" disabled={resetLoading || codeExpired}
                   className="w-full bg-purple-600 hover:bg-purple-700 disabled:opacity-60 text-white font-semibold py-2.5 rounded-lg text-sm transition-colors">
                   {resetLoading ? "Saving…" : "Reset Password"}
                 </button>
