@@ -24,11 +24,20 @@ import UserAccounts from "./pages/UserAccounts";
 import AdminPanel from "./pages/AdminPanel";
 import AdminUsers from "./pages/AdminUsers";
 
-// Dito natin ginagawa ang memory-based router.
-// Ang { path: "/" } ay sinasabi nating simulan sa root page (signup) kapag nag-open ng app.
-// Yung "hook" na lalabas dito ay yung custom na function na gagamitin ng Router
-// para malaman kung anong page ang kasalukuyang binubuksan — pero sa memory na, hindi sa URL.
-const { hook } = memoryLocation({ path: "/" });
+// Bago mag-start ang memory router, tignan muna natin kung may espesyal na params sa URL.
+// Halimbawa: kapag nag-click ang user ng verification link sa email, ang URL ay
+// "synthcs.site/login?verified=1" — kailangan nating ma-detect ito bago maitago ng replaceState.
+// Kapag may nahanap na params, dinadala natin ang user sa tamang page (login, signup, etc.)
+// instead na palagi na lang sa "/" (signup page).
+function getInitialPath() {
+  const params = new URLSearchParams(window.location.search);
+  if (params.get("verified"))    return `/login?verified=1`;
+  if (params.get("oauth_error")) return `/?oauth_error=${encodeURIComponent(params.get("oauth_error")!)}`;
+  if (params.get("error"))       return `/login?error=${encodeURIComponent(params.get("error")!)}`;
+  return "/";
+}
+
+const { hook } = memoryLocation({ path: getInitialPath() });
 
 // Ito yung lalabas kapag pumunta ang user sa URL na hindi namin kilala
 function NotFound() {
