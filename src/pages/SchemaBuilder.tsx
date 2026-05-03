@@ -399,7 +399,8 @@ export default function SchemaBuilder() {
           body: JSON.stringify({ user_id: userId, name: tables[0]?.name ?? "dataset", kaggle_ref: "", python_dataset_id: data.dataset_id, row_count: rowCount }),
         }).catch(() => {});
       }
-      setLocation(`/preview?${new URLSearchParams({ id: data.dataset_id, name: tables[0]?.name ?? "dataset", rows: String(rowCount), ref: "" })}`);
+      sessionStorage.setItem("preview_params", JSON.stringify({ id: data.dataset_id, name: tables[0]?.name ?? "dataset", rows: rowCount, ref: "" }));
+      setLocation("/preview");
     } catch (e: any) {
       setErrorMsg(e.message ?? "CTGAN expansion failed."); setPhase("error");
     }
@@ -435,7 +436,8 @@ export default function SchemaBuilder() {
           body: JSON.stringify({ user_id: userId, name: tables[0].name, kaggle_ref: kaggleRef, python_dataset_id: datasetId, row_count: rowCount }),
         }).catch(() => {});
       }
-      setLocation(`/preview?${new URLSearchParams({ id: datasetId, name: tables[0].name, rows: String(rowCount), ref: kaggleRef })}`);
+      sessionStorage.setItem("preview_params", JSON.stringify({ id: datasetId, name: tables[0].name, rows: rowCount, ref: kaggleRef }));
+      setLocation("/preview");
     } catch (e: any) {
       setErrorMsg(e.message ?? "Generation failed. Check the Python service logs."); setPhase("error");
     }

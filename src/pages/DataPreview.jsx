@@ -60,15 +60,15 @@ function qualityChecks(columns, rows) {
 // ── component ─────────────────────────────────────────────────────────────────
 
 export default function DataPreview() {
-  const [rawLocation, setLocation] = useLocation();
+  const [, setLocation] = useLocation();
 
-  // Read dataset info from wouter's memory location (not window.location.search,
-  // which is always empty because we use replaceState to hide the URL)
-  const params         = new URLSearchParams(rawLocation.split("?")[1] || "");
-  const datasetId      = params.get("id")   || "";
-  const datasetName    = params.get("name") || "Dataset";
-  const totalRowsMeta  = parseInt(params.get("rows") || "0", 10);
-  const kaggleRef      = params.get("ref")  || "";
+  // Read dataset info from sessionStorage (set by SchemaBuilder before navigating here).
+  // We can't use window.location.search because replaceState always clears the URL to "/".
+  const stored        = JSON.parse(sessionStorage.getItem("preview_params") || "{}");
+  const datasetId     = stored.id   || "";
+  const datasetName   = stored.name || "Dataset";
+  const totalRowsMeta = Number(stored.rows) || 0;
+  const kaggleRef     = stored.ref  || "";
 
   const [tab, setTab]             = useState("Table View");
   const [page, setPage]           = useState(1);
@@ -148,6 +148,7 @@ export default function DataPreview() {
 
   useEffect(() => {
     if (!datasetId) { setLocation("/downloads"); return; }
+    sessionStorage.removeItem("preview_params");
     fetch(`${PYTHON_API}/api/preview/${datasetId}?limit=200`)
       .then((r) => { if (!r.ok) throw new Error("Preview unavailable"); return r.json(); })
       .then((d) => { setData(d); setLoading(false); })
