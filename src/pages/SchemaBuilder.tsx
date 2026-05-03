@@ -98,8 +98,13 @@ export default function SchemaBuilder() {
   const [saveStatus, setSaveStatus] = useState<"idle"|"saving"|"saved"|"error">("idle");
   const [aiFieldLoading, setAiFieldLoading] = useState<string | null>(null);
 
-  // ── Load saved schema from URL ────────────────────────────────────────────
-  const loadSchemaId = new URLSearchParams(window.location.search).get("load");
+  // ── Load saved schema from sessionStorage (set by SavedSchemas "Use" button) ──
+  // window.location.search is always empty because of replaceState URL hiding
+  const [loadSchemaId] = useState(() => {
+    const id = sessionStorage.getItem("load_schema_id") || "";
+    sessionStorage.removeItem("load_schema_id");
+    return id;
+  });
 
   useEffect(() => {
     if (!loadSchemaId) return;

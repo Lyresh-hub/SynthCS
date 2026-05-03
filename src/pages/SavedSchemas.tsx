@@ -176,7 +176,7 @@ export default function SavedSchemas() {
                         <div className="flex items-center justify-end gap-2">
                           {/* "Use" button — nagbubukas ng schema sa Schema Builder */}
                           <button
-                            onClick={() => setLocation(`/schema-builder?load=${schema.id}`)}
+                            onClick={() => { sessionStorage.setItem("load_schema_id", schema.id); setLocation("/schema-builder"); }}
                             className="flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-purple-600 bg-purple-50 hover:bg-purple-100 rounded-md transition-colors"
                             title="Open in Schema Builder"
                           >
