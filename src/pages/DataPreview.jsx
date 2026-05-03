@@ -62,13 +62,13 @@ function qualityChecks(columns, rows) {
 export default function DataPreview() {
   const [, setLocation] = useLocation();
 
-  // Read dataset info from sessionStorage (set by SchemaBuilder before navigating here).
-  // We can't use window.location.search because replaceState always clears the URL to "/".
-  const stored        = JSON.parse(sessionStorage.getItem("preview_params") || "{}");
-  const datasetId     = stored.id   || "";
-  const datasetName   = stored.name || "Dataset";
-  const totalRowsMeta = Number(stored.rows) || 0;
-  const kaggleRef     = stored.ref  || "";
+  // Read dataset info from sessionStorage ONCE (lazy useState) — if we read on every render,
+  // the values disappear after removeItem fires and the component redirects incorrectly.
+  const [previewParams] = useState(() => JSON.parse(sessionStorage.getItem("preview_params") || "{}"));
+  const datasetId     = previewParams.id   || "";
+  const datasetName   = previewParams.name || "Dataset";
+  const totalRowsMeta = Number(previewParams.rows) || 0;
+  const kaggleRef     = previewParams.ref  || "";
 
   const [tab, setTab]             = useState("Table View");
   const [page, setPage]           = useState(1);
