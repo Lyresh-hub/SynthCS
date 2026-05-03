@@ -201,7 +201,7 @@ export default function UserAccounts() {
   const userName = user ? `${user.first_name} ${user.last_name}`.trim() : localStorage.getItem("user_name") ?? "User";
   const userEmail = user?.email ?? "—";
 
-  function maskEmail(email: string) {
+  function obfuscateEmail(email: string) {
     if (!email || !email.includes("@")) return email;
     const [local, domain] = email.split("@");
     const visible = local.slice(0, 2);
@@ -263,7 +263,7 @@ export default function UserAccounts() {
               <span style={styles.fieldIcon}>✉️</span>
               <div>
                 <div style={styles.fieldLabel}>EMAIL</div>
-                <div style={styles.fieldValue}>{maskEmail(userEmail)}</div>
+                <div style={styles.fieldValue}>{obfuscateEmail(userEmail)}</div>
               </div>
             </div>
           </div>
