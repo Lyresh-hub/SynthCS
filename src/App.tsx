@@ -2,7 +2,8 @@
 import Signup from "./pages/signup";
 import Login from "./pages/Login";
 import AuthCallback from "./pages/AuthCallback";
-import { Switch, Route } from "wouter"; // ito yung ginagamit namin para sa routing (katulad ng React Router)
+import { Switch, Route, Router } from "wouter"; // ito yung ginagamit namin para sa routing (katulad ng React Router)
+import { useHashLocation } from "wouter/use-hash-location"; // para gumamit ng hash-based routing (#/page)
 import Layout from "./components/Layout";           // yung pangunahing layout na may sidebar at header
 import AdminLayout from "./components/AdminLayout"; // hiwalay na layout para sa admin pages (madilim)
 import Dashboard from "./pages/Dashboard";
@@ -16,6 +17,7 @@ import UserAccounts from "./pages/UserAccounts";
 import AdminPanel from "./pages/AdminPanel";
 import AdminUsers from "./pages/AdminUsers";
 
+// error muna syempre
 // Ito yung lalabas kapag pumunta ang user sa URL na hindi namin kilala
 function NotFound() {
   return (
@@ -34,7 +36,8 @@ function NotFound() {
 
 export default function App() {
   return (
-    // Yung Switch ay nagre-render lang ng unang route na nagtutugma sa kasalukuyang URL
+    // Ginagamit natin ang hash-based routing — ang URL ay magiging /#/page para hindi halata ang path
+    <Router hook={useHashLocation}>
     <Switch>
       {/* Mga public routes — pwedeng i-access kahit hindi naka-login */}
       <Route path="/" component={Signup} />
@@ -42,7 +45,7 @@ export default function App() {
       {/* Dito napupunta ang browser pagkatapos mag-login sa GitHub o Google */}
       <Route path="/auth/callback" component={AuthCallback} />
 
-      {/* Admin routes — nakabalot sa AdminLayout para may madilim na design */}
+      {/* Admin routes — nakabalot sa AdminLayout para may madilim na design ey */}
       <Route path="/admin">
         <AdminLayout>
           <AdminPanel />
@@ -72,5 +75,6 @@ export default function App() {
         </Layout>
       </Route>
     </Switch>
+    </Router>
   );
 }
