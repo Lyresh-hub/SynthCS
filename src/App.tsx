@@ -2,10 +2,10 @@
 import Signup from "./pages/signup";
 import Login from "./pages/Login";
 import AuthCallback from "./pages/AuthCallback";
-import { Switch, Route, Router } from "wouter"; // ito yung ginagamit namin para sa routing (katulad ng React Router)
-import { useHashLocation } from "wouter/use-hash-location"; // para gumamit ng hash-based routing (#/page)
-import Layout from "./components/Layout";           // yung pangunahing layout na may sidebar at header
-import AdminLayout from "./components/AdminLayout"; // hiwalay na layout para sa admin pages (madilim)
+import { Switch, Route, Router } from "wouter"; // ito yung ginagamit namin para sa routing
+import { useState, useCallback } from "react";
+import Layout from "./components/Layout";
+import AdminLayout from "./components/AdminLayout";
 import Dashboard from "./pages/Dashboard";
 import SchemaBuilder from "./pages/SchemaBuilder";
 import SavedSchemas from "./pages/SavedSchemas";
@@ -17,7 +17,23 @@ import UserAccounts from "./pages/UserAccounts";
 import AdminPanel from "./pages/AdminPanel";
 import AdminUsers from "./pages/AdminUsers";
 
-// error muna syempre
+// Custom location hook — ang route ay naka-imbak sa memory lang, hindi makikita sa URL bar
+// Kaya palaging "synthcs.site" lang ang makikita, kahit anong page ka pumunta
+function useHiddenLocation(): [string, (to: string) => void] {
+  const [path, setPath] = useState(() => {
+    // Kunin ang path na naka-store sa sessionStorage para hindi mawala sa refresh
+    return sessionStorage.getItem("app_path") || "/";
+  });
+
+  const navigate = useCallback((to: string) => {
+    setPath(to);
+    sessionStorage.setItem("app_path", to); // i-save para hindi mawala kapag nag-click sa ibang bagay
+    window.history.replaceState(null, "", "/"); // panatilihing "/" lang ang makikita sa URL bar
+  }, []);
+
+  return [path, navigate];
+}
+
 // Ito yung lalabas kapag pumunta ang user sa URL na hindi namin kilala
 function NotFound() {
   return (
@@ -36,45 +52,45 @@ function NotFound() {
 
 export default function App() {
   return (
-    // Ginagamit natin ang hash-based routing — ang URL ay magiging /#/page para hindi halata ang path
-    <Router hook={useHashLocation}>
-    <Switch>
-      {/* Mga public routes — pwedeng i-access kahit hindi naka-login */}
-      <Route path="/" component={Signup} />
-      <Route path="/login" component={Login} />
-      {/* Dito napupunta ang browser pagkatapos mag-login sa GitHub o Google */}
-      <Route path="/auth/callback" component={AuthCallback} />
+    // Ginagamit natin ang custom hook — URL bar ay palaging "synthcs.site" lang, walang makikitang path
+    <Router hook={useHiddenLocation}>
+      <Switch>
+        {/* Mga public routes — pwedeng i-access kahit hindi naka-login */}
+        <Route path="/" component={Signup} />
+        <Route path="/login" component={Login} />
+        {/* Dito napupunta ang browser pagkatapos mag-login sa GitHub o Google */}
+        <Route path="/auth/callback" component={AuthCallback} />
 
-      {/* Admin routes — nakabalot sa AdminLayout para may madilim na design ey */}
-      <Route path="/admin">
-        <AdminLayout>
-          <AdminPanel />
-        </AdminLayout>
-      </Route>
-      <Route path="/admin/users">
-        <AdminLayout>
-          <AdminUsers />
-        </AdminLayout>
-      </Route>
+        {/* Admin routes — nakabalot sa AdminLayout para may madilim na design */}
+        <Route path="/admin">
+          <AdminLayout>
+            <AdminPanel />
+          </AdminLayout>
+        </Route>
+        <Route path="/admin/users">
+          <AdminLayout>
+            <AdminUsers />
+          </AdminLayout>
+        </Route>
 
-      {/* Regular user routes — lahat nakabalot sa Layout na may sidebar */}
-      <Route>
-        <Layout>
-          <Switch>
-            <Route path="/dashboard" component={Dashboard} />
-            <Route path="/schema-builder" component={SchemaBuilder} />
-            <Route path="/saved-schemas" component={SavedSchemas} />
-            <Route path="/downloads" component={Downloads} />
-            <Route path="/preview" component={DataPreview} />
-            <Route path="/api-access" component={APIAccess} />
-            <Route path="/privacy-mode" component={PrivacyMode} />
-            <Route path="/user-accounts" component={UserAccounts} />
-            {/* Catch-all: kapag wala talagang nagtugmang route, ipakita ang 404 */}
-            <Route component={NotFound} />
-          </Switch>
-        </Layout>
-      </Route>
-    </Switch>
+        {/* Regular user routes — lahat nakabalot sa Layout na may sidebar */}
+        <Route>
+          <Layout>
+            <Switch>
+              <Route path="/dashboard" component={Dashboard} />
+              <Route path="/schema-builder" component={SchemaBuilder} />
+              <Route path="/saved-schemas" component={SavedSchemas} />
+              <Route path="/downloads" component={Downloads} />
+              <Route path="/preview" component={DataPreview} />
+              <Route path="/api-access" component={APIAccess} />
+              <Route path="/privacy-mode" component={PrivacyMode} />
+              <Route path="/user-accounts" component={UserAccounts} />
+              {/* Catch-all: kapag wala talagang nagtugmang route, ipakita ang 404 */}
+              <Route component={NotFound} />
+            </Switch>
+          </Layout>
+        </Route>
+      </Switch>
     </Router>
   );
 }
