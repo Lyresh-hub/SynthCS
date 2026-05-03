@@ -42,15 +42,16 @@ export default function Downloads() {
   const userId = localStorage.getItem("user_id");
   const [, setLocation] = useLocation();
 
-  // Ginagawa nating URL parameters ang dataset info para mapasa sa DataPreview page
+  // Sine-save sa sessionStorage ang dataset info bago pumunta sa DataPreview
+  // (hindi pwede URL params kasi palagi itong nale-clear ng replaceState)
   const handlePreview = (ds: Dataset) => {
-    const q = new URLSearchParams({
+    sessionStorage.setItem("preview_params", JSON.stringify({
       id:   ds.python_dataset_id ?? "",
       name: ds.name,
-      rows: String(ds.row_count),
+      rows: ds.row_count,
       ref:  ds.kaggle_ref ?? "",
-    });
-    setLocation(`/preview?${q}`);
+    }));
+    setLocation("/preview");
   };
 
   // Kinukuha ang lahat ng datasets ng user mula sa Node.js backend

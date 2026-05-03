@@ -234,7 +234,10 @@ export default function Dashboard() {
 
             {/* Generate button — kapag may selected schema, dun pupunta; kung wala, Schema Builder */}
             <button
-              onClick={() => setLocation(selectedSchemaId ? `/schema-builder?load=${selectedSchemaId}` : "/schema-builder")}
+              onClick={() => {
+                if (selectedSchemaId) sessionStorage.setItem("load_schema_id", selectedSchemaId);
+                setLocation("/schema-builder");
+              }}
               className="w-full flex items-center justify-center gap-2 py-2.5 bg-purple-600 text-white text-sm font-medium rounded-md hover:bg-purple-700 transition-colors"
             >
               <Sparkles className="w-3.5 h-3.5" />
