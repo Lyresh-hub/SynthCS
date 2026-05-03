@@ -42,18 +42,20 @@ function getInitialPath() {
   }
   const userId   = localStorage.getItem("user_id");
   const lastPath = sessionStorage.getItem("last_path");
-  if (userId && lastPath) return lastPath;
+  if (userId && lastPath && !lastPath.startsWith("/preview")) return lastPath;
   return "/";
 }
 
 // Naka-loob sa Router para ma-access ang memory location — sine-save ang current page
 // sa sessionStorage para kapag nag-refresh ang user, mabalik siya sa tamang page.
-const PUBLIC_PATHS = new Set(["/", "/login", "/auth/callback"]);
+// /preview ay hindi sine-save kasi kailangan niya ng live dataset ID na mawawala pagkatapos ng session
+const UNSAVEABLE_PATHS = new Set(["/", "/login", "/auth/callback", "/preview"]);
 function LocationPersist() {
   const [location] = useLocation();
   useEffect(() => {
-    if (localStorage.getItem("user_id") && !PUBLIC_PATHS.has(location)) {
-      sessionStorage.setItem("last_path", location);
+    const basePath = location.split("?")[0];
+    if (localStorage.getItem("user_id") && !UNSAVEABLE_PATHS.has(basePath)) {
+      sessionStorage.setItem("last_path", basePath);
     }
   }, [location]);
   return null;
