@@ -60,10 +60,11 @@ function qualityChecks(columns, rows) {
 // ── component ─────────────────────────────────────────────────────────────────
 
 export default function DataPreview() {
-  const [, setLocation] = useLocation();
+  const [rawLocation, setLocation] = useLocation();
 
-  // Read dataset info from URL query params
-  const params         = new URLSearchParams(window.location.search);
+  // Read dataset info from wouter's memory location (not window.location.search,
+  // which is always empty because we use replaceState to hide the URL)
+  const params         = new URLSearchParams(rawLocation.split("?")[1] || "");
   const datasetId      = params.get("id")   || "";
   const datasetName    = params.get("name") || "Dataset";
   const totalRowsMeta  = parseInt(params.get("rows") || "0", 10);
@@ -146,7 +147,7 @@ export default function DataPreview() {
   };
 
   useEffect(() => {
-    if (!datasetId) { setError("No dataset ID provided."); setLoading(false); return; }
+    if (!datasetId) { setLocation("/downloads"); return; }
     fetch(`${PYTHON_API}/api/preview/${datasetId}?limit=200`)
       .then((r) => { if (!r.ok) throw new Error("Preview unavailable"); return r.json(); })
       .then((d) => { setData(d); setLoading(false); })
