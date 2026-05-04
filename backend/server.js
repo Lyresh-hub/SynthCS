@@ -879,6 +879,29 @@ app.patch("/api/admin/users/:id/unban", requireAdmin, async (req, res) => {
 
 const VALID_TYPES = ["string","integer","float","boolean","date","email","uuid","phone","address","name","ip"];
 
+// Enforce correct types based on field name patterns — overrides LLM guesses
+function normalizeFieldType(fieldName, currentType) {
+  const n = fieldName.toLowerCase().replace(/[\s-]/g, "_");
+
+  if (/email/.test(n)) return "email";
+  if (/(phone|mobile|tel|contact_number)/.test(n)) return "phone";
+  if (/^(ip_address|ip_addr|source_ip|dest_ip|remote_ip|ip)$/.test(n)) return "ip";
+  if (/(^id$|_uuid$|uuid)/.test(n)) return "uuid";
+
+  if (/^(first_name|last_name|full_name|firstname|lastname|fullname|middle_name|author|instructor|teacher|student_name|employee_name|patient_name|owner|recipient|sender)$/.test(n) || /(_name)$/.test(n)) return "name";
+  if (/(address|street|city|barangay|province|location|place|region|municipality)/.test(n)) return "address";
+
+  if (/(date|_at|_on|birthday|birth_date|dob|created|updated|modified|timestamp|datetime|start_date|end_date|due_date|expiry|expiration|hire_date|graduation)/.test(n)) return "date";
+
+  if (/^(is_|has_|can_|was_|should_)/.test(n) || /^(active|enabled|disabled|verified|confirmed|approved|deleted|archived|published|visible|available|flagged|banned|completed|passed|failed)$/.test(n)) return "boolean";
+
+  if (/(price|cost|amount|salary|wage|rate|percentage|percent|pct|ratio|gpa|latitude|lat|longitude|lng|lon|temperature|temp|distance|speed|revenue|profit|loss|discount|tax|fee|balance|budget|weight|height_cm|bmi)/.test(n)) return "float";
+
+  if (/^(age|count|quantity|qty|year|month|day|hour|rank|score|rating|votes|likes|views|clicks|downloads|pages|floor|room_number|employee_count|population|zip|postal_code|student_id|employee_id|order_id|product_id|user_id|case_id|ticket_id|invoice_id|port|priority|level|attempts|duration_minutes|duration_days|num_|number_of_|total_)/.test(n)) return "integer";
+
+  return currentType;
+}
+
 // Keywords that indicate attempts to generate harmful, fraudulent, or privacy-violating datasets
 const INAPPROPRIATE_KEYWORDS = [
   "real student id", "real ids", "real government id", "real social security",
@@ -1012,7 +1035,7 @@ Description: ${prompt.trim()}`;
       if (Array.isArray(c.enum_values)) c.enum_values = c.enum_values.join(", ");
       return {
         name:        f.name,
-        type:        VALID_TYPES.includes(f.type) ? f.type : "string",
+        type:        normalizeFieldType(f.name, VALID_TYPES.includes(f.type) ? f.type : "string"),
         nullable:    Boolean(f.nullable),
         null_rate:   typeof f.null_rate === "number" ? f.null_rate : 0,
         constraints: c,
