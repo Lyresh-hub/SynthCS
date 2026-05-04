@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useLocation } from "wouter";
-import { Trash2, BadgeCheck, ShieldAlert, Search, RefreshCw } from "lucide-react";
+import { Trash2, BadgeCheck, ShieldAlert, Search, RefreshCw, Ban, ShieldCheck } from "lucide-react";
 import ConfirmDialog from "../components/ConfirmDialog";
 
 import { NODE_API } from "../lib/config";
@@ -14,6 +14,9 @@ interface AdminUser {
   is_admin: boolean;
   created_at: string;
   schema_count: number;
+  strike_count: number;
+  is_banned: boolean;
+  ban_reason: string | null;
 }
 
 export default function AdminUsers() {
@@ -56,6 +59,16 @@ export default function AdminUsers() {
     const res  = await fetch(`${NODE_API}/api/admin/users/${user.id}/toggle-admin?admin_id=${adminId}`, { method: "PATCH" });
     const data = await res.json();
     setUsers((p) => p.map((u) => u.id === user.id ? { ...u, is_admin: data.is_admin } : u));
+  }
+
+  async function handleBan(user: AdminUser) {
+    await fetch(`${NODE_API}/api/admin/users/${user.id}/ban?admin_id=${adminId}&reason=Admin-issued+ban`, { method: "PATCH" });
+    setUsers((p) => p.map((u) => u.id === user.id ? { ...u, is_banned: true } : u));
+  }
+
+  async function handleUnban(user: AdminUser) {
+    await fetch(`${NODE_API}/api/admin/users/${user.id}/unban?admin_id=${adminId}`, { method: "PATCH" });
+    setUsers((p) => p.map((u) => u.id === user.id ? { ...u, is_banned: false, strike_count: 0, ban_reason: null } : u));
   }
 
   const filtered = users.filter((u) =>
@@ -126,14 +139,14 @@ export default function AdminUsers() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-gray-100 bg-gray-50">
-                {["User", "Email", "Status", "Role", "Schemas", "Joined", "Actions"].map((h) => (
+                {["User", "Email", "Status", "Role", "Strikes", "Schemas", "Joined", "Actions"].map((h) => (
                   <th key={h} className="text-left text-xs font-semibold text-gray-400 uppercase tracking-wide px-5 py-3">{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {filtered.length === 0 && (
-                <tr><td colSpan={7} className="text-center text-gray-400 py-12 text-sm">No users found</td></tr>
+                <tr><td colSpan={8} className="text-center text-gray-400 py-12 text-sm">No users found</td></tr>
               )}
               {filtered.map((user) => (
                 <tr key={user.id} className="border-b border-gray-50 hover:bg-gray-50 transition-colors">
@@ -150,7 +163,11 @@ export default function AdminUsers() {
                   </td>
                   <td className="px-5 py-3.5 text-sm text-gray-600">{user.email ?? "—"}</td>
                   <td className="px-5 py-3.5">
-                    {user.email_verified ? (
+                    {user.is_banned ? (
+                      <span className="inline-flex items-center gap-1 text-xs font-medium text-red-700 bg-red-50 px-2.5 py-1 rounded-full" title={user.ban_reason ?? ""}>
+                        <Ban className="w-3.5 h-3.5" /> Banned
+                      </span>
+                    ) : user.email_verified ? (
                       <span className="inline-flex items-center gap-1 text-xs font-medium text-green-700 bg-green-50 px-2.5 py-1 rounded-full">
                         <BadgeCheck className="w-3.5 h-3.5" /> Verified
                       </span>
@@ -165,6 +182,19 @@ export default function AdminUsers() {
                       <span className="text-xs font-semibold text-purple-700 bg-purple-50 px-2.5 py-1 rounded-full">Admin</span>
                     ) : (
                       <span className="text-xs text-gray-400 bg-gray-100 px-2.5 py-1 rounded-full">User</span>
+                    )}
+                  </td>
+                  <td className="px-5 py-3.5">
+                    {user.strike_count > 0 ? (
+                      <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
+                        user.strike_count >= 3 ? "bg-red-100 text-red-700" :
+                        user.strike_count === 2 ? "bg-amber-100 text-amber-700" :
+                        "bg-yellow-50 text-yellow-700"
+                      }`}>
+                        {user.strike_count}/3
+                      </span>
+                    ) : (
+                      <span className="text-xs text-gray-300">—</span>
                     )}
                   </td>
                   <td className="px-5 py-3.5 text-sm text-gray-600">{user.schema_count}</td>
@@ -183,6 +213,18 @@ export default function AdminUsers() {
                         <button onClick={() => handleToggleAdmin(user)}
                           className="text-xs px-2.5 py-1 rounded-md bg-purple-50 text-purple-700 hover:bg-purple-100 transition-colors font-medium whitespace-nowrap">
                           {user.is_admin ? "Revoke Admin" : "Make Admin"}
+                        </button>
+                      )}
+                      {user.id !== adminId && !user.is_banned && (
+                        <button onClick={() => handleBan(user)} title="Ban user"
+                          className="p-1.5 rounded-md text-amber-400 hover:bg-amber-50 hover:text-amber-600 transition-colors">
+                          <Ban className="w-4 h-4" />
+                        </button>
+                      )}
+                      {user.id !== adminId && user.is_banned && (
+                        <button onClick={() => handleUnban(user)} title="Unban user"
+                          className="p-1.5 rounded-md text-green-500 hover:bg-green-50 hover:text-green-700 transition-colors">
+                          <ShieldCheck className="w-4 h-4" />
                         </button>
                       )}
                       {user.id !== adminId && (

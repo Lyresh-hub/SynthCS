@@ -88,7 +88,14 @@ export default function Login() {
         body: JSON.stringify({ email: data.email, password: data.password }),
       });
       const json = await res.json();
-      if (!res.ok) { setServerError(json.error ?? "Invalid email or password"); return; }
+      if (!res.ok) {
+        if (json.error === "banned") {
+          setServerError(json.message ?? "Your account has been permanently banned due to violations of the Terms of Service.");
+        } else {
+          setServerError(json.error ?? "Invalid email or password");
+        }
+        return;
+      }
       localStorage.setItem("user_id",   json.id);
       localStorage.setItem("user_name", json.full_name);
       localStorage.setItem("is_admin",  json.is_admin ? "true" : "false");

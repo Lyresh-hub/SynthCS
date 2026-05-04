@@ -203,8 +203,11 @@ async function initDB() {
     await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_token                  VARCHAR(255)`).catch(() => {});
     await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_token_expires          TIMESTAMP`).catch(() => {});
     await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS verification_token_expires   TIMESTAMPTZ`).catch(() => {});
-    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS first_name VARCHAR(100)`).catch(() => {});
-    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_name  VARCHAR(100) NOT NULL DEFAULT ''`).catch(() => {});
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS first_name    VARCHAR(100)`).catch(() => {});
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_name     VARCHAR(100) NOT NULL DEFAULT ''`).catch(() => {});
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS strike_count  INT DEFAULT 0`).catch(() => {});
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS is_banned     BOOLEAN DEFAULT FALSE`).catch(() => {});
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS ban_reason    TEXT`).catch(() => {});
     // Migrate existing full_name data into first_name / last_name
     await pool.query(`
       UPDATE users
@@ -250,6 +253,7 @@ async function initDB() {
         expires_at        TIMESTAMP DEFAULT (NOW() + INTERVAL '30 days')
       )
     `);
+    await pool.query(`ALTER TABLE datasets ADD COLUMN IF NOT EXISTS source VARCHAR(20) DEFAULT 'llm'`).catch(() => {});
 
     console.log("✅ Database connected — all tables ready.");
   } catch (err) {
@@ -552,6 +556,9 @@ app.post("/login", async (req, res) => {
     if (!user.email_verified)
       return res.status(403).json({ error: "unverified", message: "Please verify your email before logging in." });
 
+    if (user.is_banned)
+      return res.status(403).json({ error: "banned", message: `Your account has been permanently banned. Reason: ${user.ban_reason || "Violation of Terms of Service"}` });
+
     res.json({ id: user.id, first_name: user.first_name, last_name: user.last_name, full_name: user.full_name, email: user.email, is_admin: user.is_admin || false });
   } catch (err) {
     console.error("Login error:", err.message);
@@ -789,7 +796,9 @@ app.get("/api/admin/analytics", requireAdmin, async (req, res) => {
 app.get("/api/admin/users", requireAdmin, async (req, res) => {
   try {
     const result = await pool.query(`
-      SELECT u.id, u.first_name, u.last_name, COALESCE(u.first_name || ' ' || u.last_name, u.full_name) AS full_name, u.email, u.username, u.email_verified, u.is_admin, u.created_at,
+      SELECT u.id, u.first_name, u.last_name, COALESCE(u.first_name || ' ' || u.last_name, u.full_name) AS full_name,
+             u.email, u.username, u.email_verified, u.is_admin, u.created_at,
+             COALESCE(u.strike_count, 0) AS strike_count, COALESCE(u.is_banned, FALSE) AS is_banned, u.ban_reason,
              COUNT(s.id)::int AS schema_count
       FROM users u
       LEFT JOIN schemas s ON s.user_id = u.id
@@ -839,16 +848,100 @@ app.patch("/api/admin/users/:id/toggle-admin", requireAdmin, async (req, res) =>
   }
 });
 
+app.patch("/api/admin/users/:id/ban", requireAdmin, async (req, res) => {
+  try {
+    const reason = req.query.reason || "Admin-issued ban";
+    await pool.query(
+      "UPDATE users SET is_banned = TRUE, ban_reason = $1 WHERE id = $2",
+      [reason, req.params.id]
+    );
+    res.json({ success: true });
+  } catch (err) {
+    console.error("Admin ban user error:", err.message);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+app.patch("/api/admin/users/:id/unban", requireAdmin, async (req, res) => {
+  try {
+    await pool.query(
+      "UPDATE users SET is_banned = FALSE, ban_reason = NULL, strike_count = 0 WHERE id = $1",
+      [req.params.id]
+    );
+    res.json({ success: true });
+  } catch (err) {
+    console.error("Admin unban user error:", err.message);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
 // ── LLM Schema Generation ─────────────────────────────────────────────────────
 
 const VALID_TYPES = ["string","integer","float","boolean","date","email","uuid","phone","address","name","ip"];
+
+// Keywords that indicate attempts to generate harmful, fraudulent, or privacy-violating datasets
+const INAPPROPRIATE_KEYWORDS = [
+  "real student id", "real ids", "real government id", "real social security",
+  "fake id card", "fake ids", "fake government id", "fake transcript", "fake diploma",
+  "fake academic record", "fake survey result", "fabricated result",
+  "credit card number", "cvv", "card number with cvv", "bank account number",
+  "routing number", "stolen", "fraud dataset", "scam dataset",
+  "ssn", "social security number", "patient record", "medical record with name",
+  "home address list", "personal address", "phone number list", "doxxing", " dox ",
+  "weapon", "bomb making", "drug synthesis", "narcotics", "terrorism",
+  "child abuse", "minor exploit", "malware", "virus payload", "ransomware",
+  "real payroll", "employee salary dump", "password list", "credential dump",
+  "phishing", "identity theft",
+];
+
+function isInappropriatePrompt(prompt) {
+  const lower = prompt.toLowerCase();
+  return INAPPROPRIATE_KEYWORDS.some((kw) => lower.includes(kw));
+}
 
 app.post("/api/llm/generate-schema", async (req, res) => {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) return res.status(503).json({ error: "ANTHROPIC_API_KEY not configured." });
 
-  const { prompt } = req.body;
+  const { prompt, user_id } = req.body;
   if (!prompt?.trim()) return res.status(400).json({ error: "prompt is required" });
+
+  // Moderation — block inappropriate prompts and apply strike system
+  if (isInappropriatePrompt(prompt)) {
+    if (user_id) {
+      try {
+        const updated = await pool.query(
+          "UPDATE users SET strike_count = COALESCE(strike_count, 0) + 1 WHERE id = $1 RETURNING strike_count",
+          [user_id]
+        );
+        if (updated.rows.length > 0) {
+          const strikes = updated.rows[0].strike_count;
+          if (strikes >= 3) {
+            await pool.query(
+              "UPDATE users SET is_banned = TRUE, ban_reason = $1 WHERE id = $2",
+              ["Repeated inappropriate dataset generation attempts (3 strikes)", user_id]
+            );
+            return res.status(403).json({
+              error: "banned",
+              message: "Your account has been permanently banned due to repeated violations of the Terms of Service.",
+              strikes,
+            });
+          }
+          return res.status(403).json({
+            error: "inappropriate_prompt",
+            message: `Your prompt was flagged as inappropriate. Strike ${strikes} of 3 — your account will be permanently banned after 3 strikes.`,
+            strikes,
+          });
+        }
+      } catch (e) {
+        console.error("Strike update error:", e.message);
+      }
+    }
+    return res.status(403).json({
+      error: "inappropriate_prompt",
+      message: "Your prompt was flagged as inappropriate and cannot be processed.",
+    });
+  }
 
   const schemaPrompt = `You are a data schema designer. Given a description, return ONLY a valid JSON object — no markdown, no explanation, no code fences.
 
@@ -988,14 +1081,14 @@ const PYTHON_DATASETS_DIR = path.join(__dirname, "python", "temp_datasets");
 
 app.post("/api/datasets", async (req, res) => {
   try {
-    const { user_id, name, kaggle_ref, python_dataset_id, row_count } = req.body;
+    const { user_id, name, kaggle_ref, python_dataset_id, row_count, source } = req.body;
     if (!user_id || !name)
       return res.status(400).json({ error: "user_id and name are required" });
 
     const result = await pool.query(
-      `INSERT INTO datasets (user_id, name, kaggle_ref, python_dataset_id, row_count)
-       VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-      [user_id, name, kaggle_ref || null, python_dataset_id || null, row_count || 0]
+      `INSERT INTO datasets (user_id, name, kaggle_ref, python_dataset_id, row_count, source)
+       VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+      [user_id, name, kaggle_ref || null, python_dataset_id || null, row_count || 0, source || "llm"]
     );
     res.status(201).json(result.rows[0]);
   } catch (err) {

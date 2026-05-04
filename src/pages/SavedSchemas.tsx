@@ -23,7 +23,7 @@ function inferType(name: string) {
     return { type: "Business", color: "bg-blue-100 text-blue-700" };
   if (/school|grade|student|education|course/.test(n))
     return { type: "Education", color: "bg-orange-100 text-orange-700" };
-  return { type: "Personal", color: "bg-pink-100 text-pink-700" };
+  return { type: "General", color: "bg-gray-100 text-gray-600" };
 }
 
 export default function SavedSchemas() {

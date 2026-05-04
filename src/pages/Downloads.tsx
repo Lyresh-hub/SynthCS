@@ -10,9 +10,10 @@ interface Dataset {
   id: string;
   name: string;
   kaggle_ref: string | null;
-  python_dataset_id: string | null; // ID na ginagamit para i-access ang file sa Python service
+  python_dataset_id: string | null;
   row_count: number;
   status: string;
+  source: string | null;
   created_at: string;
   expires_at: string;
 }
@@ -177,9 +178,10 @@ export default function Downloads() {
                       </div>
                     </td>
                     <td className="py-3 px-4">
-                      <span className="text-xs font-medium bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full">
-                        CTGAN
-                      </span>
+                      {ds.source === "kaggle"
+                        ? <span className="text-xs font-medium bg-blue-50 text-blue-700 px-2 py-0.5 rounded-full">Kaggle</span>
+                        : <span className="text-xs font-medium bg-purple-50 text-purple-700 px-2 py-0.5 rounded-full">AI Schema</span>
+                      }
                     </td>
                     <td className="py-3 px-4 text-xs text-gray-500">
                       {ds.row_count.toLocaleString()}

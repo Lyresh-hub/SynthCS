@@ -84,6 +84,7 @@ export default function SchemaBuilder() {
   const [llmPrompt, setLlmPrompt]   = useState("");
   const [llmLoading, setLlmLoading] = useState(false);
   const [llmError, setLlmError]     = useState("");
+  const [strikeWarning, setStrikeWarning] = useState<{ strikes: number; banned: boolean } | null>(null);
 
   const [templateDatasetId,   setTemplateDatasetId]   = useState("");
   const [templateColumns,     setTemplateColumns]     = useState<string[]>([]);
@@ -194,14 +195,26 @@ export default function SchemaBuilder() {
     if (!llmPrompt.trim()) return;
     setLlmLoading(true);
     setLlmError("");
+    setStrikeWarning(null);
+    const userId = localStorage.getItem("user_id") ?? undefined;
     try {
       const res  = await fetch(`${NODE_API}/api/llm/generate-schema`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: llmPrompt }),
+        body: JSON.stringify({ prompt: llmPrompt, user_id: userId }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "LLM request failed");
+      if (!res.ok) {
+        if (data.error === "banned") {
+          setStrikeWarning({ strikes: data.strikes ?? 3, banned: true });
+          return;
+        }
+        if (data.error === "inappropriate_prompt") {
+          setStrikeWarning({ strikes: data.strikes ?? 1, banned: false });
+          return;
+        }
+        throw new Error(data.error || "LLM request failed");
+      }
 
       const fields: Field[] = data.fields.map((f: any, i: number) =>
         makeField({
@@ -401,7 +414,7 @@ export default function SchemaBuilder() {
       if (userId) {
         await fetch(`${NODE_API}/api/datasets`, {
           method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ user_id: userId, name: tables[0]?.name ?? "dataset", kaggle_ref: "", python_dataset_id: data.dataset_id, row_count: rowCount }),
+          body: JSON.stringify({ user_id: userId, name: tables[0]?.name ?? "dataset", kaggle_ref: "", python_dataset_id: data.dataset_id, row_count: rowCount, source: "llm" }),
         }).catch(() => {});
       }
       sessionStorage.setItem("preview_params", JSON.stringify({ id: data.dataset_id, name: tables[0]?.name ?? "dataset", rows: rowCount, ref: "" }));
@@ -438,7 +451,7 @@ export default function SchemaBuilder() {
       if (userId) {
         await fetch(`${NODE_API}/api/datasets`, {
           method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ user_id: userId, name: tables[0].name, kaggle_ref: kaggleRef, python_dataset_id: datasetId, row_count: rowCount }),
+          body: JSON.stringify({ user_id: userId, name: tables[0].name, kaggle_ref: kaggleRef, python_dataset_id: datasetId, row_count: rowCount, source: "kaggle" }),
         }).catch(() => {});
       }
       sessionStorage.setItem("preview_params", JSON.stringify({ id: datasetId, name: tables[0].name, rows: rowCount, ref: kaggleRef }));
@@ -616,6 +629,29 @@ export default function SchemaBuilder() {
             <div className="mx-4 mb-3 flex items-start gap-2.5 bg-red-50 border border-red-200 rounded-lg px-3 py-2.5">
               <AlertCircle className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5" />
               <p className="text-xs text-red-700 leading-relaxed">{llmError}</p>
+            </div>
+          )}
+          {strikeWarning && !strikeWarning.banned && (
+            <div className="mx-4 mb-3 flex items-start gap-2.5 bg-amber-50 border border-amber-300 rounded-lg px-3 py-2.5">
+              <AlertCircle className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
+              <div>
+                <p className="text-xs font-semibold text-amber-800">Inappropriate prompt detected — Strike {strikeWarning.strikes}/3</p>
+                <p className="text-xs text-amber-700 mt-0.5 leading-relaxed">
+                  Your prompt violates our Terms of Service. Generating datasets intended for fraud, identity theft, or privacy violations is not allowed.
+                  {strikeWarning.strikes >= 2 && " One more violation will result in a permanent ban."}
+                </p>
+              </div>
+            </div>
+          )}
+          {strikeWarning && strikeWarning.banned && (
+            <div className="mx-4 mb-3 flex items-start gap-2.5 bg-red-50 border border-red-300 rounded-lg px-3 py-2.5">
+              <AlertCircle className="w-4 h-4 text-red-600 flex-shrink-0 mt-0.5" />
+              <div>
+                <p className="text-xs font-semibold text-red-800">Account permanently banned</p>
+                <p className="text-xs text-red-700 mt-0.5 leading-relaxed">
+                  Your account has been permanently banned due to repeated violations of the Terms of Service. Contact support if you believe this is an error.
+                </p>
+              </div>
             </div>
           )}
         </div>

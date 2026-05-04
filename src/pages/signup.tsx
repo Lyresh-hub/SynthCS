@@ -48,6 +48,7 @@ export default function Signup() {
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
   const [pendingEmail, setPendingEmail] = useState("");
+  const [modalOpen, setModalOpen] = useState<"tos" | "privacy" | null>(null);
   const [resendStatus, setResendStatus] = useState<"idle"|"sending"|"sent">("idle");
 
   // Show error message if redirected back from a failed OAuth attempt
@@ -158,6 +159,7 @@ export default function Signup() {
   );
 
   return (
+    <>
     <div className="min-h-screen flex">
       {/* ── Left showcase panel ── */}
       <div className="hidden lg:flex lg:w-[45%] flex-col items-center justify-center bg-[#1E1347] relative overflow-hidden px-12">
@@ -307,12 +309,24 @@ export default function Signup() {
                 id="agreeTerms"
                 className="mt-0.5 accent-purple-600"
               />
-              <label htmlFor="agreeTerms" className="text-sm text-gray-600 cursor-pointer">
-                I agree to the{" "}
-                <a href="#" className="text-purple-600 hover:underline font-medium">Terms of Service</a>
-                {" "}and{" "}
-                <a href="#" className="text-purple-600 hover:underline font-medium">Privacy Policy</a>
-              </label>
+              <div className="text-sm text-gray-600">
+                <label htmlFor="agreeTerms" className="cursor-pointer">I agree to the{" "}</label>
+                <button
+                  type="button"
+                  onClick={(e) => { e.preventDefault(); e.stopPropagation(); setModalOpen("tos"); }}
+                  className="text-purple-600 hover:underline font-medium"
+                >
+                  Terms of Service
+                </button>
+                <span> and </span>
+                <button
+                  type="button"
+                  onClick={(e) => { e.preventDefault(); e.stopPropagation(); setModalOpen("privacy"); }}
+                  className="text-purple-600 hover:underline font-medium"
+                >
+                  Privacy Policy
+                </button>
+              </div>
             </div>
             {errors.agreeTerms && <p className="text-xs text-red-500">{errors.agreeTerms.message}</p>}
 
@@ -333,6 +347,156 @@ export default function Signup() {
           </p>
         </div>
       </div>
+    </div>
+
+    {/* Terms of Service / Privacy Policy modal */}
+    {modalOpen && (
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
+        <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl max-h-[80vh] flex flex-col">
+          <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+            <h2 className="text-base font-semibold text-gray-900">
+              {modalOpen === "tos" ? "Terms of Service" : "Privacy Policy"}
+            </h2>
+            <button onClick={() => setModalOpen(null)} className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors text-gray-400 hover:text-gray-600">
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+          <div className="overflow-y-auto px-6 py-5 text-sm text-gray-700 space-y-4 leading-relaxed">
+            {modalOpen === "tos" ? <TermsOfServiceContent /> : <PrivacyPolicyContent />}
+          </div>
+          <div className="px-6 py-4 border-t border-gray-100 flex justify-end">
+            <button onClick={() => setModalOpen(null)}
+              className="px-5 py-2 bg-purple-600 text-white text-sm font-medium rounded-lg hover:bg-purple-700 transition-colors">
+              Close
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
+    </>
+  );
+}
+
+function TermsOfServiceContent() {
+  return (
+    <div className="space-y-5">
+      <p className="text-xs text-gray-400">Effective Date: May 2025 · Gordon College — College of Computer Studies</p>
+
+      <section>
+        <h3 className="font-semibold text-gray-800 mb-1">1. Acceptance of Terms</h3>
+        <p>By creating an account and using SynthCS, you agree to be bound by these Terms of Service. If you do not agree, do not use the platform.</p>
+      </section>
+
+      <section>
+        <h3 className="font-semibold text-gray-800 mb-1">2. Eligibility</h3>
+        <p>SynthCS is exclusively available to students, faculty, and staff of Gordon College with a valid <strong>@gordoncollege.edu.ph</strong> email address. Accounts created with unauthorized emails will not be activated.</p>
+      </section>
+
+      <section>
+        <h3 className="font-semibold text-gray-800 mb-1">3. Acceptable Use</h3>
+        <p>You may use SynthCS only for lawful, academic, and professional purposes. You agree <strong>not</strong> to:</p>
+        <ul className="list-disc pl-5 mt-1 space-y-1">
+          <li>Generate datasets intended to facilitate fraud, identity theft, or financial crime (e.g., fake credit card numbers, fake government IDs)</li>
+          <li>Generate datasets containing sensitive personal information about real individuals</li>
+          <li>Create fake academic records, transcripts, or diplomas</li>
+          <li>Generate datasets designed for phishing, social engineering, or harassment</li>
+          <li>Attempt to reverse-engineer or extract real personal data from the system</li>
+          <li>Use the platform for any purpose that violates Philippine law or Gordon College policies</li>
+        </ul>
+      </section>
+
+      <section>
+        <h3 className="font-semibold text-gray-800 mb-1">4. Strike and Ban Policy</h3>
+        <p>SynthCS uses an automated moderation system on the AI schema generator. Prompts that are flagged as inappropriate will result in a <strong>strike</strong> on your account:</p>
+        <ul className="list-disc pl-5 mt-1 space-y-1">
+          <li><strong>Strike 1:</strong> Warning issued. Generation is blocked for that prompt.</li>
+          <li><strong>Strike 2:</strong> Second warning. One more violation will result in a permanent ban.</li>
+          <li><strong>Strike 3:</strong> Account is permanently banned from SynthCS.</li>
+        </ul>
+        <p className="mt-1">Administrators may also manually ban accounts for policy violations. Banned accounts cannot log in. To appeal a ban, contact the SynthCS administrator.</p>
+      </section>
+
+      <section>
+        <h3 className="font-semibold text-gray-800 mb-1">5. Data and Storage</h3>
+        <p>Generated datasets are stored on our servers for <strong>30 days</strong> from the date of creation, after which they are automatically deleted. You are responsible for downloading your data within this period.</p>
+      </section>
+
+      <section>
+        <h3 className="font-semibold text-gray-800 mb-1">6. Intellectual Property</h3>
+        <p>All synthetic data you generate using SynthCS is yours to use for academic and professional purposes. SynthCS does not claim ownership of your generated datasets.</p>
+      </section>
+
+      <section>
+        <h3 className="font-semibold text-gray-800 mb-1">7. Disclaimer</h3>
+        <p>SynthCS is provided as-is for academic use. We do not guarantee that generated data will be suitable for all purposes. We are not liable for any outcomes resulting from the use of generated datasets.</p>
+      </section>
+
+      <section>
+        <h3 className="font-semibold text-gray-800 mb-1">8. Changes to These Terms</h3>
+        <p>We may update these Terms at any time. Continued use of SynthCS after changes are posted constitutes acceptance of the updated Terms.</p>
+      </section>
+    </div>
+  );
+}
+
+function PrivacyPolicyContent() {
+  return (
+    <div className="space-y-5">
+      <p className="text-xs text-gray-400">Effective Date: May 2025 · Gordon College — College of Computer Studies</p>
+
+      <section>
+        <h3 className="font-semibold text-gray-800 mb-1">1. Overview</h3>
+        <p>SynthCS is committed to protecting your privacy. This policy explains what information we collect, how we use it, and how we keep it safe.</p>
+      </section>
+
+      <section>
+        <h3 className="font-semibold text-gray-800 mb-1">2. Information We Collect</h3>
+        <ul className="list-disc pl-5 mt-1 space-y-1">
+          <li><strong>Account information:</strong> Your first name, last name, and Gordon College email address when you sign up.</li>
+          <li><strong>Usage data:</strong> Schemas you create, datasets you generate, and download history.</li>
+          <li><strong>Moderation data:</strong> Prompts flagged by our automated moderation system and any strike or ban records associated with your account.</li>
+        </ul>
+      </section>
+
+      <section>
+        <h3 className="font-semibold text-gray-800 mb-1">3. What We Do NOT Collect</h3>
+        <ul className="list-disc pl-5 mt-1 space-y-1">
+          <li>We do not collect or store real personal data from third parties.</li>
+          <li>We do not sell or share your data with advertisers.</li>
+          <li>Generated datasets contain no real personal information — they are entirely synthetic.</li>
+        </ul>
+      </section>
+
+      <section>
+        <h3 className="font-semibold text-gray-800 mb-1">4. How We Use Your Information</h3>
+        <ul className="list-disc pl-5 mt-1 space-y-1">
+          <li>To create and manage your account</li>
+          <li>To send email verification and password reset codes</li>
+          <li>To associate generated datasets with your account</li>
+          <li>To enforce our Terms of Service and moderation policies</li>
+          <li>To improve the platform through anonymized usage analytics</li>
+        </ul>
+      </section>
+
+      <section>
+        <h3 className="font-semibold text-gray-800 mb-1">5. Data Retention</h3>
+        <p>Your account data is retained for as long as your account is active. Generated datasets are automatically deleted after <strong>30 days</strong>. You may request deletion of your account at any time by contacting the administrator.</p>
+      </section>
+
+      <section>
+        <h3 className="font-semibold text-gray-800 mb-1">6. Data Security</h3>
+        <p>Passwords are hashed using bcrypt and are never stored in plain text. All communication between your browser and our servers is encrypted using HTTPS. Access to the database is restricted to authorized systems only.</p>
+      </section>
+
+      <section>
+        <h3 className="font-semibold text-gray-800 mb-1">7. Your Rights</h3>
+        <p>You have the right to access, correct, or request deletion of your personal data. To exercise these rights, contact the SynthCS administrator through your Gordon College channels.</p>
+      </section>
+
+      <section>
+        <h3 className="font-semibold text-gray-800 mb-1">8. Changes to This Policy</h3>
+        <p>We may update this Privacy Policy as the platform evolves. We will notify users of significant changes through the platform. Continued use after updates means you accept the revised policy.</p>
+      </section>
     </div>
   );
 }
