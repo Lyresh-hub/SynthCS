@@ -154,7 +154,6 @@ export default function Downloads() {
               <thead>
                 <tr className="border-b border-gray-100 bg-gray-50">
                   <th className="text-left py-3 px-4 text-xs font-medium text-gray-400">Dataset</th>
-                  <th className="text-left py-3 px-4 text-xs font-medium text-gray-400">Source</th>
                   <th className="text-left py-3 px-4 text-xs font-medium text-gray-400">Rows</th>
                   <th className="text-left py-3 px-4 text-xs font-medium text-gray-400">Created</th>
                   <th className="text-left py-3 px-4 text-xs font-medium text-gray-400">
@@ -176,12 +175,6 @@ export default function Downloads() {
                           )}
                         </div>
                       </div>
-                    </td>
-                    <td className="py-3 px-4">
-                      {ds.source === "kaggle"
-                        ? <span className="text-xs font-medium bg-blue-50 text-blue-700 px-2 py-0.5 rounded-full">Kaggle</span>
-                        : <span className="text-xs font-medium bg-purple-50 text-purple-700 px-2 py-0.5 rounded-full">AI Schema</span>
-                      }
                     </td>
                     <td className="py-3 px-4 text-xs text-gray-500">
                       {ds.row_count.toLocaleString()}
