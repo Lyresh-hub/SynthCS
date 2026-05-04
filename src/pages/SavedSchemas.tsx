@@ -141,7 +141,6 @@ export default function SavedSchemas() {
               <thead>
                 <tr className="border-b border-gray-100 bg-gray-50">
                   <th className="text-left py-3 px-4 text-xs font-medium text-gray-400">Schema Name</th>
-                  <th className="text-left py-3 px-4 text-xs font-medium text-gray-400">Table</th>
                   <th className="text-left py-3 px-4 text-xs font-medium text-gray-400">Type</th>
                   <th className="text-left py-3 px-4 text-xs font-medium text-gray-400">Fields</th>
                   <th className="text-left py-3 px-4 text-xs font-medium text-gray-400">Created</th>
@@ -161,7 +160,6 @@ export default function SavedSchemas() {
                           <span className="font-medium text-gray-800 text-xs">{schema.name}</span>
                         </div>
                       </td>
-                      <td className="py-3 px-4 text-xs text-gray-500">{schema.table_name || "—"}</td>
                       <td className="py-3 px-4">
                         {/* Color-coded badge para sa kategorya ng schema */}
                         <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${color}`}>{type}</span>
