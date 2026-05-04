@@ -33,6 +33,9 @@ const signupSchema = z
     agreeTerms: z.boolean().refine((v) => v === true, {
       message: "You must agree to the Terms of Service",
     }),
+    agreePrivacy: z.boolean().refine((v) => v === true, {
+      message: "You must agree to the Privacy Policy",
+    }),
   })
   .refine((data) => data.password === data.confirmPassword, {
     message: "Passwords do not match",
@@ -302,33 +305,47 @@ export default function Signup() {
             </div>
 
             {/* Agree Terms */}
-            <div className="flex items-start gap-2 pt-1">
-              <input
-                {...register("agreeTerms")}
-                type="checkbox"
-                id="agreeTerms"
-                className="mt-0.5 accent-purple-600"
-              />
-              <div className="text-sm text-gray-600">
-                <label htmlFor="agreeTerms" className="cursor-pointer">I agree to the{" "}</label>
-                <button
-                  type="button"
-                  onClick={(e) => { e.preventDefault(); e.stopPropagation(); setModalOpen("tos"); }}
-                  className="text-purple-600 hover:underline font-medium"
-                >
-                  Terms of Service
-                </button>
-                <span> and </span>
-                <button
-                  type="button"
-                  onClick={(e) => { e.preventDefault(); e.stopPropagation(); setModalOpen("privacy"); }}
-                  className="text-purple-600 hover:underline font-medium"
-                >
-                  Privacy Policy
-                </button>
+            <div className="space-y-2 pt-1">
+              <div className="flex items-start gap-2">
+                <input
+                  {...register("agreeTerms")}
+                  type="checkbox"
+                  id="agreeTerms"
+                  className="mt-0.5 accent-purple-600"
+                />
+                <div className="text-sm text-gray-600">
+                  <label htmlFor="agreeTerms" className="cursor-pointer">I have read and agree to the{" "}</label>
+                  <button
+                    type="button"
+                    onClick={(e) => { e.preventDefault(); e.stopPropagation(); setModalOpen("tos"); }}
+                    className="text-purple-600 hover:underline font-medium"
+                  >
+                    Terms of Service
+                  </button>
+                </div>
               </div>
+              {errors.agreeTerms && <p className="text-xs text-red-500 pl-5">{errors.agreeTerms.message}</p>}
+
+              <div className="flex items-start gap-2">
+                <input
+                  {...register("agreePrivacy")}
+                  type="checkbox"
+                  id="agreePrivacy"
+                  className="mt-0.5 accent-purple-600"
+                />
+                <div className="text-sm text-gray-600">
+                  <label htmlFor="agreePrivacy" className="cursor-pointer">I have read and agree to the{" "}</label>
+                  <button
+                    type="button"
+                    onClick={(e) => { e.preventDefault(); e.stopPropagation(); setModalOpen("privacy"); }}
+                    className="text-purple-600 hover:underline font-medium"
+                  >
+                    Privacy Policy
+                  </button>
+                </div>
+              </div>
+              {errors.agreePrivacy && <p className="text-xs text-red-500 pl-5">{errors.agreePrivacy.message}</p>}
             </div>
-            {errors.agreeTerms && <p className="text-xs text-red-500">{errors.agreeTerms.message}</p>}
 
             <button
               type="submit"
