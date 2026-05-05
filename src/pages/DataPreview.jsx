@@ -75,9 +75,6 @@ export default function DataPreview() {
   const [data, setData]           = useState(null);
   const [loading, setLoading]     = useState(true);
   const [error, setError]         = useState("");
-  const [validation, setValidation]   = useState(null);
-  const [validating, setValidating]   = useState(false);
-  const [detailsOpen, setDetailsOpen] = useState(false);
   const [exportFormat, setExportFormat] = useState("csv");
   const [exporting, setExporting]       = useState(false);
 
@@ -155,14 +152,6 @@ export default function DataPreview() {
       .catch((e) => { setError(e.message); setLoading(false); });
   }, [datasetId]);
 
-  useEffect(() => {
-    if (!datasetId) return;
-    setValidating(true);
-    fetch(`${PYTHON_API}/api/validate/${datasetId}`)
-      .then((r) => r.ok ? r.json() : null)
-      .then((d) => { setValidation(d); setValidating(false); })
-      .catch(() => setValidating(false));
-  }, [datasetId]);
 
   if (loading) return (
     <div className="flex items-center justify-center h-64">
@@ -428,100 +417,6 @@ export default function DataPreview() {
           </div>
         </div>
 
-        {/* Validation */}
-        <div className="bg-white border border-gray-100 rounded-xl p-4 shadow-sm">
-          <p className="text-xs font-semibold text-gray-800 mb-3">⚡ Validation</p>
-
-          {validating && (
-            <div className="flex items-center gap-2 text-xs text-gray-400">
-              <div className="w-3 h-3 border-2 border-purple-500 border-t-transparent rounded-full animate-spin" />
-              Analysing…
-            </div>
-          )}
-
-          {!validating && !validation && (
-            <p className="text-xs text-gray-400">Not available</p>
-          )}
-
-          {!validating && validation && (() => {
-            const { overall_score, status, metrics } = validation;
-            const badgeColor =
-              status === "Good"       ? "bg-green-100 text-green-700"  :
-              status === "Acceptable" ? "bg-yellow-100 text-yellow-700" :
-                                        "bg-red-100 text-red-600";
-            const barColor =
-              status === "Good"       ? "bg-green-500"  :
-              status === "Acceptable" ? "bg-yellow-400" :
-                                        "bg-red-500";
-
-            return (
-              <div className="space-y-3">
-                {/* Overall score */}
-                <div>
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="text-xs text-gray-500">Overall Score</span>
-                    <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full ${badgeColor}`}>
-                      {status}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <div className="flex-1 h-2 bg-gray-100 rounded-full overflow-hidden">
-                      <div className={`h-full rounded-full transition-all ${barColor}`} style={{ width: `${overall_score}%` }} />
-                    </div>
-                    <span className="text-xs font-semibold text-gray-800 w-9 text-right">{overall_score}%</span>
-                  </div>
-                </div>
-
-                {/* Metric cards */}
-                {[
-                  { key: "wasserstein", icon: "≋" },
-                  { key: "correlation", icon: "⊡" },
-                  { key: "utility",     icon: "⚙" },
-                ].map(({ key, icon }) => {
-                  const m = metrics[key];
-                  return (
-                    <div key={key} className="bg-gray-50 rounded-lg px-3 py-2">
-                      <div className="flex justify-between items-center">
-                        <span className="text-[11px] text-gray-500">{icon} {m.label}</span>
-                        <span className="text-xs font-semibold text-gray-800">{m.score}%</span>
-                      </div>
-                      <div className="mt-1 h-1 bg-gray-200 rounded-full overflow-hidden">
-                        <div
-                          className={`h-full rounded-full ${m.score >= 75 ? "bg-green-400" : m.score >= 50 ? "bg-yellow-400" : "bg-red-400"}`}
-                          style={{ width: `${m.score}%` }}
-                        />
-                      </div>
-                    </div>
-                  );
-                })}
-
-                {/* Expandable per-column details */}
-                {Object.keys(metrics.wasserstein.per_column || {}).length > 0 && (
-                  <div>
-                    <button
-                      onClick={() => setDetailsOpen((o) => !o)}
-                      className="text-[11px] text-purple-600 hover:underline flex items-center gap-1"
-                    >
-                      {detailsOpen ? "▾" : "▸"} View per-column scores
-                    </button>
-                    {detailsOpen && (
-                      <div className="mt-2 space-y-1 max-h-40 overflow-y-auto">
-                        {Object.entries(metrics.wasserstein.per_column).map(([col, score]) => (
-                          <div key={col} className="flex justify-between text-[11px]">
-                            <span className="text-gray-500 truncate max-w-[100px]">{col}</span>
-                            <span className={`font-medium ${score >= 75 ? "text-green-600" : score >= 50 ? "text-yellow-600" : "text-red-500"}`}>
-                              {score}%
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            );
-          })()}
-        </div>
 
         {/* Export format + download */}
         <div className="bg-white border border-gray-100 rounded-xl p-4 shadow-sm space-y-2">
