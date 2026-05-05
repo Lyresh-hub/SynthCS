@@ -167,7 +167,6 @@ export default function UserAccounts() {
   const [privacyMode, setPrivacyMode] = useState(false);
   const [autoDelete, setAutoDelete] = useState(true);
   const [anonymize, setAnonymize] = useState(true);
-  const [maskEmail, setMaskEmail] = useState(false);
 
   useEffect(() => {
     if (!userId) { setLoading(false); return; }
@@ -302,7 +301,6 @@ export default function UserAccounts() {
             { label: "Privacy Mode", desc: "All generated datasets are automatically deleted after 24h.", value: privacyMode, set: setPrivacyMode },
             { label: "Auto-delete datasets", desc: "Automatically remove datasets older than 30 days.", value: autoDelete, set: setAutoDelete },
             { label: "Anonymize exported names", desc: "Replace real-looking names with fully synthetic ones on export.", value: anonymize, set: setAnonymize },
-            { label: "Mask email addresses", desc: "Obfuscate email domains in all generated outputs.", value: maskEmail, set: setMaskEmail },
           ].map((item) => (
             <div key={item.label} style={styles.toggleRow}>
               <div>
