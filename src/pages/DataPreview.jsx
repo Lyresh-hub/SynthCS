@@ -473,23 +473,33 @@ export default function DataPreview() {
                 </div>
 
                 {[
-                  { key: "wasserstein", icon: "≋" },
-                  { key: "correlation", icon: "⊡" },
-                  { key: "utility",     icon: "⚙" },
-                ].map(({ key, icon }) => {
+                  {
+                    key: "wasserstein", icon: "≋",
+                    desc: "Measures how closely the value ranges and distributions of each column match the original dataset. A higher score means the synthetic data spreads its values the same way the real data does.",
+                  },
+                  {
+                    key: "correlation", icon: "⊡",
+                    desc: "Measures whether the relationships between columns are preserved. For example, if age and salary tend to increase together in the original, the synthetic data should reflect the same pattern.",
+                  },
+                  {
+                    key: "utility", icon: "⚙",
+                    desc: "Trains a machine learning model on the synthetic data and tests it on real data (TSTR). A higher score means the synthetic data is realistic enough to be used for AI/ML training. A lower score is normal for general-purpose datasets.",
+                  },
+                ].map(({ key, icon, desc }) => {
                   const m = metrics[key];
                   return (
-                    <div key={key} className="bg-gray-50 rounded-lg px-3 py-2">
+                    <div key={key} className="bg-gray-50 rounded-lg px-3 py-2 space-y-1">
                       <div className="flex justify-between items-center">
                         <span className="text-[11px] text-gray-500">{icon} {m.label}</span>
                         <span className="text-xs font-semibold text-gray-800">{m.score}%</span>
                       </div>
-                      <div className="mt-1 h-1 bg-gray-200 rounded-full overflow-hidden">
+                      <div className="h-1 bg-gray-200 rounded-full overflow-hidden">
                         <div
                           className={`h-full rounded-full ${m.score >= 75 ? "bg-green-400" : m.score >= 50 ? "bg-yellow-400" : "bg-red-400"}`}
                           style={{ width: `${m.score}%` }}
                         />
                       </div>
+                      <p className="text-[10px] text-gray-400 leading-relaxed">{desc}</p>
                     </div>
                   );
                 })}
