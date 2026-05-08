@@ -335,7 +335,13 @@ def generate_from_schema(req: SchemaGenerateRequest):
                              for d in np.random.randint(0, delta, n)], dtype=object)
 
         elif ftype == "email":
-            data = np.array([f"user{i}@{random.choice(DOMAINS)}" for i in range(n)], dtype=object)
+            def _make_email(_):
+                first  = random.choice(FIRST).lower()
+                last   = random.choice(LAST).lower()
+                sep    = random.choice([".", "_", ""])
+                suffix = str(random.randint(1, 99)) if random.random() < 0.3 else ""
+                return f"{first}{sep}{last}{suffix}@{random.choice(DOMAINS)}"
+            data = np.array([_make_email(i) for i in range(n)], dtype=object)
         elif ftype == "uuid":
             data = np.array([str(uuid_module.uuid4()) for _ in range(n)], dtype=object)
         elif ftype == "phone":
