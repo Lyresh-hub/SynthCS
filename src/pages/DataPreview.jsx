@@ -526,6 +526,24 @@ export default function DataPreview() {
                     )}
                   </div>
                 )}
+
+                {/* Navigate to full report page — passes data via sessionStorage so the URL stays clean */}
+                <button
+                  onClick={() => {
+                    sessionStorage.setItem("validation_report", JSON.stringify({
+                      datasetName,
+                      rowCount:    total_rows,
+                      columnCount: columns.length,
+                      overall_score,
+                      status,
+                      metrics,
+                    }));
+                    setLocation("/validation-report");
+                  }}
+                  className="w-full mt-1 py-2 rounded-lg text-xs font-semibold bg-gradient-to-r from-purple-600 to-indigo-600 text-white hover:from-purple-700 hover:to-indigo-700 transition-all shadow-sm"
+                >
+                  View Full Report →
+                </button>
               </div>
             );
           })()}

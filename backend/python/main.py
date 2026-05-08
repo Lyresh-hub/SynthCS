@@ -205,8 +205,33 @@ def generate_from_schema(req: SchemaGenerateRequest):
     import string
     from datetime import datetime, timedelta
 
-    FIRST   = ["Alice","Bob","Carlos","Diana","Eve","Frank","Grace","Henry","Iris","Jack","Karen","Leo","Maria","Nathan","Oliver","Priya","Quinn","Rachel","Samuel","Tina"]
-    LAST    = ["Smith","Johnson","Williams","Brown","Jones","Garcia","Davis","Miller","Wilson","Moore","Taylor","Anderson","Martinez","Lee","Thompson","White","Harris","Clark"]
+    FIRST = [
+        # Filipino male
+        "Jose","Juan","Miguel","Carlo","Antonio","Ricardo","Eduardo","Fernando","Ramon","Roberto",
+        "Noel","Christian","Ryan","Kenneth","Angelo","Jerome","Jason","Brian","Kevin","Ronald",
+        "Emmanuel","Alex","Ivan","Dennis","Arnold","Gilbert","Bernard","Virgilio","Andres","Rodrigo",
+        "Mark","John","Patrick","James","Daniel","Michael","David","Joseph","Robert","Christopher",
+        # Filipino female
+        "Maria","Ana","Rosa","Carmen","Elena","Linda","Grace","Marisol","Luz","Cristina",
+        "Fatima","Lourdes","Teresa","Corazon","Dolores","Jessica","Karen","Michelle","Patricia","Sandra",
+        "Angelica","Kristine","Jenny","Stephanie","Nicole","Maricel","Rowena","Jennylyn","Precious","Lovely",
+        # International
+        "Alice","Bob","Diana","Eve","Frank","Henry","Iris","Leo","Nathan","Oliver",
+        "Priya","Quinn","Rachel","Samuel","Tina","Emma","Liam","Sophia","Noah","Ava",
+        "William","Isabella","James","Mia","Benjamin","Charlotte","Lucas","Amelia","Mason","Harper",
+    ]
+    LAST = [
+        # Filipino
+        "Santos","Reyes","Cruz","Bautista","Ocampo","Garcia","Mendoza","Torres","Tan","Flores",
+        "Gonzales","Lopez","Ramos","Villanueva","Castro","Morales","Aquino","De Leon","Dela Cruz","Fernandez",
+        "Salvador","Bernardo","Pascual","Tolentino","Santiago","Francisco","Aguilar","Navarro","Castillo","Guevara",
+        "Rivera","Macaraeg","Soriano","Espiritu","Macapagal","Sison","Lacson","Dizon","Manalo","Pangilinan",
+        "Corpuz","Enriquez","Mercado","Buenaventura","Constantino","Delos Santos","Estrada","Ilagan","Jimenez","Lim",
+        # International
+        "Smith","Johnson","Williams","Brown","Jones","Davis","Miller","Wilson","Moore","Taylor",
+        "Anderson","Martinez","Lee","Thompson","White","Harris","Clark","Lewis","Walker","Hall",
+        "Young","Allen","King","Wright","Scott","Green","Baker","Adams","Nelson","Carter",
+    ]
     STREETS = ["Main St","Oak Ave","Pine Rd","Elm St","Cedar Ln","Maple Dr","River Rd","Park Blvd","Sunset Blvd","Lake Dr"]
     DOMAINS = ["gmail.com","yahoo.com","hotmail.com","outlook.com","icloud.com","proton.me"]
 
@@ -268,6 +293,226 @@ def generate_from_schema(req: SchemaGenerateRequest):
         "description":["Standard configuration","Custom setup","Default settings","Advanced configuration","Minimal setup","Full installation","Partial deployment"],
         "tag":        ["urgent","important","low-priority","follow-up","escalated","new","resolved","archived","flagged","reviewed"],
         "label":      ["urgent","important","low-priority","follow-up","escalated","new","resolved","archived","flagged","reviewed"],
+        # People & identity
+        "nationality":["American","Filipino","Canadian","German","Japanese","Australian","Brazilian","Indian","French","British","Mexican","Korean","Italian","Spanish","Dutch","Singaporean","Thai","Indonesian","Vietnamese","Chinese"],
+        "citizenship":["American","Filipino","Canadian","German","Japanese","Australian","Brazilian","Indian","French","British","Mexican","Korean","Italian","Spanish","Dutch","Singaporean","Thai","Indonesian"],
+        "ethnicity":  ["Asian","White","Hispanic","Black","Mixed","Pacific Islander","Middle Eastern","Native American","South Asian","Southeast Asian"],
+        "blood":      ["A+","A-","B+","B-","AB+","AB-","O+","O-"],  # matches blood_type, blood_group
+        # Organizations & work
+        "company":    ["Google","Apple","Microsoft","Amazon","Meta","Netflix","Tesla","Samsung","IBM","Intel","Oracle","Adobe","Salesforce","Shopify","Uber","Airbnb","Spotify","Grab","Lazada","SM Group","Ayala Corporation","BDO Unibank","PLDT","Meralco","Jollibee","Globe Telecom","Ayala Land","BPI","Metrobank"],
+        "organization":["United Nations","World Health Organization","Red Cross","UNICEF","Amnesty International","Greenpeace","World Bank","IMF","ASEAN","APEC","NATO","WHO","UNESCO","UNDP","ILO"],
+        "employer":   ["Google","Apple","Microsoft","Amazon","Meta","Netflix","Tesla","Samsung","IBM","Intel","Oracle","Adobe","Salesforce","Shopify","Uber","Jollibee","Globe","PLDT","SM Group","Ayala"],
+        "brand":      ["Nike","Adidas","Apple","Samsung","Toyota","Honda","Sony","LG","Uniqlo","H&M","Zara","Louis Vuitton","Gucci","Prada","Chanel","Rolex","Nestlé","Coca-Cola","Pepsi","McDonald's"],
+        "job_title":  ["Software Engineer","Product Manager","Data Analyst","UX Designer","Marketing Manager","HR Specialist","Financial Analyst","Operations Manager","Sales Representative","IT Specialist","Customer Service Representative","Business Analyst","Project Manager","QA Engineer","DevOps Engineer","Full Stack Developer","Data Scientist","Content Writer","Graphic Designer","Accountant"],
+        "position":   ["Software Engineer","Product Manager","Data Analyst","UX Designer","Marketing Manager","HR Specialist","Financial Analyst","Operations Manager","Sales Representative","IT Specialist","Business Analyst","Project Manager","Team Lead","Senior Associate","Director","VP","Associate","Intern","Senior Engineer","Lead Developer"],
+        "designation":["Software Engineer","Product Manager","Data Analyst","Marketing Manager","HR Specialist","Operations Manager","Sales Representative","IT Specialist","Business Analyst","Project Manager","Team Lead","Director","VP","Associate","Senior Engineer","Intern","Consultant","Specialist","Coordinator","Supervisor"],
+        # Education
+        "university": ["University of the Philippines","De La Salle University","Ateneo de Manila University","University of Santo Tomas","Far Eastern University","Polytechnic University of the Philippines","National University","Mapua University","Harvard University","MIT","Stanford University","Oxford University","Cambridge University","UC Berkeley","Yale University"],
+        "college":    ["University of the Philippines","De La Salle University","Ateneo de Manila University","University of Santo Tomas","Far Eastern University","Polytechnic University of the Philippines","National University","Mapua University","Harvard University","MIT","Stanford University","Oxford University"],
+        "school":     ["UP High School","Ateneo de Manila","La Salle Greenhills","Xavier School","Assumption College","Miriam College","San Beda","Adamson University","Mapua University","National University","Harvard University","Oxford University","MIT"],
+        "institution":["University of the Philippines","De La Salle University","Ateneo de Manila University","University of Santo Tomas","National University","Mapua University","Harvard University","MIT","Stanford University","Oxford University","Cambridge University"],
+        "course":     ["Computer Science","Business Administration","Nursing","Information Technology","Electronics Engineering","Civil Engineering","Accountancy","Psychology","Architecture","Medicine","Law","Tourism","Communication","Marketing","Finance","Education","Biology","Chemistry","Physics","Mathematics"],
+        "subject":    ["Mathematics","English","Science","History","Geography","Physics","Chemistry","Biology","Computer Science","Physical Education","Art","Music","Social Studies","Philosophy","Economics","Literature","Filipino","Statistics","Trigonometry","Calculus"],
+        "major":      ["Computer Science","Business Administration","Nursing","Information Technology","Engineering","Education","Accountancy","Psychology","Architecture","Liberal Arts","Fine Arts","Mathematics","Biology","Chemistry","Physics","Communication","Marketing","Finance","Law","Medicine"],
+        "degree":     ["High School","Bachelor's","Master's","PhD","Associate","Vocational","Doctor of Medicine","Juris Doctor","MBA","MSc","MA"],
+        "year_level": ["1st Year","2nd Year","3rd Year","4th Year","5th Year","Graduate"],
+        # Products & commerce
+        "product_name":["Laptop Pro X","Wireless Earbuds","Smart Watch Series 5","4K Monitor","Mechanical Keyboard","Gaming Mouse","USB-C Hub","Portable Charger","Bluetooth Speaker","Webcam HD","Office Chair","Standing Desk","Notebook Set","Pen Drive 128GB","External SSD","Smart TV 55\"","Air Purifier","Coffee Maker","Electric Fan","Rice Cooker"],
+        "item":       ["Laptop","Smartphone","Tablet","Monitor","Keyboard","Mouse","Headphones","Charger","Speaker","Webcam","Chair","Desk","Notebook","USB Drive","Hard Drive","TV","Printer","Scanner","Router","Switch"],
+        "service":    ["Cloud Hosting","Technical Support","Consulting","Training","Maintenance","Installation","Delivery","Subscription","Premium Access","API Access","Data Storage","Email Service","VPN Service","Security Audit","Software License"],
+        "payment_method":["Credit Card","Debit Card","PayPal","GCash","Maya","Bank Transfer","Cash","Cryptocurrency","Check","Installment"],
+        "payment":    ["Credit Card","Debit Card","PayPal","GCash","Maya","Bank Transfer","Cash","Cryptocurrency","Check","Installment"],
+        "shipping":   ["Standard","Express","Overnight","Same-Day","Free Shipping","Economy","Priority","Tracked","Untracked","International"],
+        # Health & medical
+        "ward":       ["ICU","Emergency","Pediatrics","Cardiology","Oncology","Neurology","Orthopedics","Maternity","Geriatrics","Psychiatry","General"],
+        "hospital":   ["Philippine General Hospital","St. Luke's Medical Center","Makati Medical Center","The Medical City","Asian Hospital","National Kidney Institute","Cardinal Santos Medical Center","Ospital ng Maynila","University of Santo Tomas Hospital","St. Elizabeth Hospital"],
+        "specialist": ["Cardiologist","Neurologist","Oncologist","Pediatrician","Orthopedic Surgeon","Dermatologist","Psychiatrist","Radiologist","Endocrinologist","Gastroenterologist","General Practitioner","Ophthalmologist","ENT Specialist","Pulmonologist","Rheumatologist"],
+        "symptom":    ["Fever","Cough","Headache","Fatigue","Shortness of breath","Nausea","Chest pain","Dizziness","Back pain","Joint pain","Sore throat","Rash","Vomiting","Diarrhea","Loss of appetite"],
+        # Philippine-specific geography
+        "barangay":   ["Barangay 1","Barangay 2","Barangay 3","Barangay 4","Barangay 5","Barangay 6","Barangay 7","Barangay 8","Barangay 9","Barangay 10","Barangay 11","Barangay 12","Barangay 13","Barangay 14","Barangay 15","Barangay 16","Barangay 17","Barretto","East Bajac-Bajac","West Bajac-Bajac","East Tapinac","West Tapinac","Gordon Heights","Kalaklan","Mabayuan","New Cabalan","Old Cabalan","Pag-asa","Sta. Rita"],
+        "brgy":       ["Barangay 1","Barangay 2","Barangay 3","Barangay 4","Barangay 5","Barangay 6","Barangay 7","Barangay 8","Barangay 9","Barangay 10","Barangay 11","Barangay 12","Barangay 13","Barangay 14","Barangay 15","Barangay 16","Barangay 17","Barretto","East Bajac-Bajac","West Bajac-Bajac","East Tapinac","West Tapinac","Gordon Heights","Kalaklan","Mabayuan","New Cabalan","Old Cabalan","Pag-asa","Sta. Rita"],
+        "municipality":["Olongapo","Subic","San Antonio","San Narciso","Castillejos","San Felipe","Santa Cruz","Palauig","Candelaria","Masinloc","Iba","San Marcelino","Cabangan","San Antonio","Botolan"],
+        "district":   ["District 1","District 2","District 3","District 4","District 5","Northern District","Southern District","Eastern District","Western District","Central District"],
+        # Philippine regions and provinces (proper names)
+        "ph_region":  ["NCR","Region I","Region II","Region III","Region IV-A","Region IV-B","Region V","Region VI","Region VII","Region VIII","Region IX","Region X","Region XI","Region XII","CARAGA","CAR","BARMM"],
+        "ph_province":["Metro Manila","Cebu","Davao del Sur","Laguna","Batangas","Pampanga","Bulacan","Cavite","Rizal","Pangasinan","Zambales","Nueva Ecija","Iloilo","Negros Occidental","Leyte","Quezon","Camarines Sur","Albay","Isabela","Cagayan"],
+        # Time and scheduling
+        "day_of_week":["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"],
+        "weekday":    ["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"],
+        "month_name": ["January","February","March","April","May","June","July","August","September","October","November","December"],
+        "quarter":    ["Q1","Q2","Q3","Q4","1st Quarter","2nd Quarter","3rd Quarter","4th Quarter"],
+        "shift":      ["Morning Shift","Afternoon Shift","Night Shift","Graveyard Shift","Day Shift"],
+        "time_slot":  ["8:00 AM","9:00 AM","10:00 AM","11:00 AM","12:00 PM","1:00 PM","2:00 PM","3:00 PM","4:00 PM","5:00 PM","6:00 PM","7:00 PM"],
+        "schedule":   ["Daily","Weekly","Bi-weekly","Monthly","Quarterly","Annually","On-demand","Flexible","Fixed"],
+        "frequency":  ["Daily","Weekly","Bi-weekly","Monthly","Quarterly","Annually","One-time","Recurring"],
+        "semester":   ["1st Semester","2nd Semester","Summer Term"],
+        "school_year":["2020-2021","2021-2022","2022-2023","2023-2024","2024-2025","2025-2026"],
+        "term":       ["1st Semester","2nd Semester","Summer Term","1st Quarter","2nd Quarter","3rd Quarter","4th Quarter"],
+        # Personal / demographic
+        "civil_status":["Single","Married","Widowed","Separated","Annulled","Live-in"],
+        "relationship":["Single","Married","Widowed","Separated","Annulled","Divorced","In a Relationship"],
+        "religion":   ["Roman Catholic","Islam","Iglesia ni Cristo","Protestant","Seventh-day Adventist","Buddhism","Jehovah's Witness","Evangelical","Pentecostal","Atheist / Agnostic","Other"],
+        "suffix":     ["Jr.","Sr.","II","III","IV","N/A"],
+        "honorific":  ["Mr.","Ms.","Mrs.","Dr.","Engr.","Atty.","Prof.","Rev."],
+        "salutation": ["Mr.","Ms.","Mrs.","Dr.","Engr.","Atty.","Prof."],
+        # Philippine K-12 and education
+        "strand":     ["STEM","ABM","HUMSS","GAS","TVL – Industrial Arts","TVL – Home Economics","TVL – ICT","TVL – Agriculture","Sports Track","Arts and Design Track"],
+        "track":      ["Academic Track","Technical-Vocational-Livelihood Track","Sports Track","Arts and Design Track"],
+        "section":    ["Section A","Section B","Section C","Section D","Section E","Section F","Section G","Section H"],
+        "year_level": ["Grade 7","Grade 8","Grade 9","Grade 10","Grade 11","Grade 12","1st Year","2nd Year","3rd Year","4th Year","5th Year","Graduate"],
+        "grading_period":["1st Grading","2nd Grading","3rd Grading","4th Grading","1st Quarter","2nd Quarter","3rd Quarter","4th Quarter"],
+        "learning_mode":["Face-to-Face","Online","Modular","Blended","Homeschool"],
+        # Result / outcome / decision
+        "result":     ["Passed","Failed","Incomplete","Pending","Under Review","Conditionally Passed"],
+        "outcome":    ["Successful","Failed","Pending","Completed","Cancelled","In Progress","On Hold"],
+        "verdict":    ["Approved","Rejected","Pending","Under Review","Conditionally Approved","Deferred"],
+        "decision":   ["Approved","Rejected","Pending","Under Review","Escalated","Deferred"],
+        "pass_fail":  ["Pass","Fail"],
+        "approval":   ["Approved","Rejected","Pending","Under Review","Conditionally Approved"],
+        # Purpose / reason / mode
+        "purpose":    ["Personal","Business","Education","Research","Recreation","Emergency","Medical","Travel","Shopping","Government"],
+        "reason":     ["Personal","Business","Academic","Medical","Travel","Shopping","Recreation","Emergency","Voluntary","Involuntary"],
+        "cause":      ["Natural Causes","Accident","Illness","Unknown","Under Investigation","Negligence"],
+        "mode":       ["Online","Walk-in","Phone","Email","In-person","Remote","Hybrid"],
+        "method":     ["Online","Cash","Bank Transfer","Credit Card","Debit Card","GCash","Maya","Check","Installment","COD"],
+        "channel":    ["Website","Mobile App","Social Media","Email","SMS","Phone Call","In-Store","Partner","Referral"],
+        "source":     ["Website","Social Media","Referral","Email","Walk-in","Advertisement","Search Engine","Word of Mouth","Partner","Agent"],
+        "transport":  ["Car","Bus","Jeepney","Tricycle","Motorcycle","Train (MRT/LRT)","Plane","Ship","Bicycle","UV Express","P2P Bus"],
+        "vehicle":    ["Sedan","SUV","Truck","Van","Motorcycle","Bus","Jeepney","Tricycle","Bicycle","Electric Vehicle"],
+        # Access / account / membership
+        "access_level":["Full Access","Read Only","Write Only","Admin","Restricted","Guest","Public","Private"],
+        "account_type":["Admin","Regular User","Premium","Guest","Staff","Moderator","Subscriber","Visitor"],
+        "membership": ["Free","Basic","Standard","Premium","VIP","Gold","Silver","Platinum","Trial"],
+        "subscription":["Free","Monthly","Quarterly","Annual","Lifetime","Trial","Enterprise"],
+        "tier":       ["Bronze","Silver","Gold","Platinum","Diamond","Free","Basic","Pro"],
+        # Logistics and orders
+        "order_status":["Pending","Confirmed","Processing","Shipped","Out for Delivery","Delivered","Cancelled","Returned","Refunded"],
+        "delivery_status":["Pending","Dispatched","In Transit","Out for Delivery","Delivered","Failed","Returned"],
+        "tracking":   ["Pending","In Transit","Out for Delivery","Delivered","Exception","Returned to Sender"],
+        "return_reason":["Defective","Wrong Item","Changed Mind","Not as Described","Duplicate Order","Other"],
+        # File / format / technical
+        "format":     ["PDF","Excel (.xlsx)","CSV","Word (.docx)","JSON","XML","PNG","JPEG","MP4","ZIP","TXT","PowerPoint (.pptx)"],
+        "file_type":  ["Document","Spreadsheet","Image","Video","Audio","Archive","Database","Executable","Text","Presentation"],
+        "extension":  [".pdf",".xlsx",".csv",".docx",".json",".xml",".png",".jpg",".mp4",".zip",".txt",".pptx"],
+        "resolution": ["1080p","720p","4K","480p","1440p","360p","2160p"],
+        # Business / operations
+        "transaction_type":["Credit","Debit","Transfer","Withdrawal","Deposit","Payment","Refund","Adjustment"],
+        "transaction":["Credit","Debit","Transfer","Withdrawal","Deposit","Payment","Refund","Adjustment"],
+        "invoice_status":["Paid","Unpaid","Overdue","Partially Paid","Cancelled","Draft","Sent"],
+        "contract_type":["Full-time","Part-time","Contractual","Project-based","Probationary","Consultancy","Internship"],
+        "employment": ["Full-time","Part-time","Contractual","Project-based","Probationary","Consultancy","Internship","Casual"],
+        "position_level":["Entry Level","Junior","Mid-level","Senior","Lead","Manager","Director","VP","C-Level","Intern"],
+        # Events and occasions
+        "occasion":   ["Birthday","Wedding","Anniversary","Christmas","New Year","Valentine's Day","Graduation","Baptism","Reunion","Fiesta","Halloween","Thanksgiving","Easter","Mother's Day","Father's Day"],
+        "event_type": ["Conference","Seminar","Workshop","Webinar","Training","Meeting","Party","Wedding","Birthday","Graduation","Exhibition","Festival"],
+        "holiday":    ["New Year's Day","Valentine's Day","Holy Week","Labor Day","Independence Day","Bonifacio Day","Christmas Day","Rizal Day","All Saints' Day","Eid al-Fitr","Eid al-Adha"],
+        # Feedback / satisfaction
+        "satisfaction":["Very Satisfied","Satisfied","Neutral","Dissatisfied","Very Dissatisfied"],
+        "rating_label":["Poor","Fair","Good","Very Good","Excellent"],
+        "recommendation":["Highly Recommended","Recommended","Neutral","Not Recommended","Would Not Recommend"],
+        # IT / network / system
+        "log_level":  ["INFO","DEBUG","WARNING","ERROR","CRITICAL","FATAL","TRACE"],
+        "environment":["Development","Staging","Production","Testing","QA","Pre-production","Sandbox"],
+        "http_method":["GET","POST","PUT","DELETE","PATCH","HEAD","OPTIONS"],
+        "error_code": ["200","201","400","401","403","404","422","500","502","503"],
+    }
+
+    # Smart numeric ranges keyed by substring of field name (applied when no user constraints are given)
+    _NUMERIC_SMART: dict[str, tuple[float, float, str]] = {
+        "age":          (18,    80,       "normal"),
+        "salary":       (25000, 150000,   "skewed"),
+        "income":       (25000, 150000,   "skewed"),
+        "wage":         (15,    100,      "skewed"),
+        "price":        (1.0,   999.99,   "skewed"),
+        "cost":         (1.0,   5000.0,   "skewed"),
+        "amount":       (10.0,  10000.0,  "skewed"),
+        "fee":          (1.0,   500.0,    "uniform"),
+        "revenue":      (1000,  1000000,  "skewed"),
+        "budget":       (500,   500000,   "skewed"),
+        "balance":      (0,     100000,   "skewed"),
+        "credit_score": (300,   850,      "normal"),
+        "score":        (0,     100,      "normal"),
+        "rating":       (1,     5,        "normal"),
+        "gpa":          (1.5,   4.0,      "normal"),
+        "grade":        (60,    100,      "normal"),
+        "year":         (2015,  2025,     "uniform"),
+        "quantity":     (1,     500,      "skewed"),
+        "qty":          (1,     500,      "skewed"),
+        "stock":        (0,     1000,     "uniform"),
+        "weight":       (40,    150,      "normal"),
+        "height":       (150,   200,      "normal"),
+        "bmi":          (17.5,  35.0,     "normal"),
+        "temperature":  (36.0,  39.5,     "normal"),
+        "percent":      (0,     100,      "normal"),
+        "percentage":   (0,     100,      "normal"),
+        "pct":          (0,     100,      "normal"),
+        "ratio":        (0.0,   1.0,      "uniform"),
+        "discount":     (0,     70,       "skewed"),
+        "tax":          (0,     30,       "normal"),
+        "interest":     (0.1,   25.0,     "normal"),
+        "distance":     (1,     10000,    "skewed"),
+        "speed":        (0,     200,      "normal"),
+        "latitude":     (-90,   90,       "uniform"),
+        "longitude":    (-180,  180,      "uniform"),
+        "lat":          (-90,   90,       "uniform"),
+        "lon":          (-180,  180,      "uniform"),
+        "lng":          (-180,  180,      "uniform"),
+        "port":         (1024,  65535,    "uniform"),
+        "duration":     (1,     3600,     "skewed"),
+        "rank":         (1,     1000,     "uniform"),
+        "capacity":     (1,     10000,    "skewed"),
+        "population":   (1000,  10000000, "skewed"),
+        # Time components
+        "hours":        (0,     23,       "uniform"),
+        "hour":         (0,     23,       "uniform"),
+        "minutes":      (0,     59,       "uniform"),
+        "seconds":      (0,     59,       "uniform"),
+        "day_num":      (1,     31,       "uniform"),
+        "month_num":    (1,     12,       "uniform"),
+        # Academic
+        "units":        (3,     24,       "uniform"),
+        "marks":        (0,     100,      "normal"),
+        "gwa":          (1.0,   4.0,      "normal"),
+        # Physical measurements
+        "bmi":          (17.5,  35.0,     "normal"),
+        "pulse":        (60,    100,      "normal"),
+        "heart_rate":   (60,    100,      "normal"),
+        "blood_pressure_systolic":  (90,  140, "normal"),
+        "blood_pressure_diastolic": (60,  90,  "normal"),
+        # Business / financial
+        "order_total":  (100,   50000,    "skewed"),
+        "invoice":      (500,   500000,   "skewed"),
+        "tip":          (0,     500,      "skewed"),
+        "profit":       (0,     100000,   "skewed"),
+        "loss":         (0,     50000,    "skewed"),
+        "expense":      (100,   50000,    "skewed"),
+        "payment_amount":(100,  100000,   "skewed"),
+        "transaction_amount":(100, 500000,"skewed"),
+        # Engagement / analytics
+        "views":        (0,     100000,   "skewed"),
+        "clicks":       (0,     10000,    "skewed"),
+        "likes":        (0,     50000,    "skewed"),
+        "shares":       (0,     5000,     "skewed"),
+        "downloads":    (0,     10000,    "skewed"),
+        "impressions":  (0,     500000,   "skewed"),
+        # Location
+        "floor":        (1,     50,       "uniform"),
+        "room":         (100,   999,      "uniform"),
+        "unit":         (1,     200,      "uniform"),
+        "zip":          (1000,  9999,     "uniform"),
+        # Logistics
+        "passengers":   (1,     500,      "skewed"),
+        "seats":        (1,     100,      "uniform"),
+        "items":        (1,     100,      "skewed"),
+        "pages":        (1,     500,      "skewed"),
+        "chapters":     (1,     50,       "uniform"),
+        "episodes":     (1,     100,      "uniform"),
+        "seasons":      (1,     20,       "uniform"),
+        "attempts":     (1,     10,       "skewed"),
+        "errors":       (0,     50,       "skewed"),
+        "retries":      (0,     5,        "skewed"),
+        "response_time":(10,    5000,     "skewed"),
+        "uptime":       (90.0,  100.0,    "normal"),
     }
 
     def _keyword_pool(field_name: str, description: str) -> list[str] | None:
@@ -279,6 +524,17 @@ def generate_from_schema(req: SchemaGenerateRequest):
 
     def gen_col(ftype: str, n: int, c: FieldConstraints, field_name: str = "", description: str = ""):
         null_mask = np.random.random(n) < (min(c.null_rate, 50.0) / 100.0)
+
+        # Normalised field name used for all pattern checks below
+        fname = field_name.lower().replace(" ", "_").replace("-", "_")
+
+        # Apply smart numeric ranges when the user left min/max blank
+        if ftype in ("integer", "float") and c.min_val is None and c.max_val is None:
+            for kw, (s_lo, s_hi, s_dist) in _NUMERIC_SMART.items():
+                if kw in fname:
+                    c = FieldConstraints(min_val=s_lo, max_val=s_hi,
+                                         distribution=s_dist, null_rate=c.null_rate)
+                    break
 
         if ftype == "integer":
             lo = int(c.min_val) if c.min_val is not None else 1
@@ -307,6 +563,52 @@ def generate_from_schema(req: SchemaGenerateRequest):
         elif ftype == "string":
             if c.enum_values:
                 data = np.random.choice(c.enum_values, n).astype(object)
+
+            # ── Name-component patterns need FIRST/LAST combined specially ──
+            elif any(p in fname for p in ("full_name", "fullname", "full name", "complete_name")):
+                data = np.array([f"{random.choice(FIRST)} {random.choice(LAST)}" for _ in range(n)], dtype=object)
+            elif any(p in fname for p in ("first_name", "firstname", "fname", "given_name", "forename")):
+                data = np.array([random.choice(FIRST) for _ in range(n)], dtype=object)
+            elif any(p in fname for p in ("last_name", "lastname", "lname", "surname", "family_name", "middle_name", "middlename")):
+                data = np.array([random.choice(LAST) for _ in range(n)], dtype=object)
+
+            # ── Username: realistic handles like alice.smith42 ──
+            elif any(p in fname for p in ("username", "user_name", "login", "handle", "screen_name", "account_name")):
+                seps = [".", "_", ""]
+                data = np.array([
+                    f"{random.choice(FIRST).lower()}{random.choice(seps)}{random.choice(LAST).lower()}"
+                    f"{random.randint(1,99) if random.random()<0.4 else ''}"
+                    for _ in range(n)
+                ], dtype=object)
+
+            # ── Website / URL ──
+            elif any(p in fname for p in ("website", "url", "web_url", "link", "homepage", "site_url", "webpage")):
+                prefixes = ["www.",""]
+                tlds = [".com",".org",".net",".io",".co",".ph"]
+                stems = ["tech","solutions","global","smart","digital","next","alpha","nova","prime","core","hub","lab","works","group","media"]
+                data = np.array([
+                    f"https://{random.choice(prefixes)}{random.choice(LAST).lower()}{random.choice(stems)}{random.choice(tlds)}"
+                    for _ in range(n)
+                ], dtype=object)
+
+            # ── Zip / postal code ──
+            elif any(p in fname for p in ("zip_code", "zipcode", "zip", "postal_code", "postcode", "postal")):
+                data = np.array([f"{random.randint(1000, 9999)}" for _ in range(n)], dtype=object)
+
+            # ── General person-name catch: "name" alone, or *_name fields that are
+            #    clearly about a person (patient_name, customer_name, employee_name, etc.)
+            #    Excludes technical names: file_name, table_name, product_name, etc. ──
+            elif fname == "name" or (
+                "_name" in fname and not any(ex in fname for ex in (
+                    "file","column","table","database","domain","host","service","app",
+                    "system","page","class","function","variable","method","object",
+                    "bucket","key","field","attr","property","product","brand","item",
+                    "drug","street","city","country","region","company","org","team",
+                    "store","shop","game","song","book","movie","course","subject",
+                ))
+            ):
+                data = np.array([f"{random.choice(FIRST)} {random.choice(LAST)}" for _ in range(n)], dtype=object)
+
             else:
                 smart_pool = _keyword_pool(field_name, description)
                 if smart_pool:

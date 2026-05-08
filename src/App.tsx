@@ -23,6 +23,7 @@ import PrivacyMode from "./pages/PrivacyMode";
 import UserAccounts from "./pages/UserAccounts";
 import AdminPanel from "./pages/AdminPanel";
 import AdminUsers from "./pages/AdminUsers";
+import ValidationReport from "./pages/ValidationReport";
 
 // Bago mag-start ang memory router, tignan muna natin kung may espesyal na params sa URL.
 // Halimbawa: kapag nag-click ang user ng verification link sa email, ang URL ay
@@ -50,7 +51,7 @@ function getInitialPath() {
 // sa sessionStorage para kapag nag-refresh ang user, mabalik siya sa tamang page.
 // /preview ay hindi sine-save kasi kailangan niya ng live dataset ID na mawawala pagkatapos ng session
 // Ginagamit natin localStorage (hindi sessionStorage) para maalala kahit isara ang browser
-const UNSAVEABLE_PATHS = new Set(["/", "/login", "/auth/callback", "/preview"]);
+const UNSAVEABLE_PATHS = new Set(["/", "/login", "/auth/callback", "/preview", "/validation-report"]);
 function LocationPersist() {
   const [location] = useLocation();
   useEffect(() => {
@@ -121,6 +122,7 @@ export default function App() {
               <Route path="/saved-schemas" component={SavedSchemas} />
               <Route path="/downloads" component={Downloads} />
               <Route path="/preview" component={DataPreview} />
+              <Route path="/validation-report" component={ValidationReport} />
               <Route path="/api-access" component={APIAccess} />
               <Route path="/privacy-mode" component={PrivacyMode} />
               <Route path="/user-accounts" component={UserAccounts} />
