@@ -114,7 +114,13 @@ def _gaussian_copula_sample(df: pd.DataFrame, n: int) -> pd.DataFrame:
         for i, col in enumerate(num_cols):
             sorted_vals = np.sort(df[col].dropna().values.astype(float))
             quantile_pts = np.linspace(0, 1, len(sorted_vals))
-            synthetic[col] = np.interp(U[:, i], quantile_pts, sorted_vals)
+            generated = np.interp(U[:, i], quantile_pts, sorted_vals)
+            # If original column had only whole numbers, keep synthetic as integers
+            orig_vals = df[col].dropna().values
+            if np.all(orig_vals == orig_vals.astype(int)):
+                synthetic[col] = np.round(generated).astype(int)
+            else:
+                synthetic[col] = np.round(generated, 2)
 
     # Restore original column order
     return synthetic.reindex(columns=df.columns)
