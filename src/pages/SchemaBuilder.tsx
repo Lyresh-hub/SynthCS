@@ -35,7 +35,8 @@ interface Field {
   constraints:  FieldConstraints;
   description:  string;
   expanded:     boolean;
-  llmGenerated?: boolean;   // true = auto-added by augment-schema, shown in yellow
+  llmGenerated?: boolean;   // auto-added by augment-schema → yellow
+  mergedFrom?:   string;    // source label of dataset that contributed this field → blue
 }
 
 interface SmartResult extends KaggleDataset {
@@ -43,6 +44,16 @@ interface SmartResult extends KaggleDataset {
   sourceLabel: string;
   sourceIcon:  string;
 }
+
+// Per-source color tokens (used for tabs, badges, and search result cards)
+const SOURCE_COLORS: Record<string, { dot: string; badge: string; text: string; activeBg: string; activeText: string }> = {
+  kaggle:      { dot: "bg-amber-500",   badge: "bg-amber-50 border-amber-200",   text: "text-amber-700",   activeBg: "bg-amber-500",   activeText: "text-white" },
+  huggingface: { dot: "bg-yellow-500",  badge: "bg-yellow-50 border-yellow-200", text: "text-yellow-700",  activeBg: "bg-yellow-500",  activeText: "text-white" },
+  uci:         { dot: "bg-blue-500",    badge: "bg-blue-50 border-blue-200",     text: "text-blue-700",    activeBg: "bg-blue-500",    activeText: "text-white" },
+  openml:      { dot: "bg-emerald-500", badge: "bg-emerald-50 border-emerald-200", text: "text-emerald-700", activeBg: "bg-emerald-500", activeText: "text-white" },
+  datagov_ph:  { dot: "bg-red-500",     badge: "bg-red-50 border-red-200",       text: "text-red-700",     activeBg: "bg-red-500",     activeText: "text-white" },
+  psa:         { dot: "bg-violet-500",  badge: "bg-violet-50 border-violet-200", text: "text-violet-700",  activeBg: "bg-violet-500",  activeText: "text-white" },
+};
 
 interface Table { id: string; name: string; fields: Field[]; }
 
@@ -93,7 +104,8 @@ export default function SchemaBuilder() {
   const [llmPrompt, setLlmPrompt]   = useState("");
   const [llmLoading, setLlmLoading] = useState(false);
   const [llmError, setLlmError]     = useState("");
-  const [smartResults, setSmartResults] = useState<SmartResult[]>([]);
+  const [smartResults, setSmartResults]       = useState<SmartResult[]>([]);
+  const [selectedSmartIds, setSelectedSmartIds] = useState<Set<string>>(new Set());
   const [strikeWarning, setStrikeWarning] = useState<{ strikes: number; banned: boolean } | null>(null);
 
   const [templateDatasetId,   setTemplateDatasetId]   = useState("");
@@ -345,6 +357,101 @@ export default function SchemaBuilder() {
     }
   };
 
+  // Multi-dataset merge: download all selected, union their schemas, keep primary for CTGAN
+  const handleMergeSelected = async () => {
+    const toDownload = smartResults.filter((ds) => selectedSmartIds.has(`${ds.source}:${ds.ref}`));
+    if (toDownload.length < 2) return;
+
+    setPhase("smart_augmenting");
+    setLoadingMsg(`Downloading and merging ${toDownload.length} datasets…`);
+
+    try {
+      const settled = await Promise.allSettled(
+        toDownload.map((ds) =>
+          fetch(DOWNLOAD_ENDPOINTS[ds.source] ?? DOWNLOAD_ENDPOINTS["kaggle"], {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ dataset_ref: ds.ref }),
+          })
+            .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`Download failed: ${ds.title}`))))
+            .then((data) => ({ ds, data }))
+        )
+      );
+
+      const successful = settled
+        .filter((r): r is PromiseFulfilledResult<{ ds: SmartResult; data: any }> => r.status === "fulfilled")
+        .map((r) => r.value)
+        .sort((a, b) => (b.ds.downloadCount || 0) - (a.ds.downloadCount || 0));
+
+      if (successful.length === 0) throw new Error("All dataset downloads failed.");
+
+      const [primary, ...others] = successful;
+      setDatasetId(primary.data.dataset_id);
+      setKaggleRef(primary.ds.ref);
+
+      const primarySchema: OriginalField[] = primary.data.schema.map((f: any) => ({
+        name: f.name, type: f.type, nullable: f.nullable, sample_values: f.sample_values ?? [],
+      }));
+      setOriginalSchema(primarySchema);
+
+      const seenNames = new Set(primarySchema.map((f) => f.name.toLowerCase()));
+
+      const primaryFields: Field[] = primarySchema.map((f, i) =>
+        makeField({ id: `r${i}`, name: f.name, type: f.type, originalName: f.name, originalType: f.type })
+      );
+
+      const mergedFields: Field[] = [];
+      for (const { ds, data } of others) {
+        const srcLabel = DATA_SOURCES.find((s) => s.id === ds.source)?.label ?? ds.source;
+        for (const f of (data.schema ?? [])) {
+          if (!seenNames.has((f.name as string).toLowerCase())) {
+            seenNames.add((f.name as string).toLowerCase());
+            mergedFields.push(
+              makeField({ id: `m${mergedFields.length}`, name: f.name, type: f.type,
+                originalName: f.name, originalType: f.type, mergedFrom: srcLabel })
+            );
+          }
+        }
+      }
+
+      // If user had a prompt, also augment with any LLM-detected missing fields
+      let llmFields: Field[] = [];
+      if (llmPrompt.trim()) {
+        const allNames = [...primarySchema.map((f) => f.name), ...mergedFields.map((f) => f.name)];
+        try {
+          const augRes = await fetch(`${NODE_API}/api/llm/augment-schema`, {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              existing_schema: allNames.map((n) => ({ name: n, type: "string" })),
+              user_prompt: llmPrompt,
+            }),
+          });
+          const extras: any[] = augRes.ok ? ((await augRes.json()).fields ?? []) : [];
+          llmFields = extras.map((f: any, i: number) =>
+            makeField({
+              id: `llm${i}`, name: f.name, type: f.type,
+              originalName: f.name, originalType: f.type,
+              description: f.description ?? "", llmGenerated: true,
+              constraints: (() => {
+                const c = f.constraints ?? {};
+                const ev = c.enum_values;
+                return { ...c, enum_values: Array.isArray(ev) ? ev.join(", ") : (ev ?? undefined) };
+              })(),
+            })
+          );
+        } catch { /* non-fatal */ }
+      }
+
+      const mergedTitle = toDownload.map((d) => d.title).join(" + ");
+      setTables([{ id: "1", name: mergedTitle, fields: [...primaryFields, ...mergedFields, ...llmFields] }]);
+      setMode("kaggle");
+      setPhase("schema");
+      setSelectedSmartIds(new Set());
+    } catch (e: any) {
+      setErrorMsg(e.message ?? "Dataset merge failed.");
+      setPhase("error");
+    }
+  };
+
   const handleAiSuggestField = async (tid: string, field: Field) => {
     setAiFieldLoading(field.id);
     try {
@@ -374,12 +481,12 @@ export default function SchemaBuilder() {
   // ── External dataset sources ──────────────────────────────────────────────
 
   const DATA_SOURCES = [
-    { id: "kaggle",      label: "Kaggle",        icon: "🏆", placeholder: "e.g. titanic, diabetes, house prices…",    desc: "50,000+ community datasets" },
-    { id: "huggingface", label: "Hugging Face",  icon: "🤗", placeholder: "e.g. banking, sentiment, medical…",        desc: "50,000+ ML-ready datasets" },
-    { id: "uci",         label: "UCI ML Repo",   icon: "🎓", placeholder: "e.g. iris, wine, breast cancer…",          desc: "Classic academic benchmarks" },
-    { id: "openml",      label: "OpenML",        icon: "📊", placeholder: "e.g. diabetes, credit, spam…",             desc: "Research datasets with benchmarks" },
-    { id: "datagov_ph",  label: "Data.gov.ph",   icon: "🇵🇭", placeholder: "e.g. population, education, health…",    desc: "PH government open data" },
-    { id: "psa",         label: "PSA",           icon: "📋", placeholder: "e.g. census, labor, poverty…",             desc: "PH Statistics Authority" },
+    { id: "kaggle",      label: "Kaggle",        placeholder: "e.g. titanic, diabetes, house prices…",   desc: "50,000+ community datasets" },
+    { id: "huggingface", label: "Hugging Face",  placeholder: "e.g. banking, sentiment, medical…",       desc: "50,000+ ML-ready datasets" },
+    { id: "uci",         label: "UCI ML Repo",   placeholder: "e.g. iris, wine, breast cancer…",         desc: "Classic academic benchmarks" },
+    { id: "openml",      label: "OpenML",        placeholder: "e.g. diabetes, credit, spam…",            desc: "Research datasets with benchmarks" },
+    { id: "datagov_ph",  label: "Data.gov.ph",   placeholder: "e.g. population, education, health…",    desc: "PH government open data" },
+    { id: "psa",         label: "PSA",           placeholder: "e.g. census, labor, poverty…",            desc: "PH Statistics Authority" },
   ];
 
   const SEARCH_ENDPOINTS: Record<string, string> = {
@@ -548,9 +655,9 @@ export default function SchemaBuilder() {
     setLoadingMsg(`Training CTGAN · generating ${rowCount.toLocaleString()} rows…`);
     setPhase("generating");
 
-    const hasLlmFields = tables[0].fields.some((f) => f.llmGenerated);
-    const realFields   = tables[0].fields.filter((f) => !f.llmGenerated);
-    const llmFields    = tables[0].fields.filter((f) =>  f.llmGenerated);
+    const hasLlmFields = tables[0].fields.some((f) => f.llmGenerated || f.mergedFrom);
+    const realFields   = tables[0].fields.filter((f) => !f.llmGenerated && !f.mergedFrom);
+    const llmFields    = tables[0].fields.filter((f) =>  f.llmGenerated || f.mergedFrom);
 
     const changes = realFields.map((f) => ({
       original_name: f.originalName || f.name,
@@ -815,38 +922,113 @@ export default function SchemaBuilder() {
 
       {phase === "smart_results" && (
         <div className="bg-white border border-gray-100 rounded-xl overflow-hidden shadow-sm">
-          <div className="px-4 py-3 border-b border-gray-100 bg-purple-50/50 flex items-center justify-between">
+          {/* Header */}
+          <div className="px-4 py-3 border-b border-gray-100 bg-gray-50 flex items-start justify-between gap-3">
             <div>
-              <p className="text-sm font-semibold text-gray-800">Real datasets found — pick one as your base</p>
+              <p className="text-sm font-semibold text-gray-800">Real datasets found</p>
               <p className="text-xs text-gray-500 mt-0.5">
-                Missing fields from your description will be added automatically by AI
+                Select one dataset to use as a base, or select multiple to merge their schemas together.
+                Any fields from your description that are missing will be added automatically.
               </p>
             </div>
             <button
-              onClick={() => { setPhase("idle"); runPureLlmGenerate(); }}
-              className="text-xs text-purple-600 hover:text-purple-800 font-medium underline whitespace-nowrap ml-4">
+              onClick={() => { setPhase("idle"); setSelectedSmartIds(new Set()); runPureLlmGenerate(); }}
+              className="flex-shrink-0 text-xs text-gray-400 hover:text-gray-700 font-medium underline whitespace-nowrap mt-0.5">
               Skip — use pure AI
             </button>
           </div>
+
+          {/* Source legend */}
+          <div className="px-4 py-2 border-b border-gray-50 flex flex-wrap gap-2">
+            {Object.entries(SOURCE_COLORS)
+              .filter(([id]) => smartResults.some((r) => r.source === id))
+              .map(([id, c]) => (
+                <span key={id} className={`flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded-full border ${c.badge} ${c.text}`}>
+                  <span className={`w-1.5 h-1.5 rounded-full ${c.dot}`} />
+                  {DATA_SOURCES.find((s) => s.id === id)?.label ?? id}
+                </span>
+              ))}
+          </div>
+
+          {/* Result rows */}
           <div className="divide-y divide-gray-50">
-            {smartResults.map((ds) => (
-              <button key={`${ds.source}:${ds.ref}`} onClick={() => handleSmartSelect(ds)}
-                className="w-full text-left px-4 py-3 hover:bg-purple-50 transition-colors flex items-center gap-3">
-                <span className="text-lg flex-shrink-0">{ds.sourceIcon}</span>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <p className="text-sm font-medium text-gray-800 truncate">{ds.title}</p>
-                    <span className="text-[10px] px-1.5 py-0.5 bg-gray-100 text-gray-500 rounded-full font-medium flex-shrink-0">
-                      {ds.sourceLabel}
-                    </span>
+            {smartResults.map((ds) => {
+              const key = `${ds.source}:${ds.ref}`;
+              const selected = selectedSmartIds.has(key);
+              const c = SOURCE_COLORS[ds.source] ?? SOURCE_COLORS["kaggle"];
+              return (
+                <div
+                  key={key}
+                  className={`flex items-center gap-3 px-4 py-3 transition-colors cursor-pointer
+                    ${selected ? "bg-gray-50" : "hover:bg-gray-50/60"}`}
+                  onClick={() => {
+                    setSelectedSmartIds((prev) => {
+                      const next = new Set(prev);
+                      if (next.has(key)) next.delete(key);
+                      else next.add(key);
+                      return next;
+                    });
+                  }}
+                >
+                  {/* Checkbox */}
+                  <div className={`w-4 h-4 rounded border-2 flex-shrink-0 flex items-center justify-center transition-colors
+                    ${selected ? "bg-gray-800 border-gray-800" : "border-gray-300"}`}>
+                    {selected && (
+                      <svg viewBox="0 0 10 8" className="w-2.5 h-2.5 fill-white">
+                        <path d="M1 4l2.5 2.5L9 1" stroke="white" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round" />
+                      </svg>
+                    )}
                   </div>
-                  <p className="text-xs text-gray-400 mt-0.5 truncate">
-                    {ds.ref} · {ds.size}{ds.downloadCount > 0 ? ` · ${ds.downloadCount.toLocaleString()} downloads` : ""}
-                  </p>
+
+                  {/* Source dot */}
+                  <span className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${c.dot}`} />
+
+                  {/* Info */}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <p className="text-sm font-medium text-gray-800 truncate">{ds.title}</p>
+                      <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded border ${c.badge} ${c.text} flex-shrink-0`}>
+                        {ds.sourceLabel}
+                      </span>
+                    </div>
+                    <p className="text-xs text-gray-400 mt-0.5 truncate">
+                      {ds.size}{ds.downloadCount > 0 ? ` · ${ds.downloadCount.toLocaleString()} downloads` : ""}
+                      {ds.lastUpdated ? ` · Updated ${ds.lastUpdated}` : ""}
+                    </p>
+                  </div>
                 </div>
-                <Download className="w-4 h-4 text-gray-300 flex-shrink-0" />
-              </button>
-            ))}
+              );
+            })}
+          </div>
+
+          {/* Action bar */}
+          <div className="px-4 py-3 border-t border-gray-100 bg-gray-50 flex items-center justify-between gap-3">
+            <p className="text-xs text-gray-500">
+              {selectedSmartIds.size === 0
+                ? "Select a dataset to continue"
+                : selectedSmartIds.size === 1
+                  ? "1 dataset selected"
+                  : `${selectedSmartIds.size} datasets selected — will be merged`}
+            </p>
+            <div className="flex items-center gap-2">
+              {selectedSmartIds.size === 1 && (() => {
+                const picked = smartResults.find((ds) => selectedSmartIds.has(`${ds.source}:${ds.ref}`));
+                return picked ? (
+                  <button
+                    onClick={() => handleSmartSelect(picked)}
+                    className="flex items-center gap-1.5 px-4 py-1.5 bg-gray-800 text-white rounded-lg text-xs font-semibold hover:bg-gray-900 transition-colors">
+                    <Download className="w-3.5 h-3.5" /> Use Dataset
+                  </button>
+                ) : null;
+              })()}
+              {selectedSmartIds.size >= 2 && (
+                <button
+                  onClick={handleMergeSelected}
+                  className="flex items-center gap-1.5 px-4 py-1.5 bg-gray-800 text-white rounded-lg text-xs font-semibold hover:bg-gray-900 transition-colors">
+                  <Layers className="w-3.5 h-3.5" /> Merge {selectedSmartIds.size} Datasets
+                </button>
+              )}
+            </div>
           </div>
         </div>
       )}
@@ -866,19 +1048,23 @@ export default function SchemaBuilder() {
 
           {/* Source tabs */}
           <div className="flex flex-wrap gap-1.5">
-            {DATA_SOURCES.map((src) => (
-              <button
-                key={src.id}
-                onClick={() => { setDataSource(src.id); setSearchResults([]); setPhase("idle"); }}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border transition-colors
-                  ${dataSource === src.id
-                    ? "bg-purple-600 text-white border-purple-600 shadow-sm"
-                    : "border-gray-200 text-gray-600 hover:border-purple-300 hover:text-purple-600"}`}
-              >
-                <span>{src.icon}</span>
-                {src.label}
-              </button>
-            ))}
+            {DATA_SOURCES.map((src) => {
+              const c = SOURCE_COLORS[src.id];
+              const active = dataSource === src.id;
+              return (
+                <button
+                  key={src.id}
+                  onClick={() => { setDataSource(src.id); setSearchResults([]); setPhase("idle"); }}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border transition-all
+                    ${active
+                      ? `${c.activeBg} ${c.activeText} border-transparent shadow-sm`
+                      : "border-gray-200 text-gray-600 hover:border-gray-300 hover:bg-gray-50"}`}
+                >
+                  <span className={`w-2 h-2 rounded-full flex-shrink-0 ${active ? "bg-white/70" : c.dot}`} />
+                  {src.label}
+                </button>
+              );
+            })}
           </div>
 
           {/* Description */}
@@ -1075,15 +1261,15 @@ export default function SchemaBuilder() {
 
           <div className="flex items-center justify-between">
             {(() => {
-              const hasLlm = table.fields.some((f) => f.llmGenerated);
-              if (hasLlm) return (
-                <div className="flex items-center gap-1.5">
-                  <span className="text-xs font-medium px-2.5 py-1 rounded-full bg-blue-100 text-blue-700">⬡ Real Dataset</span>
-                  <span className="text-xs font-medium px-2.5 py-1 rounded-full bg-yellow-100 text-yellow-700">✦ AI Augmented</span>
-                </div>
-              );
-              if (mode === "llm") return <span className="text-xs font-medium px-2.5 py-1 rounded-full bg-purple-100 text-purple-700">✦ AI Generated Schema</span>;
-              return <span className="text-xs font-medium px-2.5 py-1 rounded-full bg-blue-100 text-blue-700">⬡ Real Dataset</span>;
+              const hasLlm    = table.fields.some((f) => f.llmGenerated);
+              const hasMerged = table.fields.some((f) => f.mergedFrom);
+              const tags: JSX.Element[] = [];
+              if (hasMerged)  tags.push(<span key="m" className="text-xs font-medium px-2.5 py-1 rounded-full bg-gray-800 text-white">Merged Datasets</span>);
+              else            tags.push(<span key="r" className="text-xs font-medium px-2.5 py-1 rounded-full bg-gray-100 text-gray-600">Real Dataset</span>);
+              if (hasLlm)     tags.push(<span key="a" className="text-xs font-medium px-2.5 py-1 rounded-full bg-yellow-100 text-yellow-700">AI Augmented</span>);
+              if (mode === "llm" && !hasMerged && !hasLlm)
+                              return <span className="text-xs font-medium px-2.5 py-1 rounded-full bg-purple-100 text-purple-700">AI Generated Schema</span>;
+              return <div className="flex items-center gap-1.5">{tags}</div>;
             })()}
             <button onClick={() => { setPhase("idle"); setSearchQuery(""); setSearchResults([]); setSaveStatus("idle"); }}
               className="text-xs text-gray-400 hover:text-gray-600 transition-colors">
@@ -1128,9 +1314,11 @@ export default function SchemaBuilder() {
                     ? "bg-purple-50/30"
                     : field.llmGenerated
                       ? "bg-yellow-50/70"
-                      : changed
-                        ? "bg-amber-50"
-                        : "hover:bg-gray-50";
+                      : field.mergedFrom
+                        ? "bg-blue-50/50"
+                        : changed
+                          ? "bg-amber-50"
+                          : "hover:bg-gray-50";
                   return (
                     <Fragment key={field.id}>
                       <tr className={`border-b border-gray-50 transition-colors ${rowBg}`}>
@@ -1145,7 +1333,12 @@ export default function SchemaBuilder() {
                                 className="text-sm bg-transparent focus:outline-none text-gray-800 flex-1 min-w-0" />
                               {field.llmGenerated && (
                                 <span className="flex-shrink-0 text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-yellow-200 text-yellow-800 border border-yellow-300 whitespace-nowrap">
-                                  ✦ AI Added
+                                  AI Added
+                                </span>
+                              )}
+                              {field.mergedFrom && (
+                                <span className="flex-shrink-0 text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-blue-100 text-blue-700 border border-blue-200 whitespace-nowrap">
+                                  {field.mergedFrom}
                                 </span>
                               )}
                             </div>
@@ -1213,14 +1406,27 @@ export default function SchemaBuilder() {
             </div>
           </div>
 
-          {/* LLM-added fields legend */}
-          {table.fields.some((f) => f.llmGenerated) && (
-            <div className="flex items-start gap-2 bg-yellow-50 border border-yellow-200 rounded-xl px-3 py-2.5 text-xs text-yellow-800">
-              <span className="text-base leading-none flex-shrink-0">✦</span>
-              <span>
-                <strong>AI-augmented fields</strong> (highlighted in yellow) were automatically added because your description mentioned them but the real dataset didn't include them.
-                These fields are generated using smart schema rules — not hallucinated values — and are fully editable.
-              </span>
+          {/* Field origin legend */}
+          {(table.fields.some((f) => f.llmGenerated) || table.fields.some((f) => f.mergedFrom)) && (
+            <div className="space-y-1.5">
+              {table.fields.some((f) => f.mergedFrom) && (
+                <div className="flex items-start gap-2 bg-blue-50 border border-blue-200 rounded-xl px-3 py-2.5 text-xs text-blue-800">
+                  <span className="w-2.5 h-2.5 rounded-full bg-blue-400 flex-shrink-0 mt-0.5" />
+                  <span>
+                    <strong>Merged fields</strong> (blue) came from other selected datasets whose columns didn't overlap with the primary dataset.
+                    Values are generated using smart schema rules based on field name and type.
+                  </span>
+                </div>
+              )}
+              {table.fields.some((f) => f.llmGenerated) && (
+                <div className="flex items-start gap-2 bg-yellow-50 border border-yellow-200 rounded-xl px-3 py-2.5 text-xs text-yellow-800">
+                  <span className="w-2.5 h-2.5 rounded-full bg-yellow-400 flex-shrink-0 mt-0.5" />
+                  <span>
+                    <strong>AI-added fields</strong> (yellow) were automatically detected from your description — they were missing from the real dataset.
+                    Generated using smart schema rules, not hallucinated values. Fully editable.
+                  </span>
+                </div>
+              )}
             </div>
           )}
 
