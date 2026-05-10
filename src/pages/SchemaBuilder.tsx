@@ -78,6 +78,7 @@ export default function SchemaBuilder() {
   const [loadingMsg, setLoadingMsg] = useState("");
   const [errorMsg, setErrorMsg]     = useState("");
 
+  const [dataSource, setDataSource]       = useState("kaggle");
   const [searchQuery, setSearchQuery]     = useState("");
   const [searchResults, setSearchResults] = useState<KaggleDataset[]>([]);
 
@@ -284,13 +285,42 @@ export default function SchemaBuilder() {
     }
   };
 
-  // ── Kaggle ────────────────────────────────────────────────────────────────
+  // ── External dataset sources ──────────────────────────────────────────────
+
+  const DATA_SOURCES = [
+    { id: "kaggle",      label: "Kaggle",        icon: "🏆", placeholder: "e.g. titanic, diabetes, house prices…",    desc: "50,000+ community datasets" },
+    { id: "huggingface", label: "Hugging Face",  icon: "🤗", placeholder: "e.g. banking, sentiment, medical…",        desc: "50,000+ ML-ready datasets" },
+    { id: "uci",         label: "UCI ML Repo",   icon: "🎓", placeholder: "e.g. iris, wine, breast cancer…",          desc: "Classic academic benchmarks" },
+    { id: "openml",      label: "OpenML",        icon: "📊", placeholder: "e.g. diabetes, credit, spam…",             desc: "Research datasets with benchmarks" },
+    { id: "datagov_ph",  label: "Data.gov.ph",   icon: "🇵🇭", placeholder: "e.g. population, education, health…",    desc: "PH government open data" },
+    { id: "psa",         label: "PSA",           icon: "📋", placeholder: "e.g. census, labor, poverty…",             desc: "PH Statistics Authority" },
+  ];
+
+  const SEARCH_ENDPOINTS: Record<string, string> = {
+    kaggle:      `${PYTHON_API}/api/kaggle/search`,
+    huggingface: `${PYTHON_API}/api/huggingface/search`,
+    uci:         `${PYTHON_API}/api/uci/search`,
+    openml:      `${PYTHON_API}/api/openml/search`,
+    datagov_ph:  `${PYTHON_API}/api/datagov_ph/search`,
+    psa:         `${PYTHON_API}/api/psa/search`,
+  };
+
+  const DOWNLOAD_ENDPOINTS: Record<string, string> = {
+    kaggle:      `${PYTHON_API}/api/kaggle/download`,
+    huggingface: `${PYTHON_API}/api/huggingface/download`,
+    uci:         `${PYTHON_API}/api/uci/download`,
+    openml:      `${PYTHON_API}/api/openml/download`,
+    datagov_ph:  `${PYTHON_API}/api/datagov_ph/download`,
+    psa:         `${PYTHON_API}/api/psa/download`,
+  };
+
+  const activeSource = DATA_SOURCES.find((s) => s.id === dataSource) ?? DATA_SOURCES[0];
 
   const handleSearch = async () => {
     if (!searchQuery.trim()) return;
-    setLoadingMsg("Searching Kaggle…"); setPhase("loading");
+    setLoadingMsg(`Searching ${activeSource.label}…`); setPhase("loading");
     try {
-      const res = await fetch(`${PYTHON_API}/api/kaggle/search`, {
+      const res = await fetch(SEARCH_ENDPOINTS[dataSource], {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ query: searchQuery }),
       });
@@ -305,9 +335,9 @@ export default function SchemaBuilder() {
 
   const handleSelectDataset = async (ds: KaggleDataset) => {
     setKaggleRef(ds.ref);
-    setLoadingMsg(`Downloading "${ds.title}" from Kaggle…`); setPhase("loading");
+    setLoadingMsg(`Downloading "${ds.title}" from ${activeSource.label}…`); setPhase("loading");
     try {
-      const res  = await fetch(`${PYTHON_API}/api/kaggle/download`, {
+      const res = await fetch(DOWNLOAD_ENDPOINTS[dataSource], {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ dataset_ref: ds.ref }),
       });
@@ -451,7 +481,7 @@ export default function SchemaBuilder() {
       if (userId) {
         await fetch(`${NODE_API}/api/datasets`, {
           method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ user_id: userId, name: tables[0].name, kaggle_ref: kaggleRef, python_dataset_id: datasetId, row_count: rowCount, source: "kaggle" }),
+          body: JSON.stringify({ user_id: userId, name: tables[0].name, kaggle_ref: kaggleRef, python_dataset_id: datasetId, row_count: rowCount, source: dataSource }),
         }).catch(() => {});
       }
       sessionStorage.setItem("preview_params", JSON.stringify({ id: datasetId, name: tables[0].name, rows: rowCount, ref: kaggleRef }));
@@ -661,24 +691,48 @@ export default function SchemaBuilder() {
       {(phase === "idle" || phase === "results") && (
         <div className="flex items-center gap-3">
           <div className="flex-1 h-px bg-gray-100" />
-          <span className="text-xs text-gray-400 font-medium">OR USE KAGGLE DATASET</span>
+          <span className="text-xs text-gray-400 font-medium">OR USE AN EXTERNAL DATASET</span>
           <div className="flex-1 h-px bg-gray-100" />
         </div>
       )}
 
-      {/* ── Kaggle search ── */}
-      {phase === "idle" && (
-        <div className="bg-white border border-gray-100 rounded-xl p-5 shadow-sm space-y-3">
-          <p className="text-sm font-medium text-gray-700">
-            Search Kaggle for an existing dataset to use as CTGAN training data
-          </p>
+      {/* ── Dataset source selector + search ── */}
+      {(phase === "idle" || phase === "results") && (
+        <div className="bg-white border border-gray-100 rounded-xl p-5 shadow-sm space-y-4">
+
+          {/* Source tabs */}
+          <div className="flex flex-wrap gap-1.5">
+            {DATA_SOURCES.map((src) => (
+              <button
+                key={src.id}
+                onClick={() => { setDataSource(src.id); setSearchResults([]); setPhase("idle"); }}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border transition-colors
+                  ${dataSource === src.id
+                    ? "bg-purple-600 text-white border-purple-600 shadow-sm"
+                    : "border-gray-200 text-gray-600 hover:border-purple-300 hover:text-purple-600"}`}
+              >
+                <span>{src.icon}</span>
+                {src.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Description */}
+          <p className="text-xs text-gray-500">{activeSource.desc} — search for a dataset to use as CTGAN training data</p>
+
+          {/* Search bar */}
           <div className="flex gap-2">
-            <input value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)}
+            <input
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && handleSearch()}
-              placeholder="e.g. titanic, diabetes, house prices…"
-              className="flex-1 text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500" />
-            <button onClick={handleSearch}
-              className="flex items-center gap-1.5 px-4 py-2 bg-gray-800 text-white rounded-lg text-sm font-medium hover:bg-gray-900 transition-colors">
+              placeholder={activeSource.placeholder}
+              className="flex-1 text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500"
+            />
+            <button
+              onClick={handleSearch}
+              className="flex items-center gap-1.5 px-4 py-2 bg-gray-800 text-white rounded-lg text-sm font-medium hover:bg-gray-900 transition-colors"
+            >
               <Search className="w-4 h-4" /> Search
             </button>
           </div>

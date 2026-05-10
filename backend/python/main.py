@@ -15,6 +15,11 @@ load_dotenv(Path(__file__).parent / ".env")
 from kaggle_service import search_datasets, download_dataset
 from analyzer import analyze_dataset
 from generator import generate_synthetic_data, expand_template_with_ctgan
+import huggingface_service
+import uci_service
+import openml_service
+import datagov_ph_service
+import psa_service
 
 app = FastAPI(title="SynthCS Python Service")
 
@@ -99,6 +104,133 @@ def kaggle_download(req: DownloadRequest) -> dict[str, Any]:
         "schema": schema,
     }
 
+
+# ── Hugging Face ─────────────────────────────────────────────────────────────
+
+@app.post("/api/huggingface/search")
+def hf_search(req: SearchRequest) -> dict[str, Any]:
+    try:
+        return {"datasets": huggingface_service.search_datasets(req.query)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/huggingface/download")
+def hf_download(req: DownloadRequest) -> dict[str, Any]:
+    dataset_id = str(uuid.uuid4())
+    dest = os.path.join(DATASETS_DIR, dataset_id)
+    os.makedirs(dest, exist_ok=True)
+    csv_path = huggingface_service.download_dataset(req.dataset_ref, dest)
+    if not csv_path:
+        raise HTTPException(status_code=404, detail="Could not download dataset from Hugging Face.")
+    try:
+        schema = analyze_dataset(csv_path)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Schema analysis failed: {e}")
+    return {"dataset_id": dataset_id, "csv_file": os.path.basename(csv_path), "schema": schema}
+
+
+# ── UCI ML Repository ─────────────────────────────────────────────────────────
+
+@app.post("/api/uci/search")
+def uci_search(req: SearchRequest) -> dict[str, Any]:
+    try:
+        return {"datasets": uci_service.search_datasets(req.query)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/uci/download")
+def uci_download(req: DownloadRequest) -> dict[str, Any]:
+    dataset_id = str(uuid.uuid4())
+    dest = os.path.join(DATASETS_DIR, dataset_id)
+    os.makedirs(dest, exist_ok=True)
+    csv_path = uci_service.download_dataset(req.dataset_ref, dest)
+    if not csv_path:
+        raise HTTPException(status_code=404, detail="Could not download dataset from UCI.")
+    try:
+        schema = analyze_dataset(csv_path)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Schema analysis failed: {e}")
+    return {"dataset_id": dataset_id, "csv_file": os.path.basename(csv_path), "schema": schema}
+
+
+# ── OpenML ────────────────────────────────────────────────────────────────────
+
+@app.post("/api/openml/search")
+def openml_search(req: SearchRequest) -> dict[str, Any]:
+    try:
+        return {"datasets": openml_service.search_datasets(req.query)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/openml/download")
+def openml_download(req: DownloadRequest) -> dict[str, Any]:
+    dataset_id = str(uuid.uuid4())
+    dest = os.path.join(DATASETS_DIR, dataset_id)
+    os.makedirs(dest, exist_ok=True)
+    csv_path = openml_service.download_dataset(req.dataset_ref, dest)
+    if not csv_path:
+        raise HTTPException(status_code=404, detail="Could not download dataset from OpenML.")
+    try:
+        schema = analyze_dataset(csv_path)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Schema analysis failed: {e}")
+    return {"dataset_id": dataset_id, "csv_file": os.path.basename(csv_path), "schema": schema}
+
+
+# ── Data.gov.ph ───────────────────────────────────────────────────────────────
+
+@app.post("/api/datagov_ph/search")
+def datagov_ph_search(req: SearchRequest) -> dict[str, Any]:
+    try:
+        return {"datasets": datagov_ph_service.search_datasets(req.query)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/datagov_ph/download")
+def datagov_ph_download(req: DownloadRequest) -> dict[str, Any]:
+    dataset_id = str(uuid.uuid4())
+    dest = os.path.join(DATASETS_DIR, dataset_id)
+    os.makedirs(dest, exist_ok=True)
+    csv_path = datagov_ph_service.download_dataset(req.dataset_ref, dest)
+    if not csv_path:
+        raise HTTPException(status_code=404, detail="Could not download dataset from Data.gov.ph.")
+    try:
+        schema = analyze_dataset(csv_path)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Schema analysis failed: {e}")
+    return {"dataset_id": dataset_id, "csv_file": os.path.basename(csv_path), "schema": schema}
+
+
+# ── PSA ───────────────────────────────────────────────────────────────────────
+
+@app.post("/api/psa/search")
+def psa_search(req: SearchRequest) -> dict[str, Any]:
+    try:
+        return {"datasets": psa_service.search_datasets(req.query)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/psa/download")
+def psa_download(req: DownloadRequest) -> dict[str, Any]:
+    dataset_id = str(uuid.uuid4())
+    dest = os.path.join(DATASETS_DIR, dataset_id)
+    os.makedirs(dest, exist_ok=True)
+    csv_path = psa_service.download_dataset(req.dataset_ref, dest)
+    if not csv_path:
+        raise HTTPException(status_code=404, detail="Could not download dataset from PSA.")
+    try:
+        schema = analyze_dataset(csv_path)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Schema analysis failed: {e}")
+    return {"dataset_id": dataset_id, "csv_file": os.path.basename(csv_path), "schema": schema}
+
+
+# ── Kaggle generate ───────────────────────────────────────────────────────────
 
 @app.post("/api/generate")
 def generate(req: GenerateRequest):
