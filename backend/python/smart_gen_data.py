@@ -64,8 +64,9 @@ _POOLS: dict[str, list[str]] = {
     "priority":    ["Low","Medium","High","Urgent"],
     "status":      ["Active","Inactive","Pending","Completed","Cancelled","In Progress","On Hold","Resolved"],
     "stage":       ["Draft","Review","Approved","Published","Archived","In Progress","Completed"],
-    "grade":       ["A","B","C","D","F"],
-    "category":    ["Category A","Category B","Category C","Category D"],
+    "grade":       ["A","A","A","A","B","B","B","B","B","B","C","C","C","C","C","D","D","D","F","F"],
+    "category":    ["Laptops","Desktop PCs","Monitors","Keyboards & Mice","Storage Devices","RAM & Memory","CPUs & Processors","Graphics Cards","Motherboards","Networking","Power Supplies","Cooling Systems","Printers","Scanners","UPS & Power","Accessories","Software Licenses","Peripherals","Cables & Adapters","Gaming Gear"],
+    "product_category":["Laptops","Desktop PCs","Monitors","Input Devices","Storage","Memory","Processors","Graphics Cards","Motherboards","Networking","Power Supplies","Cooling","Printers","UPS","Peripherals","Accessories"],
     "type":        ["Type A","Type B","Type C","Type D"],
     "gender":      ["Male","Female","Non-binary","Prefer not to say"],
     "sex":         ["Male","Female"],
@@ -84,7 +85,7 @@ _POOLS: dict[str, list[str]] = {
     "role":        ["Admin","User","Manager","Analyst","Developer","Designer","Viewer","Editor","Owner","Guest"],
     "airline":     ["Philippine Airlines","Cebu Pacific","AirAsia","Delta","United","American Airlines","Emirates","Singapore Airlines","Cathay Pacific","Qatar Airways"],
     "airport":     ["NAIA","Mactan-Cebu","Clark","Los Angeles (LAX)","New York (JFK)","London (LHR)","Tokyo (NRT)","Sydney (SYD)","Dubai (DXB)","Singapore (SIN)"],
-    "product":     ["Product A","Product B","Product C","Product D","Product E","Widget X","Widget Y","Service Pack 1","Premium Plan","Basic Plan"],
+    "product":     ["Laptop","Desktop PC","Monitor","Mechanical Keyboard","Gaming Mouse","Webcam","Headset","USB Hub","SSD Drive","RAM 16GB","RAM 32GB","CPU Cooler","Power Supply","Graphics Card","Motherboard","Wireless Router","Network Switch","UPS Battery","Inkjet Printer","Laser Printer"],
     "plan":        ["Free","Basic","Pro","Enterprise","Starter","Business","Ultimate"],
     "currency":    ["USD","EUR","GBP","JPY","PHP","AUD","CAD","SGD","CNY","KRW"],
     "language":    ["English","Spanish","French","German","Japanese","Mandarin","Filipino","Portuguese","Arabic","Korean"],
@@ -121,8 +122,19 @@ _POOLS: dict[str, list[str]] = {
     "subject":     ["Mathematics","English","Science","History","Geography","Physics","Chemistry","Biology","Computer Science","Physical Education","Art","Music","Social Studies","Philosophy","Economics","Literature","Filipino","Statistics","Trigonometry","Calculus"],
     "major":       ["Computer Science","Business Administration","Nursing","Information Technology","Engineering","Education","Accountancy","Psychology","Architecture","Liberal Arts","Fine Arts","Mathematics","Biology","Chemistry","Physics","Communication","Marketing","Finance","Law","Medicine"],
     "year_level":  ["Grade 7","Grade 8","Grade 9","Grade 10","Grade 11","Grade 12","1st Year","2nd Year","3rd Year","4th Year","5th Year","Graduate"],
-    "product_name":["Laptop Pro X","Wireless Earbuds","Smart Watch Series 5","4K Monitor","Mechanical Keyboard","Gaming Mouse","USB-C Hub","Portable Charger","Bluetooth Speaker","Webcam HD","Office Chair","Standing Desk","Notebook Set","Pen Drive 128GB","External SSD","Smart TV 55\"","Air Purifier","Coffee Maker","Electric Fan","Rice Cooker"],
-    "item":        ["Laptop","Smartphone","Tablet","Monitor","Keyboard","Mouse","Headphones","Charger","Speaker","Webcam","Chair","Desk","Notebook","USB Drive","Hard Drive","TV","Printer","Scanner","Router","Switch"],
+    "product_name":["Acer Aspire 5 Laptop","ASUS ROG Gaming PC","Dell 27\" 4K Monitor","Logitech MX Keys","Razer DeathAdder V3","Seagate Barracuda 2TB HDD","Samsung 970 EVO 1TB SSD","Corsair Vengeance 32GB RAM","NVIDIA RTX 4070","Intel Core i7-13700K","AMD Ryzen 9 7900X","ASUS ROG STRIX B650-E","Corsair RM850x PSU","be quiet! Dark Rock 4","Netgear Nighthawk AX6000","TP-Link TL-SG108","APC Back-UPS 1500VA","HP LaserJet Pro M404n","Canon PIXMA G3020","Epson L3210 Printer"],
+    "item_name":   ["Laptop","Desktop PC","Monitor","Keyboard","Mouse","Webcam","Headset","USB Hub","External SSD","RAM Module","CPU","Power Supply","Graphics Card","Network Card","Router","Switch","UPS","Printer","Scanner","Projector"],
+    "item":        ["Laptop","Desktop PC","Monitor","Keyboard","Mouse","Headset","Webcam","USB Hub","SSD Drive","RAM","CPU","PSU","GPU","Motherboard","Router","Switch","Printer","Scanner","UPS","Projector"],
+    "supplier_name":["PC Express Philippines","Datablitz","iTech Philippines","Villman Computers","Abenson Enterprises","CDW Technology","Arrow Electronics","Ingram Micro","TD SYNNEX","Tech Data Philippines","Samsung Electronics PH","ASUS Philippines","Logitech Philippines","Seagate Technology","Kingston Technology","Corsair Philippines","HP Philippines","Canon Philippines","Epson Philippines","Acer Philippines"],
+    "vendor_name":  ["PC Express Philippines","Datablitz","iTech Philippines","Villman Computers","CDW Technology","Arrow Electronics","Ingram Micro","TD SYNNEX","Samsung Electronics","ASUS","Logitech","Seagate","Kingston","Corsair","HP Philippines","Canon Philippines","Epson","Acer","MSI","Gigabyte"],
+    "manufacturer": ["ASUS","MSI","Gigabyte","Acer","Dell","HP","Lenovo","Samsung","LG","BenQ","Logitech","Razer","Corsair","Kingston","Seagate","Western Digital","Intel","AMD","NVIDIA","Canon"],
+    "brand_name":   ["ASUS","MSI","Gigabyte","Acer","Dell","HP","Lenovo","Samsung","Logitech","Razer","Corsair","Kingston","Seagate","Intel","AMD","NVIDIA","Canon","Epson","TP-Link","Netgear"],
+    "movement_type":["Purchase","Sale","Return","Damaged","Transfer In","Transfer Out","Adjustment","Stock Count","Disposal","Write-off"],
+    "stock_movement":["Purchase","Sale","Return","Damaged","Transfer","Adjustment","Stock Count"],
+    "transaction_type_inv":["Purchase Order","Sales Invoice","Customer Return","Supplier Return","Stock Transfer","Inventory Adjustment","Damaged Goods Write-off"],
+    "warehouse_name":["Main Warehouse","Branch Store 1","Branch Store 2","Storage Room A","Online Fulfillment Center","Service Center"],
+    "warehouse":    ["Main Warehouse","Branch Store 1","Branch Store 2","Storage Room A","Online Fulfillment Center"],
+    "location_name":["Main Warehouse","Branch Store 1","Branch Store 2","Storage Room A","Service Center","Head Office"],
     "service":     ["Cloud Hosting","Technical Support","Consulting","Training","Maintenance","Installation","Delivery","Subscription","Premium Access","API Access","Data Storage","Email Service","VPN Service","Security Audit","Software License"],
     "payment_method":["Credit Card","Debit Card","PayPal","GCash","Maya","Bank Transfer","Cash","Cryptocurrency","Check","Installment"],
     "payment":     ["Credit Card","Debit Card","PayPal","GCash","Maya","Bank Transfer","Cash","Cryptocurrency","Check","Installment"],
@@ -143,6 +155,10 @@ _POOLS: dict[str, list[str]] = {
     "quarter":     ["Q1","Q2","Q3","Q4","1st Quarter","2nd Quarter","3rd Quarter","4th Quarter"],
     "shift":       ["Morning Shift","Afternoon Shift","Night Shift","Graveyard Shift","Day Shift"],
     "time_slot":   ["8:00 AM","9:00 AM","10:00 AM","11:00 AM","12:00 PM","1:00 PM","2:00 PM","3:00 PM","4:00 PM","5:00 PM","6:00 PM","7:00 PM"],
+    "class_start_time": ["07:00","07:30","08:00","08:30","09:00","09:30","10:00","10:30","11:00","11:30","13:00","13:30","14:00","14:30","15:00","15:30","16:00","17:00"],
+    "class_end_time":   ["09:00","09:30","10:00","10:30","11:00","11:30","12:00","12:30","13:00","14:00","14:30","15:00","15:30","16:00","17:00","18:00","19:00","20:00"],
+    "start_time":       ["07:00","07:30","08:00","08:30","09:00","09:30","10:00","10:30","11:00","11:30","13:00","13:30","14:00","14:30","15:00","15:30","16:00","17:00"],
+    "end_time":         ["09:00","09:30","10:00","10:30","11:00","11:30","12:00","12:30","13:00","14:00","14:30","15:00","15:30","16:00","17:00","18:00","19:00","20:00"],
     "schedule":    ["Daily","Weekly","Bi-weekly","Monthly","Quarterly","Annually","On-demand","Flexible","Fixed"],
     "frequency":   ["Daily","Weekly","Bi-weekly","Monthly","Quarterly","Annually","One-time","Recurring"],
     "semester":    ["1st Semester","2nd Semester","Summer Term"],
@@ -187,8 +203,8 @@ _POOLS: dict[str, list[str]] = {
     "file_type":   ["Document","Spreadsheet","Image","Video","Audio","Archive","Database","Executable","Text","Presentation"],
     "extension":   [".pdf",".xlsx",".csv",".docx",".json",".xml",".png",".jpg",".mp4",".zip",".txt",".pptx"],
     "resolution":  ["1080p","720p","4K","480p","1440p","360p","2160p"],
-    "transaction_type":["Credit","Debit","Transfer","Withdrawal","Deposit","Payment","Refund","Adjustment"],
-    "transaction": ["Credit","Debit","Transfer","Withdrawal","Deposit","Payment","Refund","Adjustment"],
+    "transaction_type":["Purchase","Sale","Return","Transfer","Adjustment","Damaged","Restock","Write-off","Credit","Debit","Deposit","Payment","Refund"],
+    "transaction": ["Purchase","Sale","Return","Transfer","Adjustment","Restock","Credit","Debit","Deposit","Payment","Refund"],
     "invoice_status":["Paid","Unpaid","Overdue","Partially Paid","Cancelled","Draft","Sent"],
     "contract_type":["Full-time","Part-time","Contractual","Project-based","Probationary","Consultancy","Internship"],
     "employment":  ["Full-time","Part-time","Contractual","Project-based","Probationary","Consultancy","Internship","Casual"],
@@ -230,6 +246,9 @@ _NUMERIC_SMART: dict[str, tuple[float, float, str]] = {
     "height":        (150,   200,      "normal"),
     "bmi":           (17.5,  35.0,     "normal"),
     "temperature":   (36.0,  39.5,     "normal"),
+    "attendance_rate":       (60.0, 100.0, "normal"),
+    "attendance_percentage": (60.0, 100.0, "normal"),
+    "attendance":            (60.0, 100.0, "normal"),
     "percent":       (0,     100,      "normal"),
     "percentage":    (0,     100,      "normal"),
     "pct":           (0,     100,      "normal"),
@@ -292,14 +311,31 @@ _NUMERIC_SMART: dict[str, tuple[float, float, str]] = {
     "retries":       (0,     5,        "skewed"),
     "response_time": (10,    5000,     "skewed"),
     "uptime":        (90.0,  100.0,    "normal"),
+    "unit_price":    (500,   150000,   "skewed"),
+    "unit_cost":     (300,   120000,   "skewed"),
+    "selling_price": (500,   150000,   "skewed"),
+    "purchase_price":(300,   120000,   "skewed"),
+    "reorder_level": (5,     100,      "normal"),
+    "reorder_point": (5,     100,      "normal"),
+    "min_stock":     (5,     50,       "normal"),
+    "max_stock":     (100,   1000,     "skewed"),
+    "stock_before":  (0,     500,      "skewed"),
+    "stock_after":   (0,     500,      "skewed"),
+    "opening_stock": (0,     500,      "skewed"),
+    "closing_stock": (0,     500,      "skewed"),
+    "on_hand":       (0,     500,      "skewed"),
+    "available":     (0,     500,      "skewed"),
+    "total_value":   (1000,  5000000,  "skewed"),
+    "inventory_value":(1000, 5000000,  "skewed"),
 }
 
 
 def _keyword_pool(field_name: str, description: str) -> list | None:
     hint = (field_name + " " + description).lower().replace("_", " ")
-    for key, pool in _POOLS.items():
-        if key in hint:
-            return pool
+    # Longest keys checked first so "product_name" wins over "product", "name"
+    for key in sorted(_POOLS.keys(), key=len, reverse=True):
+        if key.replace("_", " ") in hint:
+            return _POOLS[key]
     return None
 
 
@@ -307,6 +343,17 @@ def gen_col(ftype: str, n: int, c: Any, field_name: str = "", description: str =
     """Generate n values for a column given its type, constraints, and name hints."""
     null_mask = np.random.random(n) < (min(getattr(c, "null_rate", 0) or 0, 50.0) / 100.0)
     fname = field_name.lower().replace(" ", "_").replace("-", "_")
+
+    # ── Time fields: return HH:MM strings regardless of declared type ─────────
+    if (fname.endswith("_time") or "_time_" in fname
+            or fname in ("start_time", "end_time", "class_time", "open_time", "close_time")):
+        if "end" in fname or "close" in fname:
+            time_pool = _POOLS["end_time"]
+        else:
+            time_pool = _POOLS["start_time"]
+        data = np.random.choice(time_pool, n).astype(object)
+        data[null_mask] = None
+        return data
 
     # Apply smart numeric ranges when the user left min/max blank
     if ftype in ("integer", "float"):
@@ -399,12 +446,19 @@ def gen_col(ftype: str, n: int, c: Any, field_name: str = "", description: str =
             "_name" in fname and not any(ex in fname for ex in (
                 "file","column","table","database","domain","host","service","app",
                 "system","page","class","function","variable","method","object",
-                "bucket","key","field","attr","property","product","brand","item",
-                "drug","street","city","country","region","company","org","team",
-                "store","shop","game","song","book","movie","course","subject",
+                "bucket","key","field","attr","property",
+                "product","brand","item","drug","street","city","country","region",
+                "company","org","team","store","shop","game","song","book","movie",
+                "course","subject","supplier","vendor","warehouse","manufacturer",
+                "category","sku","model","part","location","station","device",
             ))
         ):
-            data = np.array([f"{random.choice(FIRST)} {random.choice(LAST)}" for _ in range(n)], dtype=object)
+            # Check if description hints at a non-person entity before using person names
+            smart_pool = _keyword_pool(field_name, description)
+            if smart_pool:
+                data = np.random.choice(smart_pool, n).astype(object)
+            else:
+                data = np.array([f"{random.choice(FIRST)} {random.choice(LAST)}" for _ in range(n)], dtype=object)
 
         else:
             smart_pool = _keyword_pool(field_name, description)

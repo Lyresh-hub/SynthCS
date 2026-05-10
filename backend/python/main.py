@@ -21,6 +21,9 @@ import openml_service
 import datagov_ph_service
 import psa_service
 from smart_gen_data import gen_col
+from temporal_engine import apply_temporal
+from relationship_engine import apply_rules
+from anomaly_injector import inject_anomalies
 
 app = FastAPI(title="SynthCS Python Service")
 
@@ -53,10 +56,37 @@ class FieldChange(BaseModel):
     nullable: bool
 
 
+class TemporalConfig(BaseModel):
+    enabled:           bool       = False
+    start_date:        str | None = None
+    end_date:          str | None = None
+    business_hours:    bool       = True
+    ordered:           bool       = False
+    timestamp_columns: list[str]  = []
+
+
+class RelationshipRule(BaseModel):
+    if_col:   str
+    if_op:    str = "eq"
+    if_val:   str = ""
+    then_col: str
+    then_op:  str = "set"
+    then_val: str = ""
+
+
+class AnomalyConfig(BaseModel):
+    enabled: bool      = False
+    ratio:   float     = 0.05
+    types:   list[str] = []
+
+
 class GenerateRequest(BaseModel):
     dataset_id: str
-    changes: list[FieldChange]
-    row_count: int
+    changes:    list[FieldChange]
+    row_count:  int
+    temporal:   TemporalConfig         = TemporalConfig()
+    rules:      list[RelationshipRule] = []
+    anomaly:    AnomalyConfig          = AnomalyConfig()
 
 
 # ── Routes ───────────────────────────────────────────────────────────────────
@@ -258,6 +288,16 @@ def generate(req: GenerateRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Generation failed: {e}")
 
+    try:
+        import pandas as pd
+        df = pd.read_csv(output_path)
+        df = apply_temporal(df, req.temporal.model_dump())
+        df = apply_rules(df, [r.model_dump() for r in req.rules])
+        df = inject_anomalies(df, req.anomaly.model_dump())
+        df.to_csv(output_path, index=False)
+    except Exception:
+        pass  # post-processing failure must not block the response
+
     return FileResponse(
         path=output_path,
         media_type="text/csv",
@@ -316,9 +356,32 @@ class SchemaGenerateRequest(BaseModel):
     fields:     list[SchemaField]
 
 
+class MultiTableFieldDef(BaseModel):
+    name:        str
+    field_type:  str
+    nullable:    bool             = False
+    description: str              = ""
+    constraints: FieldConstraints = FieldConstraints()
+    fk_table:    str | None       = None   # referenced table name
+    fk_field:    str | None       = None   # referenced field name
+
+
+class MultiTableDef(BaseModel):
+    name:      str
+    fields:    list[MultiTableFieldDef]
+    row_count: int = 1000
+
+
+class MultiTableRequest(BaseModel):
+    tables: list[MultiTableDef]
+
+
 class ExpandRequest(BaseModel):
     dataset_id: str
     row_count:  int
+    temporal:   TemporalConfig         = TemporalConfig()
+    rules:      list[RelationshipRule] = []
+    anomaly:    AnomalyConfig          = AnomalyConfig()
 
 
 class SmartSearchRequest(BaseModel):
@@ -336,7 +399,10 @@ class HybridGenerateRequest(BaseModel):
     dataset_id:   str
     changes:      list[FieldChange]
     row_count:    int
-    extra_fields: list[ExtraFieldDef] = []
+    extra_fields: list[ExtraFieldDef]  = []
+    temporal:     TemporalConfig        = TemporalConfig()
+    rules:        list[RelationshipRule] = []
+    anomaly:      AnomalyConfig          = AnomalyConfig()
 
 
 _TEMPLATE_ROWS = 200
@@ -345,29 +411,45 @@ _TEMPLATE_ROWS = 200
 @app.post("/api/generate-from-schema")
 def generate_from_schema(req: SchemaGenerateRequest):
     """
-    Generate a 200-row faker template from a schema definition.
-    Returns the dataset_id plus a JSON preview so the frontend can show it
-    before the user decides how many rows to expand to via CTGAN.
+    Generate a 200-row template using relational generation:
+    master entity tables built first, FK consistency enforced,
+    email derived from the same entity's name, inventory state tracked.
+    Returns dataset_id, JSON preview, and metadata for any entity master tables.
     """
     import pandas as pd
     import uuid as uuid_module
+    from relational_gen import generate_relational_dataset
 
-    df = pd.DataFrame({
-        f.name: gen_col(f.field_type, _TEMPLATE_ROWS, f.constraints, f.name, f.description)
-        for f in req.fields
-    })
     dataset_id = str(uuid_module.uuid4())
     dest = os.path.join(DATASETS_DIR, dataset_id)
     os.makedirs(dest, exist_ok=True)
+
+    df, entity_tables = generate_relational_dataset(req.fields, _TEMPLATE_ROWS, save_dir=dest)
+
     template_path = os.path.join(dest, "template.csv")
     df.to_csv(template_path, index=False)
-    preview_df = df.head(20)
+
+    preview_df   = df.head(20)
     preview_rows = preview_df.where(preview_df.notna(), None).to_dict(orient="records")
+
+    # Summarise entity master tables for the frontend
+    entity_meta = [
+        {
+            "name":    name,
+            "file":    f"{name}_master.csv",
+            "rows":    len(tbl),
+            "columns": tbl.columns.tolist(),
+            "preview": tbl.head(5).where(tbl.head(5).notna(), None).to_dict(orient="records"),
+        }
+        for name, tbl in entity_tables.items()
+    ]
+
     return {
         "dataset_id":    dataset_id,
         "template_rows": _TEMPLATE_ROWS,
         "columns":       df.columns.tolist(),
         "preview":       preview_rows,
+        "entity_tables": entity_meta,
     }
 
     # ── The code below is unreachable — refactored into smart_gen_data.py ──
@@ -858,6 +940,120 @@ def generate_from_schema(req: SchemaGenerateRequest):
     }
 
 
+@app.get("/api/download-entity/{dataset_id}/{table_name}")
+def download_entity_table(dataset_id: str, table_name: str):
+    """Download a generated entity master table (e.g. professor_master.csv)."""
+    safe_name = table_name.replace("/", "").replace("\\", "").replace("..", "")
+    if not safe_name.endswith(".csv"):
+        safe_name += "_master.csv"
+    path = os.path.join(DATASETS_DIR, dataset_id, safe_name)
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail="Entity table not found.")
+    return FileResponse(path=path, media_type="text/csv", filename=safe_name)
+
+
+@app.post("/api/generate-multi-table")
+def generate_multi_table(req: MultiTableRequest):
+    """
+    Generate multiple related tables with FK consistency, then return
+    all CSVs bundled in a single ZIP archive.
+
+    Tables are generated in topological order so that parent tables
+    (the FK targets) always exist before child tables reference them.
+    """
+    import io
+    import random
+    import zipfile
+
+    import pandas as pd
+    from fastapi.responses import StreamingResponse
+    from relational_gen import generate_relational_dataset
+    from smart_gen_data import gen_col
+
+    if not req.tables:
+        raise HTTPException(status_code=400, detail="No tables provided.")
+
+    table_names = {t.name for t in req.tables}
+
+    # Build dependency graph
+    deps: dict[str, set[str]] = {t.name: set() for t in req.tables}
+    for tbl in req.tables:
+        for f in tbl.fields:
+            if f.fk_table and f.fk_table in table_names and f.fk_table != tbl.name:
+                deps[tbl.name].add(f.fk_table)
+
+    # Kahn's topological sort
+    in_degree = {name: len(dep_set) for name, dep_set in deps.items()}
+    queue = [name for name, deg in in_degree.items() if deg == 0]
+    generation_order: list[str] = []
+    while queue:
+        node = queue.pop(0)
+        generation_order.append(node)
+        for name, dep_set in deps.items():
+            if node in dep_set:
+                in_degree[name] -= 1
+                if in_degree[name] == 0:
+                    queue.append(name)
+
+    # Fallback if cycle detected
+    if len(generation_order) != len(table_names):
+        generation_order = [t.name for t in req.tables]
+
+    generated: dict[str, pd.DataFrame] = {}
+
+    for tname in generation_order:
+        tbl = next((t for t in req.tables if t.name == tname), None)
+        if tbl is None:
+            continue
+
+        n_rows = max(1, tbl.row_count)
+        fk_specs  = [(f.name, f.fk_table, f.fk_field, f) for f in tbl.fields if f.fk_table]
+        non_fk    = [f for f in tbl.fields if not f.fk_table]
+
+        if non_fk:
+            df, _ = generate_relational_dataset(non_fk, n_rows)
+        else:
+            df = pd.DataFrame(index=range(n_rows))
+
+        # Fill FK columns from already-generated parent tables
+        for (fname, ref_table, ref_field, orig_f) in fk_specs:
+            if (ref_table in generated
+                    and ref_field
+                    and ref_field in generated[ref_table].columns):
+                pool = generated[ref_table][ref_field].dropna().tolist()
+                if pool:
+                    df[fname] = [random.choice(pool) for _ in range(n_rows)]
+                    continue
+            # Fallback: generate independently
+            df[fname] = gen_col(
+                orig_f.field_type, n_rows,
+                orig_f.constraints, orig_f.name, orig_f.description,
+            )
+
+        # Restore original column order
+        col_order = [f.name for f in tbl.fields if f.name in df.columns]
+        extra     = [c for c in df.columns if c not in col_order]
+        df = df[col_order + extra]
+        generated[tname] = df
+
+    # Build in-memory ZIP
+    zip_buf = io.BytesIO()
+    with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for tbl in req.tables:
+            if tbl.name in generated:
+                zf.writestr(
+                    f"{tbl.name}.csv",
+                    generated[tbl.name].to_csv(index=False).encode("utf-8"),
+                )
+
+    zip_buf.seek(0)
+    return StreamingResponse(
+        zip_buf,
+        media_type="application/zip",
+        headers={"Content-Disposition": "attachment; filename=dataset_tables.zip"},
+    )
+
+
 @app.post("/api/expand-with-ctgan")
 def expand_with_ctgan(req: ExpandRequest):
     """Train CTGAN on the 200-row template and scale up to req.row_count rows."""
@@ -872,6 +1068,18 @@ def expand_with_ctgan(req: ExpandRequest):
         expand_template_with_ctgan(dataset_path, req.row_count)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"CTGAN expansion failed: {e}")
+
+    try:
+        import pandas as pd
+        output_path = os.path.join(dataset_path, "synthetic_output.csv")
+        if os.path.exists(output_path):
+            df = pd.read_csv(output_path)
+            df = apply_temporal(df, req.temporal.model_dump())
+            df = apply_rules(df, [r.model_dump() for r in req.rules])
+            df = inject_anomalies(df, req.anomaly.model_dump())
+            df.to_csv(output_path, index=False)
+    except Exception:
+        pass
 
     return {"dataset_id": req.dataset_id}
 
@@ -961,6 +1169,15 @@ def generate_hybrid(req: HybridGenerateRequest):
                 extra.name, extra.description,
             )
         df.to_csv(output_path, index=False)
+
+    try:
+        df = pd.read_csv(output_path)
+        df = apply_temporal(df, req.temporal.model_dump())
+        df = apply_rules(df, [r.model_dump() for r in req.rules])
+        df = inject_anomalies(df, req.anomaly.model_dump())
+        df.to_csv(output_path, index=False)
+    except Exception:
+        pass
 
     return FileResponse(
         path=output_path,

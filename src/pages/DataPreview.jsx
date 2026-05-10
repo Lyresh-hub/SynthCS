@@ -65,10 +65,11 @@ export default function DataPreview() {
   // Read dataset info from sessionStorage ONCE (lazy useState) — if we read on every render,
   // the values disappear after removeItem fires and the component redirects incorrectly.
   const [previewParams] = useState(() => JSON.parse(sessionStorage.getItem("preview_params") || "{}"));
-  const datasetId     = previewParams.id   || "";
-  const datasetName   = previewParams.name || "Dataset";
-  const totalRowsMeta = Number(previewParams.rows) || 0;
-  const kaggleRef     = previewParams.ref  || "";
+  const datasetId     = previewParams.id            || "";
+  const datasetName   = previewParams.name          || "Dataset";
+  const totalRowsMeta = Number(previewParams.rows)  || 0;
+  const kaggleRef     = previewParams.ref           || "";
+  const entityTables  = previewParams.entity_tables || [];
 
   const [tab, setTab]             = useState("Table View");
   const [page, setPage]           = useState(1);
@@ -84,6 +85,7 @@ export default function DataPreview() {
   const exportFormats = [
     { id: "csv",   label: "CSV" },
     { id: "json",  label: "JSON" },
+    { id: "jsonl", label: "JSONL" },
     { id: "sql",   label: "SQL" },
     { id: "excel", label: "Excel" },
   ];
@@ -111,6 +113,11 @@ export default function DataPreview() {
       } else if (exportFormat === "json") {
         blob = new Blob([JSON.stringify(allRows, null, 2)], { type: "application/json" });
         filename = `${datasetName}.json`;
+
+      } else if (exportFormat === "jsonl") {
+        const lines = allRows.map((row) => JSON.stringify(row)).join("\n");
+        blob = new Blob([lines], { type: "application/jsonl" });
+        filename = `${datasetName}.jsonl`;
 
       } else if (exportFormat === "sql") {
         const tableName = datasetName.toLowerCase().replace(/[^a-z0-9]/g, "_");
@@ -581,6 +588,35 @@ export default function DataPreview() {
         >
           ← Back to Downloads
         </button>
+
+        {/* Related entity master tables */}
+        {entityTables.length > 0 && (
+          <div className="bg-white border border-gray-100 rounded-xl overflow-hidden shadow-sm">
+            <div className="px-4 py-3 border-b border-gray-100 bg-gray-50">
+              <p className="text-sm font-semibold text-gray-800">Related Tables</p>
+              <p className="text-xs text-gray-400 mt-0.5">
+                Entity master tables generated alongside the main dataset
+              </p>
+            </div>
+            <div className="divide-y divide-gray-50 px-4 py-2 space-y-2">
+              {entityTables.map((et) => (
+                <div key={et.name} className="flex items-center justify-between py-2">
+                  <div>
+                    <p className="text-xs font-semibold text-gray-700 capitalize">{et.name}_master.csv</p>
+                    <p className="text-[11px] text-gray-400">{et.rows} records · {et.columns.join(", ")}</p>
+                  </div>
+                  <a
+                    href={`${PYTHON_API}/api/download-entity/${datasetId}/${et.name}`}
+                    download={`${et.name}_master.csv`}
+                    className="text-xs px-3 py-1.5 bg-gray-800 text-white rounded-lg font-medium hover:bg-gray-900 transition-colors"
+                  >
+                    ↓ Download
+                  </a>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

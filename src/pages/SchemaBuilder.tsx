@@ -1,7 +1,7 @@
 import { useState, useEffect, Fragment } from "react";
 import { useLocation } from "wouter";
 import {
-  Plus, Trash2, GripVertical, Layers,
+  Plus, Trash2, GripVertical, Layers, X,
   Search, Download, RefreshCw, AlertCircle, Save, ChevronDown, ChevronRight, Sparkles,
 } from "lucide-react";
 
@@ -37,6 +37,8 @@ interface Field {
   expanded:     boolean;
   llmGenerated?: boolean;   // auto-added by augment-schema → yellow
   mergedFrom?:   string;    // source label of dataset that contributed this field → blue
+  fk_table?:     string;    // FK: referenced table name
+  fk_field?:     string;    // FK: referenced field name
 }
 
 interface SmartResult extends KaggleDataset {
@@ -55,7 +57,34 @@ const SOURCE_COLORS: Record<string, { dot: string; badge: string; text: string; 
   psa:         { dot: "bg-violet-500",  badge: "bg-violet-50 border-violet-200", text: "text-violet-700",  activeBg: "bg-violet-500",  activeText: "text-white" },
 };
 
-interface Table { id: string; name: string; fields: Field[]; }
+interface Table { id: string; name: string; fields: Field[]; rowCount?: number; }
+
+interface TemporalConfig {
+  enabled:           boolean;
+  start_date:        string;
+  end_date:          string;
+  business_hours:    boolean;
+  ordered:           boolean;
+  timestamp_columns: string[];
+}
+
+interface RelRule {
+  id:       string;
+  if_col:   string;
+  if_op:    string;
+  if_val:   string;
+  then_col: string;
+  then_op:  string;
+  then_val: string;
+}
+
+interface AnomalyCfg {
+  enabled: boolean;
+  ratio:   number;
+  types:   string[];
+}
+
+type GenerationMode = "mock" | "ai_training" | "cybersecurity" | "stress_testing";
 
 interface KaggleDataset {
   ref: string; title: string; size: string;
@@ -69,6 +98,166 @@ interface OriginalField {
 type Phase = "idle" | "results" | "loading" | "schema" | "template_preview" | "generating" | "error"
            | "smart_searching" | "smart_results" | "smart_augmenting";
 type Mode  = "kaggle" | "llm";
+
+// ── Generation modes ──────────────────────────────────────────────────────────
+
+const GENERATION_MODES: Array<{ id: GenerationMode; label: string; desc: string; color: string }> = [
+  { id: "mock",           label: "Mock Data",       desc: "Realistic dev / test data",          color: "gray"   },
+  { id: "ai_training",    label: "AI Training",     desc: "Labeled ML-ready datasets",          color: "blue"   },
+  { id: "cybersecurity",  label: "Cybersecurity",   desc: "Attack patterns & security events",  color: "red"    },
+  { id: "stress_testing", label: "Stress Testing",  desc: "Edge cases & high-volume logs",      color: "orange" },
+];
+
+type PresetField = { name: string; type: string; description: string; constraints?: Partial<FieldConstraints> };
+interface Preset { name: string; table: string; fields: PresetField[] }
+
+const PRESETS: Record<GenerationMode, Preset[]> = {
+  mock: [
+    { name: "User Directory", table: "users", fields: [
+      { name: "user_id",    type: "uuid",    description: "Primary key" },
+      { name: "first_name", type: "name",    description: "First name" },
+      { name: "last_name",  type: "name",    description: "Last name" },
+      { name: "email",      type: "email",   description: "Email address" },
+      { name: "phone",      type: "phone",   description: "Contact number" },
+      { name: "role",       type: "string",  description: "System role",       constraints: { enum_values: "Admin, User, Manager, Viewer" } },
+      { name: "department", type: "string",  description: "Department",        constraints: { enum_values: "Engineering, HR, Finance, Sales, Operations" } },
+      { name: "created_at", type: "date",    description: "Account created date" },
+      { name: "status",     type: "string",  description: "Account status",    constraints: { enum_values: "Active, Inactive, Suspended" } },
+    ]},
+    { name: "E-commerce Orders", table: "orders", fields: [
+      { name: "order_id",        type: "uuid",    description: "Order identifier" },
+      { name: "customer_name",   type: "name",    description: "Customer full name" },
+      { name: "email",           type: "email",   description: "Customer email" },
+      { name: "product",         type: "string",  description: "Product name",      constraints: { enum_values: "Laptop, Smartphone, Headphones, Monitor, Keyboard, Mouse, Charger, Speaker" } },
+      { name: "quantity",        type: "integer", description: "Units ordered",     constraints: { min_val: 1, max_val: 10 } },
+      { name: "unit_price",      type: "float",   description: "Price per unit",    constraints: { min_val: 5, max_val: 999 } },
+      { name: "total_amount",    type: "float",   description: "Order total",       constraints: { min_val: 5, max_val: 9990 } },
+      { name: "status",          type: "string",  description: "Order status",      constraints: { enum_values: "Pending, Processing, Shipped, Delivered, Cancelled, Refunded" } },
+      { name: "order_date",      type: "date",    description: "Date order placed" },
+      { name: "shipping_address",type: "address", description: "Shipping address" },
+    ]},
+    { name: "CRM Contacts", table: "contacts", fields: [
+      { name: "contact_id",  type: "uuid",    description: "Contact identifier" },
+      { name: "full_name",   type: "name",    description: "Full name" },
+      { name: "email",       type: "email",   description: "Email address" },
+      { name: "phone",       type: "phone",   description: "Phone number" },
+      { name: "company",     type: "string",  description: "Company name",   constraints: { enum_values: "Acme Corp, GlobalTech, DataSystems, CloudWorks, NetSolutions" } },
+      { name: "lead_source", type: "string",  description: "Lead origin",    constraints: { enum_values: "Website, Referral, LinkedIn, Cold Call, Event, Email Campaign" } },
+      { name: "stage",       type: "string",  description: "Pipeline stage", constraints: { enum_values: "Lead, Prospect, Qualified, Negotiation, Closed Won, Closed Lost" } },
+      { name: "deal_value",  type: "float",   description: "Estimated deal", constraints: { min_val: 1000, max_val: 500000 } },
+      { name: "created_at",  type: "date",    description: "Record created" },
+    ]},
+  ],
+  ai_training: [
+    { name: "IDS Network Traffic", table: "network_traffic", fields: [
+      { name: "flow_id",      type: "uuid",    description: "Unique flow identifier" },
+      { name: "timestamp",    type: "date",    description: "Capture timestamp" },
+      { name: "src_ip",       type: "ip",      description: "Source IP address" },
+      { name: "dst_ip",       type: "ip",      description: "Destination IP address" },
+      { name: "src_port",     type: "integer", description: "Source port",       constraints: { min_val: 1, max_val: 65535 } },
+      { name: "dst_port",     type: "integer", description: "Destination port",  constraints: { min_val: 1, max_val: 65535 } },
+      { name: "protocol",     type: "string",  description: "Network protocol",  constraints: { enum_values: "TCP, UDP, ICMP, HTTP, HTTPS, DNS, SSH" } },
+      { name: "packet_count", type: "integer", description: "Packets in flow",   constraints: { min_val: 1, max_val: 10000 } },
+      { name: "byte_count",   type: "integer", description: "Bytes transferred",  constraints: { min_val: 64, max_val: 1500000 } },
+      { name: "duration",     type: "float",   description: "Flow duration (s)",  constraints: { min_val: 0, max_val: 3600 } },
+      { name: "flags",        type: "string",  description: "TCP flags",          constraints: { enum_values: "SYN, ACK, FIN, RST, PSH, URG, SYN-ACK" } },
+      { name: "label",        type: "string",  description: "Traffic class",      constraints: { enum_values: "Normal, DoS, PortScan, Brute Force, Web Attack, Infiltration" } },
+    ]},
+    { name: "Fraud Detection", table: "transactions", fields: [
+      { name: "transaction_id", type: "uuid",    description: "Transaction identifier" },
+      { name: "user_id",        type: "uuid",    description: "Account holder ID" },
+      { name: "timestamp",      type: "date",    description: "Transaction timestamp" },
+      { name: "amount",         type: "float",   description: "Transaction amount",   constraints: { min_val: 0.01, max_val: 10000 } },
+      { name: "merchant",       type: "string",  description: "Merchant name",         constraints: { enum_values: "Amazon, Walmart, Target, Best Buy, Apple, Netflix, Uber, Local Store, Unknown Vendor" } },
+      { name: "category",       type: "string",  description: "Spend category",        constraints: { enum_values: "Groceries, Electronics, Travel, Entertainment, Utilities, Healthcare, Restaurant, Shopping" } },
+      { name: "location",       type: "string",  description: "Transaction location",  constraints: { enum_values: "New York, Los Angeles, Manila, London, Tokyo, Singapore, Unknown" } },
+      { name: "device_type",    type: "string",  description: "Device used",           constraints: { enum_values: "Mobile, Desktop, ATM, POS Terminal, API" } },
+      { name: "ip_address",     type: "ip",      description: "Client IP" },
+      { name: "is_fraud",       type: "boolean", description: "Fraud label",           constraints: { true_ratio: 0.02 } },
+    ]},
+    { name: "Chatbot Intent", table: "utterances", fields: [
+      { name: "utterance_id",  type: "uuid",    description: "Sample identifier" },
+      { name: "text",          type: "string",  description: "User utterance",   constraints: { enum_values: "What is my balance?, Help me reset my password, Cancel my subscription, Track my order, I want to speak to an agent, How do I update my address?, What are your hours?" } },
+      { name: "intent",        type: "string",  description: "Intent label",     constraints: { enum_values: "check_balance, reset_password, cancel_subscription, track_order, escalate, update_info, faq" } },
+      { name: "confidence",    type: "float",   description: "Model confidence", constraints: { min_val: 0.5, max_val: 1.0 } },
+      { name: "language",      type: "string",  description: "Language code",    constraints: { enum_values: "en, tl, es, fr, de, ja" } },
+      { name: "channel",       type: "string",  description: "Input channel",    constraints: { enum_values: "web_chat, mobile_app, voice, email, sms" } },
+      { name: "created_at",    type: "date",    description: "Timestamp" },
+    ]},
+    { name: "Churn Prediction", table: "customer_activity", fields: [
+      { name: "customer_id",      type: "uuid",    description: "Customer identifier" },
+      { name: "tenure_months",    type: "integer", description: "Months as customer",      constraints: { min_val: 1, max_val: 120 } },
+      { name: "monthly_charges",  type: "float",   description: "Monthly billing",         constraints: { min_val: 20, max_val: 500 } },
+      { name: "total_charges",    type: "float",   description: "Lifetime spend",          constraints: { min_val: 20, max_val: 10000 } },
+      { name: "contract_type",    type: "string",  description: "Contract type",           constraints: { enum_values: "Month-to-Month, One Year, Two Year" } },
+      { name: "internet_service", type: "string",  description: "Internet service tier",   constraints: { enum_values: "Fiber optic, DSL, No" } },
+      { name: "num_support_calls",type: "integer", description: "Support calls last 90d",  constraints: { min_val: 0, max_val: 20 } },
+      { name: "last_login_days",  type: "integer", description: "Days since last login",   constraints: { min_val: 0, max_val: 180 } },
+      { name: "churned",          type: "boolean", description: "Churn label",             constraints: { true_ratio: 0.27 } },
+    ]},
+  ],
+  cybersecurity: [
+    { name: "Attack Log Dataset", table: "attack_logs", fields: [
+      { name: "event_id",    type: "uuid",    description: "Event identifier" },
+      { name: "timestamp",   type: "date",    description: "Event timestamp" },
+      { name: "src_ip",      type: "ip",      description: "Attacker IP" },
+      { name: "dst_ip",      type: "ip",      description: "Target IP" },
+      { name: "dst_port",    type: "integer", description: "Target port",    constraints: { min_val: 1, max_val: 65535 } },
+      { name: "attack_type", type: "string",  description: "Attack category", constraints: { enum_values: "SQL Injection, XSS, DDoS, Brute Force, Port Scan, CSRF, RCE, Path Traversal, SSRF" } },
+      { name: "severity",    type: "string",  description: "Risk level",      constraints: { enum_values: "Low, Medium, High, Critical" } },
+      { name: "payload",     type: "string",  description: "Raw payload",     constraints: { enum_values: "' OR '1'='1, <script>alert(1)</script>, ../../../etc/passwd, ; cat /etc/shadow, {{7*7}}" } },
+      { name: "status",      type: "string",  description: "Action taken",    constraints: { enum_values: "Blocked, Allowed, Detected, Escalated" } },
+      { name: "user_agent",  type: "string",  description: "HTTP user agent", constraints: { enum_values: "Mozilla/5.0, sqlmap/1.7, curl/7.81.0, python-requests/2.28, Nikto/2.1.6" } },
+      { name: "is_malicious",type: "boolean", description: "Malicious flag",  constraints: { true_ratio: 0.3 } },
+    ]},
+    { name: "WAF Events", table: "waf_events", fields: [
+      { name: "request_id",   type: "uuid",    description: "Request identifier" },
+      { name: "timestamp",    type: "date",    description: "Request timestamp" },
+      { name: "client_ip",    type: "ip",      description: "Client IP address" },
+      { name: "method",       type: "string",  description: "HTTP method",        constraints: { enum_values: "GET, POST, PUT, DELETE, PATCH, OPTIONS, HEAD" } },
+      { name: "uri",          type: "string",  description: "Request URI",        constraints: { enum_values: "/login, /admin, /api/users, /search?q=, /wp-admin, /../../../etc/passwd, /api/v1/token" } },
+      { name: "status_code",  type: "integer", description: "HTTP status",        constraints: { min_val: 200, max_val: 503 } },
+      { name: "response_time",type: "float",   description: "Response time (ms)", constraints: { min_val: 1, max_val: 5000 } },
+      { name: "rule_id",      type: "string",  description: "WAF rule triggered", constraints: { enum_values: "SQLI-001, XSS-002, RCE-003, PT-004, NONE" } },
+      { name: "is_blocked",   type: "boolean", description: "Request blocked",    constraints: { true_ratio: 0.25 } },
+    ]},
+    { name: "Auth / Brute Force Log", table: "auth_logs", fields: [
+      { name: "log_id",          type: "uuid",    description: "Log entry ID" },
+      { name: "timestamp",       type: "date",    description: "Attempt timestamp" },
+      { name: "user_id",         type: "uuid",    description: "Target account" },
+      { name: "src_ip",          type: "ip",      description: "Source IP address" },
+      { name: "login_status",    type: "string",  description: "Auth result",        constraints: { enum_values: "SUCCESS, FAILURE, LOCKED, MFA_REQUIRED" } },
+      { name: "failed_attempts", type: "integer", description: "Failed attempts",    constraints: { min_val: 0, max_val: 100 } },
+      { name: "session_token",   type: "string",  description: "Session token",      constraints: { enum_values: "valid_token_abc, eyJhbGciOiJub25lIn0.eyJ1c2VyIjoiYWRtaW4ifQ., null, EXPIRED" } },
+      { name: "device",          type: "string",  description: "Device type",        constraints: { enum_values: "Desktop, Mobile, Unknown, Tor Browser" } },
+      { name: "location",        type: "string",  description: "Geo-location",       constraints: { enum_values: "Philippines, United States, Russia, China, Unknown, Tor Exit Node" } },
+    ]},
+  ],
+  stress_testing: [
+    { name: "Application Log", table: "app_logs", fields: [
+      { name: "log_id",    type: "uuid",    description: "Log entry identifier" },
+      { name: "timestamp", type: "date",    description: "Log timestamp" },
+      { name: "level",     type: "string",  description: "Log level",     constraints: { enum_values: "DEBUG, INFO, WARNING, ERROR, CRITICAL" } },
+      { name: "service",   type: "string",  description: "Microservice",  constraints: { enum_values: "auth-service, api-gateway, payment-service, notification-service, user-service, db-proxy" } },
+      { name: "message",   type: "string",  description: "Log message",   constraints: { enum_values: "Request processed, Connection timeout, Rate limit exceeded, Cache miss, DB query slow, Memory high, OK" } },
+      { name: "duration_ms",type:"integer", description: "Processing time",constraints: { min_val: 1, max_val: 30000 } },
+      { name: "status_code",type:"integer", description: "HTTP status",   constraints: { min_val: 200, max_val: 503 } },
+      { name: "user_id",   type: "uuid",    description: "Actor user ID" },
+      { name: "request_id",type: "uuid",    description: "Trace ID" },
+    ]},
+    { name: "IoT Sensor Stream", table: "sensor_readings", fields: [
+      { name: "reading_id",  type: "uuid",    description: "Reading identifier" },
+      { name: "device_id",   type: "uuid",    description: "Device identifier" },
+      { name: "timestamp",   type: "date",    description: "Reading timestamp" },
+      { name: "temperature", type: "float",   description: "Temperature (°C)",  constraints: { min_val: -10, max_val: 85 } },
+      { name: "humidity",    type: "float",   description: "Humidity (%)",       constraints: { min_val: 0, max_val: 100 } },
+      { name: "pressure",    type: "float",   description: "Pressure (hPa)",     constraints: { min_val: 900, max_val: 1100 } },
+      { name: "battery_pct", type: "integer", description: "Battery %",          constraints: { min_val: 0, max_val: 100 } },
+      { name: "signal_rssi", type: "integer", description: "Signal strength",    constraints: { min_val: -100, max_val: 0 } },
+      { name: "status",      type: "string",  description: "Device status",      constraints: { enum_values: "Online, Offline, Degraded, Calibrating" } },
+    ]},
+  ],
+};
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -85,6 +274,96 @@ function makeField(overrides: Partial<Field> & { name: string; type: string }): 
     expanded: false,
     ...overrides,
   };
+}
+
+// ── Entity auto-detection: split a flat LLM schema into related tables ────────
+
+function _pluralizeEntity(word: string): string {
+  if (word.endsWith("y") && word.length > 1 && !"aeiou".includes(word[word.length - 2])) {
+    return word.slice(0, -1) + "ies";
+  }
+  if (word.endsWith("s") || word.endsWith("x") || word.endsWith("ch") || word.endsWith("sh")) {
+    return word + "es";
+  }
+  return word + "s";
+}
+
+/**
+ * Given a flat list of fields (as the LLM produces), detect entity groups and
+ * split them into separate Table objects.
+ *
+ * Detection rule: a prefix (part before the first `_`) is an entity group if it
+ * has a `<prefix>_id` field AND at least one more field with that prefix.
+ * e.g.  student_id + student_name + student_email  →  `students` table
+ *        professor_id + professor_name              →  `professors` table
+ *
+ * The main table keeps only the `<prefix>_id` FK fields (with fk_table set)
+ * plus all non-entity fields.
+ */
+function splitSchemaIntoTables(mainName: string, fields: Field[]): Table[] {
+  // Group fields by prefix (text before first underscore)
+  const groups: Record<string, Field[]> = {};
+  for (const f of fields) {
+    const idx = f.name.indexOf("_");
+    if (idx > 0) {
+      const prefix = f.name.slice(0, idx);
+      if (!groups[prefix]) groups[prefix] = [];
+      groups[prefix].push(f);
+    }
+  }
+
+  // Keep only groups that have an _id field AND at least one more field
+  type EGroup = { idField: Field; others: Field[] };
+  const entityGroups: Record<string, EGroup> = {};
+  for (const [prefix, grp] of Object.entries(groups)) {
+    const idField = grp.find((f) => f.name === `${prefix}_id`);
+    const others  = grp.filter((f) => f.name !== `${prefix}_id`);
+    if (idField && others.length >= 1) {
+      entityGroups[prefix] = { idField, others };
+    }
+  }
+
+  if (Object.keys(entityGroups).length === 0) {
+    return [{ id: "t1", name: mainName, fields }];
+  }
+
+  const entityFieldNames = new Set<string>(
+    Object.values(entityGroups).flatMap(({ idField, others }) => [
+      idField.name,
+      ...others.map((f) => f.name),
+    ])
+  );
+
+  // Main table: keep non-entity fields + _id FK fields (all other entity fields removed)
+  const mainFields: Field[] = fields
+    .filter((f) => {
+      if (!entityFieldNames.has(f.name)) return true; // non-entity field → keep
+      const idx = f.name.indexOf("_");
+      if (idx < 0) return true;
+      const prefix = f.name.slice(0, idx);
+      return f.name === `${prefix}_id`;               // only keep the id as FK
+    })
+    .map((f) => {
+      const idx = f.name.indexOf("_");
+      if (idx < 0) return f;
+      const prefix = f.name.slice(0, idx);
+      if (entityGroups[prefix] && f.name === `${prefix}_id`) {
+        return { ...f, fk_table: _pluralizeEntity(prefix), fk_field: `${prefix}_id` };
+      }
+      return f;
+    });
+
+  const result: Table[] = [{ id: "t_main", name: mainName, fields: mainFields }];
+
+  for (const [prefix, { idField, others }] of Object.entries(entityGroups)) {
+    result.push({
+      id: `t_${prefix}_${Date.now()}`,
+      name: _pluralizeEntity(prefix),
+      fields: [idField, ...others],
+    });
+  }
+
+  return result;
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -111,15 +390,63 @@ export default function SchemaBuilder() {
   const [templateDatasetId,   setTemplateDatasetId]   = useState("");
   const [templateColumns,     setTemplateColumns]     = useState<string[]>([]);
   const [templatePreviewRows, setTemplatePreviewRows] = useState<Record<string, unknown>[]>([]);
+  const [entityTables,        setEntityTables]        = useState<Array<{name:string; file:string; rows:number; columns:string[]; preview:Record<string,unknown>[]}>>([]);
 
   const [datasetId, setDatasetId]           = useState("");
   const [kaggleRef, setKaggleRef]           = useState("");
   const [originalSchema, setOriginalSchema] = useState<OriginalField[]>([]);
   const [tables, setTables]                 = useState<Table[]>([]);
+  const [activeTableId, setActiveTableId]   = useState<string>("");
   const [rowCount, setRowCount]             = useState(10_000);
 
   const [saveStatus, setSaveStatus] = useState<"idle"|"saving"|"saved"|"error">("idle");
   const [aiFieldLoading, setAiFieldLoading] = useState<string | null>(null);
+
+  // ── Advanced generation state ─────────────────────────────────────────────
+  const [genMode, setGenMode] = useState<GenerationMode>("mock");
+  const [showPresets, setShowPresets] = useState(false);
+  const [showAdvanced, setShowAdvanced] = useState(false);
+
+  const [temporal, setTemporal] = useState<TemporalConfig>({
+    enabled: false, start_date: "", end_date: "",
+    business_hours: true, ordered: false, timestamp_columns: [],
+  });
+  const [relRules, setRelRules]   = useState<RelRule[]>([]);
+  const [anomaly, setAnomaly]     = useState<AnomalyCfg>({
+    enabled: false, ratio: 0.05, types: [],
+  });
+
+  const addRelRule = () =>
+    setRelRules((prev) => [
+      ...prev,
+      { id: Date.now().toString(), if_col: "", if_op: "eq", if_val: "",
+        then_col: "", then_op: "set", then_val: "" },
+    ]);
+
+  const updateRelRule = (id: string, patch: Partial<RelRule>) =>
+    setRelRules((prev) => prev.map((r) => (r.id === id ? { ...r, ...patch } : r)));
+
+  const removeRelRule = (id: string) =>
+    setRelRules((prev) => prev.filter((r) => r.id !== id));
+
+  const loadPreset = (preset: Preset) => {
+    const fields: Field[] = preset.fields.map((f, i) =>
+      makeField({
+        id: `p${i}`, name: f.name, type: f.type,
+        originalName: f.name, originalType: f.type,
+        description: f.description,
+        constraints: (() => {
+          const c = f.constraints ?? {};
+          const ev = (c as any).enum_values;
+          return { ...c, enum_values: Array.isArray(ev) ? ev.join(", ") : (ev ?? undefined) } as FieldConstraints;
+        })(),
+      })
+    );
+    setOriginalSchema(preset.fields.map((f) => ({ name: f.name, type: f.type, nullable: false })));
+    setTables([{ id: "1", name: preset.table, fields }]);
+    setDatasetId(""); setKaggleRef(""); setMode("llm"); setPhase("schema");
+    setShowPresets(false);
+  };
 
   // ── Load saved schema from sessionStorage (set by SavedSchemas "Use" button) ──
   // window.location.search is always empty because of replaceState URL hiding
@@ -156,6 +483,16 @@ export default function SchemaBuilder() {
       })
       .catch(() => {});
   }, [loadSchemaId]);
+
+  // Sync activeTableId whenever tables change (e.g. after LLM generation)
+  useEffect(() => {
+    if (tables.length > 0 && !tables.find((t) => t.id === activeTableId)) {
+      setActiveTableId(tables[0].id);
+    }
+  }, [tables, activeTableId]);
+
+  const getActiveTable = () =>
+    tables.find((t) => t.id === activeTableId) ?? tables[0];
 
   // ── Field helpers ─────────────────────────────────────────────────────────
 
@@ -205,6 +542,84 @@ export default function SchemaBuilder() {
       )
     );
 
+  // ── Multi-table management ────────────────────────────────────────────────
+
+  const addTable = () => {
+    const newId = `t${Date.now()}`;
+    const newTable: Table = {
+      id: newId,
+      name: `table_${tables.length + 1}`,
+      fields: [makeField({ id: `f0t${newId}`, name: "id", type: "uuid" })],
+    };
+    setTables((prev) => [...prev, newTable]);
+    setActiveTableId(newId);
+  };
+
+  const removeTable = (tid: string) => {
+    setTables((prev) => {
+      const next = prev.filter((t) => t.id !== tid);
+      if (activeTableId === tid && next.length > 0) {
+        setActiveTableId(next[0].id);
+      }
+      return next;
+    });
+  };
+
+  const updateTableName = (tid: string, name: string) =>
+    setTables((prev) => prev.map((t) => (t.id === tid ? { ...t, name } : t)));
+
+  const updateTableRowCount = (tid: string, count: number) =>
+    setTables((prev) => prev.map((t) => (t.id === tid ? { ...t, rowCount: count } : t)));
+
+  // ── Multi-table ZIP generation ────────────────────────────────────────────
+
+  const handleGenerateMultiTableZip = async () => {
+    setLoadingMsg(`Generating ${tables.length} tables and packaging as ZIP…`);
+    setPhase("generating");
+    try {
+      const payload = {
+        tables: tables.map((t) => ({
+          name: t.name,
+          fields: t.fields.map((f) => ({
+            name:        f.name,
+            field_type:  f.type,
+            nullable:    f.null_rate > 0,
+            description: f.description,
+            constraints: {
+              ...f.constraints,
+              null_rate:   f.null_rate,
+              enum_values: f.constraints.enum_values
+                ? String(f.constraints.enum_values).split(",").map((v) => v.trim()).filter(Boolean)
+                : [],
+            },
+            fk_table: f.fk_table ?? null,
+            fk_field: f.fk_field ?? null,
+          })),
+          row_count: t.rowCount ?? rowCount,
+        })),
+      };
+      const res = await fetch(`${PYTHON_API}/api/generate-multi-table`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      const blob = await res.blob();
+      const url  = URL.createObjectURL(blob);
+      const a    = document.createElement("a");
+      a.href = url;
+      a.download = "dataset_tables.zip";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      setPhase("schema");
+    } catch (e: any) {
+      setErrorMsg(e.message ?? "Multi-table generation failed.");
+      setPhase("error");
+    }
+  };
+
   const isChanged = (field: Field): boolean => {
     const orig = originalSchema.find((o) => o.name === field.originalName);
     if (!orig) return true;
@@ -244,7 +659,8 @@ export default function SchemaBuilder() {
         })
       );
       setOriginalSchema(data.fields.map((f: any) => ({ name: f.name, type: f.type, nullable: false })));
-      setTables([{ id: "1", name: data.table_name, fields }]);
+      // Auto-detect entity groups and split into separate tables
+      setTables(splitSchemaIntoTables(data.table_name, fields));
       setDatasetId(""); setKaggleRef(""); setMode("llm"); setPhase("schema");
     } catch (e: any) {
       const msg: string = e?.message ?? "";
@@ -348,7 +764,7 @@ export default function SchemaBuilder() {
         })
       );
 
-      setTables([{ id: "1", name: ds.title, fields: [...realFields, ...llmFields] }]);
+      setTables(splitSchemaIntoTables(ds.title, [...realFields, ...llmFields]));
       setMode("kaggle");
       setPhase("schema");
     } catch (e: any) {
@@ -558,7 +974,8 @@ export default function SchemaBuilder() {
   // ── Save ──────────────────────────────────────────────────────────────────
 
   const handleSaveSchema = async () => {
-    if (!tables[0]) return;
+    const at = getActiveTable();
+    if (!at) return;
     const userId = localStorage.getItem("user_id");
     if (!userId) return;
     setSaveStatus("saving");
@@ -567,9 +984,9 @@ export default function SchemaBuilder() {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           user_id: userId,
-          name: tables[0].name,
-          table_name: tables[0].name,
-          fields: tables[0].fields.map((f) => ({ name: f.name, type: f.type, nullable: f.null_rate > 0 })),
+          name: at.name,
+          table_name: at.name,
+          fields: at.fields.map((f) => ({ name: f.name, type: f.type, nullable: f.null_rate > 0 })),
         }),
       });
       if (!res.ok) throw new Error();
@@ -584,13 +1001,14 @@ export default function SchemaBuilder() {
   // ── Generate template (LLM mode — step 1) ───────────────────────────────
 
   const handleGenerateTemplate = async () => {
-    if (!tables[0]) return;
+    const at = getActiveTable();
+    if (!at) return;
     setLoadingMsg("Generating 200-row template via schema…");
     setPhase("generating");
     try {
       const payload = {
-        table_name: tables[0].name,
-        fields: tables[0].fields.map((f) => ({
+        table_name: at.name,
+        fields: at.fields.map((f) => ({
           name:        f.name,
           field_type:  f.type,
           nullable:    f.null_rate > 0,
@@ -613,6 +1031,7 @@ export default function SchemaBuilder() {
       setTemplateDatasetId(data.dataset_id);
       setTemplateColumns(data.columns);
       setTemplatePreviewRows(data.preview);
+      setEntityTables(data.entity_tables ?? []);
       setRowCount(10_000);
       setPhase("template_preview");
     } catch (e: any) {
@@ -628,7 +1047,13 @@ export default function SchemaBuilder() {
     try {
       const res = await fetch(`${PYTHON_API}/api/expand-with-ctgan`, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ dataset_id: templateDatasetId, row_count: rowCount }),
+        body: JSON.stringify({
+          dataset_id: templateDatasetId,
+          row_count:  rowCount,
+          temporal,
+          rules: relRules.map(({ id: _id, ...r }) => r),
+          anomaly,
+        }),
       });
       if (!res.ok) throw new Error(await res.text());
       const data = await res.json();
@@ -637,10 +1062,14 @@ export default function SchemaBuilder() {
       if (userId) {
         await fetch(`${NODE_API}/api/datasets`, {
           method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ user_id: userId, name: tables[0]?.name ?? "dataset", kaggle_ref: "", python_dataset_id: data.dataset_id, row_count: rowCount, source: "llm" }),
+          body: JSON.stringify({ user_id: userId, name: getActiveTable()?.name ?? "dataset", kaggle_ref: "", python_dataset_id: data.dataset_id, row_count: rowCount, source: "llm" }),
         }).catch(() => {});
       }
-      sessionStorage.setItem("preview_params", JSON.stringify({ id: data.dataset_id, name: tables[0]?.name ?? "dataset", rows: rowCount, ref: "" }));
+      sessionStorage.setItem("preview_params", JSON.stringify({
+        id: data.dataset_id, name: getActiveTable()?.name ?? "dataset",
+        rows: rowCount, ref: "",
+        entity_tables: entityTables,
+      }));
       setLocation("/preview");
     } catch (e: any) {
       setErrorMsg(e.message ?? "CTGAN expansion failed."); setPhase("error");
@@ -650,14 +1079,15 @@ export default function SchemaBuilder() {
   // ── Generate (Kaggle/CTGAN mode; hybrid when LLM-added fields present) ───
 
   const handleGenerate = async () => {
-    if (!tables[0]) return;
+    const at = getActiveTable();
+    if (!at) return;
     if (!datasetId) return;
     setLoadingMsg(`Training CTGAN · generating ${rowCount.toLocaleString()} rows…`);
     setPhase("generating");
 
-    const hasLlmFields = tables[0].fields.some((f) => f.llmGenerated || f.mergedFrom);
-    const realFields   = tables[0].fields.filter((f) => !f.llmGenerated && !f.mergedFrom);
-    const llmFields    = tables[0].fields.filter((f) =>  f.llmGenerated || f.mergedFrom);
+    const hasLlmFields = at.fields.some((f) => f.llmGenerated || f.mergedFrom);
+    const realFields   = at.fields.filter((f) => !f.llmGenerated && !f.mergedFrom);
+    const llmFields    = at.fields.filter((f) =>  f.llmGenerated || f.mergedFrom);
 
     const changes = realFields.map((f) => ({
       original_name: f.originalName || f.name,
@@ -668,8 +1098,17 @@ export default function SchemaBuilder() {
     }));
 
     try {
+      const advPayload = {
+        temporal: {
+          ...temporal,
+          timestamp_columns: temporal.timestamp_columns,
+        },
+        rules: relRules.map(({ id: _id, ...r }) => r),
+        anomaly,
+      };
+
       let endpoint = `${PYTHON_API}/api/generate`;
-      let body: any = { dataset_id: datasetId, changes, row_count: rowCount };
+      let body: any = { dataset_id: datasetId, changes, row_count: rowCount, ...advPayload };
 
       if (hasLlmFields) {
         endpoint = `${PYTHON_API}/api/generate-hybrid`;
@@ -697,10 +1136,10 @@ export default function SchemaBuilder() {
       if (userId) {
         await fetch(`${NODE_API}/api/datasets`, {
           method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ user_id: userId, name: tables[0].name, kaggle_ref: kaggleRef, python_dataset_id: datasetId, row_count: rowCount, source: dataSource }),
+          body: JSON.stringify({ user_id: userId, name: getActiveTable()?.name ?? "dataset", kaggle_ref: kaggleRef, python_dataset_id: datasetId, row_count: rowCount, source: dataSource }),
         }).catch(() => {});
       }
-      sessionStorage.setItem("preview_params", JSON.stringify({ id: datasetId, name: tables[0].name, rows: rowCount, ref: kaggleRef }));
+      sessionStorage.setItem("preview_params", JSON.stringify({ id: datasetId, name: getActiveTable()?.name ?? "dataset", rows: rowCount, ref: kaggleRef }));
       setLocation("/preview");
     } catch (e: any) {
       setErrorMsg(e.message ?? "Generation failed. Check the Python service logs."); setPhase("error");
@@ -818,6 +1257,46 @@ export default function SchemaBuilder() {
               <span className="text-xs text-gray-500 w-8">{field.null_rate}%</span>
             </div>
 
+            {/* FK reference — only shown when 2+ tables exist */}
+            {tables.length >= 2 && (
+              <div className={colClass}>
+                <label className={labelClass}>Foreign Key Reference</label>
+                <select
+                  value={field.fk_table && field.fk_field ? `${field.fk_table}.${field.fk_field}` : ""}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    if (!val) {
+                      updateField(table.id, field.id, { fk_table: undefined, fk_field: undefined });
+                    } else {
+                      const dotIdx = val.indexOf(".");
+                      const tName  = val.slice(0, dotIdx);
+                      const fName  = val.slice(dotIdx + 1);
+                      updateField(table.id, field.id, { fk_table: tName, fk_field: fName });
+                    }
+                  }}
+                  className={inputClass}
+                >
+                  <option value="">— No foreign key —</option>
+                  {tables
+                    .filter((t) => t.id !== table.id)
+                    .flatMap((t) =>
+                      t.fields.map((f) => ({
+                        key: `${t.name}.${f.name}`,
+                        label: `${t.name} → ${f.name}`,
+                      }))
+                    )
+                    .map(({ key, label }) => (
+                      <option key={key} value={key}>{label}</option>
+                    ))}
+                </select>
+                {field.fk_table && field.fk_field && (
+                  <p className="text-[10px] text-green-600 mt-0.5">
+                    Values will be sampled from <strong>{field.fk_table}.{field.fk_field}</strong>
+                  </p>
+                )}
+              </div>
+            )}
+
             {/* Type-specific */}
             {panel && (
               <div>
@@ -839,11 +1318,69 @@ export default function SchemaBuilder() {
   // ── Main render ───────────────────────────────────────────────────────────
 
   const changedCount = mode === "kaggle"
-    ? (tables[0]?.fields.filter(isChanged).length ?? 0)
+    ? (getActiveTable()?.fields.filter(isChanged).length ?? 0)
     : 0;
 
   return (
     <div className="space-y-4">
+
+      {/* ── Generation Mode selector ── */}
+      {phase !== "loading" && phase !== "generating" && phase !== "smart_searching" && phase !== "smart_augmenting" && (
+        <div className="bg-white border border-gray-100 rounded-xl shadow-sm overflow-hidden">
+          <div className="grid grid-cols-4 divide-x divide-gray-100">
+            {GENERATION_MODES.map((m) => {
+              const active = genMode === m.id;
+              const colorMap: Record<string, string> = {
+                gray:   "bg-gray-800 text-white",
+                blue:   "bg-blue-600 text-white",
+                red:    "bg-red-600 text-white",
+                orange: "bg-orange-500 text-white",
+              };
+              const borderMap: Record<string, string> = {
+                gray: "border-b-2 border-gray-800",
+                blue: "border-b-2 border-blue-600",
+                red:  "border-b-2 border-red-600",
+                orange: "border-b-2 border-orange-500",
+              };
+              return (
+                <button
+                  key={m.id}
+                  onClick={() => { setGenMode(m.id); setShowPresets(true); }}
+                  className={`flex flex-col items-start px-4 py-3 text-left transition-colors
+                    ${active ? borderMap[m.color] + " bg-gray-50" : "hover:bg-gray-50/70"}`}
+                >
+                  <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded mb-1.5
+                    ${active ? colorMap[m.color] : "bg-gray-100 text-gray-500"}`}>
+                    {m.label}
+                  </span>
+                  <span className="text-[11px] text-gray-500 leading-tight">{m.desc}</span>
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Presets strip */}
+          {showPresets && (
+            <div className="border-t border-gray-100 px-4 py-3 bg-gray-50">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs font-semibold text-gray-600">Preset Schemas</span>
+                <button onClick={() => setShowPresets(false)} className="text-xs text-gray-400 hover:text-gray-600">Dismiss</button>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {PRESETS[genMode].map((preset) => (
+                  <button
+                    key={preset.name}
+                    onClick={() => loadPreset(preset)}
+                    className="text-xs px-3 py-1.5 bg-white border border-gray-200 rounded-full hover:border-purple-400 hover:text-purple-700 transition-colors font-medium text-gray-700 shadow-sm"
+                  >
+                    {preset.name}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* ── LLM panel ── */}
       {phase !== "loading" && phase !== "generating" && phase !== "smart_searching" && phase !== "smart_augmenting" && (
@@ -1215,6 +1752,56 @@ export default function SchemaBuilder() {
             </div>
           </div>
 
+          {/* Entity master tables */}
+          {entityTables.length > 0 && (
+            <div className="bg-white border border-gray-100 rounded-xl overflow-hidden shadow-sm">
+              <div className="px-4 py-3 border-b border-gray-100 bg-gray-50">
+                <p className="text-sm font-semibold text-gray-800">Related Entity Tables</p>
+                <p className="text-xs text-gray-400 mt-0.5">
+                  These master tables were automatically generated to ensure FK consistency.
+                  They will be available as separate CSV downloads after generation.
+                </p>
+              </div>
+              <div className="divide-y divide-gray-50">
+                {entityTables.map((et) => (
+                  <div key={et.name} className="px-4 py-3">
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-semibold text-gray-700 capitalize">{et.name}_master</span>
+                        <span className="text-[10px] text-gray-400">{et.rows} records · {et.columns.length} columns</span>
+                      </div>
+                      <span className="text-[10px] px-2 py-0.5 bg-blue-50 text-blue-600 rounded-full font-medium border border-blue-100">
+                        {et.columns.join(", ")}
+                      </span>
+                    </div>
+                    <div className="overflow-x-auto rounded border border-gray-100">
+                      <table className="w-full text-xs">
+                        <thead>
+                          <tr className="bg-gray-50 border-b border-gray-100">
+                            {et.columns.map((c) => (
+                              <th key={c} className="px-3 py-1.5 text-left text-[10px] font-semibold text-gray-500 uppercase whitespace-nowrap">{c}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {et.preview.map((row, i) => (
+                            <tr key={i} className="border-b border-gray-50 last:border-0">
+                              {et.columns.map((c) => (
+                                <td key={c} className="px-3 py-1.5 text-gray-700 whitespace-nowrap max-w-[200px] truncate">
+                                  {row[c] == null ? <span className="text-gray-300 italic">null</span> : String(row[c])}
+                                </td>
+                              ))}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* Row count + expand */}
           <div className="bg-white border border-gray-100 rounded-xl p-5 shadow-sm space-y-4">
             <div>
@@ -1255,8 +1842,41 @@ export default function SchemaBuilder() {
         </div>
       )}
 
+      {/* Table tabs — shown when 2+ tables */}
+      {phase === "schema" && tables.length >= 2 && (
+        <div className="bg-white border border-gray-100 rounded-xl overflow-hidden shadow-sm">
+          <div className="flex items-center overflow-x-auto">
+            {tables.map((t) => {
+              const isActive = t.id === (tables.find((x) => x.id === activeTableId) ?? tables[0]).id;
+              return (
+                <button key={t.id}
+                  onClick={() => setActiveTableId(t.id)}
+                  className={`flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium border-r border-gray-100 whitespace-nowrap transition-colors flex-shrink-0 relative
+                    ${isActive ? "bg-purple-50 text-purple-700" : "text-gray-500 hover:bg-gray-50"}`}
+                >
+                  {isActive && <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-purple-600" />}
+                  <span className="truncate max-w-[120px]">{t.name}</span>
+                  <span
+                    onClick={(e) => { e.stopPropagation(); removeTable(t.id); }}
+                    className="ml-1.5 text-gray-300 hover:text-red-400 flex-shrink-0 transition-colors cursor-pointer"
+                  >
+                    <X className="w-3 h-3" />
+                  </span>
+                </button>
+              );
+            })}
+            <button onClick={addTable}
+              className="flex items-center gap-1 px-3 py-2.5 text-xs text-gray-400 hover:text-purple-600 transition-colors ml-auto flex-shrink-0 border-l border-gray-100">
+              <Plus className="w-3.5 h-3.5" /> Add Table
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* ── Schema editor ── */}
-      {phase === "schema" && tables.map((table) => (
+      {phase === "schema" && tables.length > 0 && (() => {
+        const table = tables.find((t) => t.id === activeTableId) ?? tables[0];
+        return (
         <div key={table.id} className="space-y-4">
 
           <div className="flex items-center justify-between">
@@ -1280,16 +1900,29 @@ export default function SchemaBuilder() {
           {/* Field table */}
           <div className="bg-white border border-gray-100 rounded-xl overflow-hidden shadow-sm">
             <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100 bg-gray-50">
-              <div className="flex items-center gap-2">
-                <Layers className="w-4 h-4 text-purple-600" />
-                <span className="text-sm font-semibold text-gray-800">{table.name}</span>
-                <span className="text-xs text-gray-400">({table.fields.length} fields)</span>
+              <div className="flex items-center gap-2 flex-1 min-w-0">
+                <Layers className="w-4 h-4 text-purple-600 flex-shrink-0" />
+                <input
+                  value={table.name}
+                  onChange={(e) => updateTableName(table.id, e.target.value)}
+                  className="text-sm font-semibold text-gray-800 bg-transparent focus:outline-none focus:underline min-w-0 flex-1"
+                  title="Click to rename table"
+                />
+                <span className="text-xs text-gray-400 flex-shrink-0">({table.fields.length} fields)</span>
               </div>
-              {changedCount > 0 && (
-                <span className="text-xs font-medium text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full">
-                  {changedCount} change{changedCount !== 1 ? "s" : ""}
-                </span>
-              )}
+              <div className="flex items-center gap-2 flex-shrink-0">
+                {changedCount > 0 && (
+                  <span className="text-xs font-medium text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full">
+                    {changedCount} change{changedCount !== 1 ? "s" : ""}
+                  </span>
+                )}
+                {tables.length === 1 && (
+                  <button onClick={addTable}
+                    className="flex items-center gap-1 text-xs text-gray-400 hover:text-purple-600 transition-colors border border-gray-200 rounded-lg px-2 py-1">
+                    <Plus className="w-3 h-3" /> Add Table
+                  </button>
+                )}
+              </div>
             </div>
 
             <table className="w-full text-sm">
@@ -1339,6 +1972,11 @@ export default function SchemaBuilder() {
                               {field.mergedFrom && (
                                 <span className="flex-shrink-0 text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-blue-100 text-blue-700 border border-blue-200 whitespace-nowrap">
                                   {field.mergedFrom}
+                                </span>
+                              )}
+                              {field.fk_table && field.fk_field && (
+                                <span className="flex-shrink-0 text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-green-100 text-green-700 border border-green-200 whitespace-nowrap">
+                                  FK → {field.fk_table}.{field.fk_field}
                                 </span>
                               )}
                             </div>
@@ -1430,10 +2068,214 @@ export default function SchemaBuilder() {
             </div>
           )}
 
+          {/* Advanced Generation */}
+          <div className="bg-white border border-gray-100 rounded-xl overflow-hidden shadow-sm">
+            <button
+              onClick={() => setShowAdvanced((v) => !v)}
+              className="w-full flex items-center justify-between px-4 py-3 hover:bg-gray-50 transition-colors"
+            >
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-semibold text-gray-700">Advanced Generation</span>
+                {(temporal.enabled || relRules.length > 0 || anomaly.enabled) && (
+                  <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-purple-100 text-purple-700">
+                    {[temporal.enabled && "Temporal", relRules.length > 0 && `${relRules.length} Rule${relRules.length > 1 ? "s" : ""}`, anomaly.enabled && "Anomalies"].filter(Boolean).join(" · ")}
+                  </span>
+                )}
+              </div>
+              {showAdvanced
+                ? <ChevronDown className="w-4 h-4 text-gray-400" />
+                : <ChevronRight className="w-4 h-4 text-gray-400" />}
+            </button>
+
+            {showAdvanced && (
+              <div className="px-4 pb-4 space-y-5 border-t border-gray-50">
+
+                {/* ── Temporal Simulation ── */}
+                <div className="pt-4 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-xs font-semibold text-gray-700">Temporal Simulation</p>
+                      <p className="text-[11px] text-gray-400">Replace timestamp columns with realistic, business-hours-biased values</p>
+                    </div>
+                    <button
+                      onClick={() => setTemporal((t) => ({ ...t, enabled: !t.enabled }))}
+                      className={`relative w-10 h-5 rounded-full transition-colors flex-shrink-0
+                        ${temporal.enabled ? "bg-purple-600" : "bg-gray-200"}`}
+                    >
+                      <span className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform
+                        ${temporal.enabled ? "translate-x-5" : ""}`} />
+                    </button>
+                  </div>
+
+                  {temporal.enabled && (
+                    <div className="space-y-3 pl-1">
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="flex flex-col gap-1">
+                          <label className="text-[11px] font-medium text-gray-500 uppercase tracking-wide">Start Date</label>
+                          <input type="date" className="text-xs border border-gray-200 rounded-md px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-purple-400"
+                            value={temporal.start_date}
+                            onChange={(e) => setTemporal((t) => ({ ...t, start_date: e.target.value }))} />
+                        </div>
+                        <div className="flex flex-col gap-1">
+                          <label className="text-[11px] font-medium text-gray-500 uppercase tracking-wide">End Date</label>
+                          <input type="date" className="text-xs border border-gray-200 rounded-md px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-purple-400"
+                            value={temporal.end_date}
+                            onChange={(e) => setTemporal((t) => ({ ...t, end_date: e.target.value }))} />
+                        </div>
+                      </div>
+                      <div className="flex gap-4">
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <input type="checkbox" className="accent-purple-600"
+                            checked={temporal.business_hours}
+                            onChange={(e) => setTemporal((t) => ({ ...t, business_hours: e.target.checked }))} />
+                          <span className="text-xs text-gray-600">Business-hours bias (Mon-Fri 08-18)</span>
+                        </label>
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <input type="checkbox" className="accent-purple-600"
+                            checked={temporal.ordered}
+                            onChange={(e) => setTemporal((t) => ({ ...t, ordered: e.target.checked }))} />
+                          <span className="text-xs text-gray-600">Ordered event sequence</span>
+                        </label>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* ── Relationship Rules ── */}
+                <div className="space-y-3 border-t border-gray-50 pt-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-xs font-semibold text-gray-700">Relationship Rules</p>
+                      <p className="text-[11px] text-gray-400">Enforce field dependencies — e.g. if login_status = SUCCESS then failed_attempts ≤ 2</p>
+                    </div>
+                    <button
+                      onClick={addRelRule}
+                      className="flex items-center gap-1 text-xs text-purple-600 hover:text-purple-800 font-medium"
+                    >
+                      <Plus className="w-3.5 h-3.5" /> Add Rule
+                    </button>
+                  </div>
+
+                  {relRules.length === 0 && (
+                    <p className="text-[11px] text-gray-400 italic">No rules yet. Click "Add Rule" to create your first dependency.</p>
+                  )}
+
+                  {relRules.map((rule) => {
+                    const fieldNames = tables[0]?.fields.map((f) => f.name) ?? [];
+                    const sel = "text-xs border border-gray-200 rounded-md px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-purple-400 bg-white";
+                    const inp = sel;
+                    return (
+                      <div key={rule.id} className="flex flex-wrap items-center gap-2 p-2.5 bg-gray-50 rounded-lg border border-gray-100">
+                        <span className="text-[11px] font-semibold text-gray-500 uppercase">IF</span>
+                        <select value={rule.if_col} onChange={(e) => updateRelRule(rule.id, { if_col: e.target.value })} className={sel}>
+                          <option value="">-- column --</option>
+                          {fieldNames.map((n) => <option key={n} value={n}>{n}</option>)}
+                        </select>
+                        <select value={rule.if_op} onChange={(e) => updateRelRule(rule.id, { if_op: e.target.value })} className={sel}>
+                          {[["eq","="],["neq","≠"],["gt",">"],["lt","<"],["gte","≥"],["lte","≤"],["in","in"]].map(([v,l]) =>
+                            <option key={v} value={v}>{l}</option>)}
+                        </select>
+                        <input value={rule.if_val} onChange={(e) => updateRelRule(rule.id, { if_val: e.target.value })}
+                          placeholder="value" className={inp + " w-24"} />
+                        <span className="text-[11px] font-semibold text-gray-500 uppercase">THEN</span>
+                        <select value={rule.then_col} onChange={(e) => updateRelRule(rule.id, { then_col: e.target.value })} className={sel}>
+                          <option value="">-- column --</option>
+                          {fieldNames.map((n) => <option key={n} value={n}>{n}</option>)}
+                        </select>
+                        <select value={rule.then_op} onChange={(e) => updateRelRule(rule.id, { then_op: e.target.value })} className={sel}>
+                          {[["set","= (set)"],["one_of","= one of"],["clamp_max","≤ (cap)"],["clamp_min","≥ (floor)"],["set_range","= float range"],["set_int_range","= int range"]].map(([v,l]) =>
+                            <option key={v} value={v}>{l}</option>)}
+                        </select>
+                        <input value={rule.then_val} onChange={(e) => updateRelRule(rule.id, { then_val: e.target.value })}
+                          placeholder={rule.then_op === "one_of" ? "A, B, C" : rule.then_op.includes("range") ? "lo, hi" : "value"}
+                          className={inp + " w-28"} />
+                        <button onClick={() => removeRelRule(rule.id)} className="text-gray-300 hover:text-red-500 ml-auto">
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* ── Anomaly Injection (Cybersecurity mode only) ── */}
+                {genMode === "cybersecurity" && (
+                  <div className="space-y-3 border-t border-gray-50 pt-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-xs font-semibold text-gray-700">Anomaly Injection</p>
+                        <p className="text-[11px] text-gray-400">Insert realistic attack payloads into a fraction of rows</p>
+                      </div>
+                      <button
+                        onClick={() => setAnomaly((a) => ({ ...a, enabled: !a.enabled }))}
+                        className={`relative w-10 h-5 rounded-full transition-colors flex-shrink-0
+                          ${anomaly.enabled ? "bg-red-500" : "bg-gray-200"}`}
+                      >
+                        <span className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform
+                          ${anomaly.enabled ? "translate-x-5" : ""}`} />
+                      </button>
+                    </div>
+
+                    {anomaly.enabled && (
+                      <div className="space-y-3 pl-1">
+                        <div>
+                          <div className="flex items-center justify-between mb-1">
+                            <span className="text-[11px] font-medium text-gray-500 uppercase tracking-wide">Anomaly ratio</span>
+                            <span className="text-xs font-semibold text-red-600">{Math.round(anomaly.ratio * 100)}%</span>
+                          </div>
+                          <input type="range" min={0.01} max={0.5} step={0.01}
+                            value={anomaly.ratio}
+                            onChange={(e) => setAnomaly((a) => ({ ...a, ratio: Number(e.target.value) }))}
+                            className="w-full accent-red-500" />
+                        </div>
+                        <div>
+                          <p className="text-[11px] font-medium text-gray-500 uppercase tracking-wide mb-1.5">Attack types</p>
+                          <div className="flex flex-wrap gap-2">
+                            {["sql_injection","xss","brute_force","port_scan","invalid_jwt","impossible_timestamp"].map((t) => {
+                              const on = anomaly.types.includes(t);
+                              return (
+                                <button key={t} onClick={() =>
+                                  setAnomaly((a) => ({
+                                    ...a,
+                                    types: on ? a.types.filter((x) => x !== t) : [...a.types, t],
+                                  }))}
+                                  className={`text-[11px] px-2.5 py-1 rounded-full border font-medium transition-colors
+                                    ${on ? "bg-red-100 border-red-300 text-red-700" : "border-gray-200 text-gray-500 hover:border-red-200"}`}>
+                                  {t.replace(/_/g, " ")}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+              </div>
+            )}
+          </div>
+
           {/* Row count + Save + Generate */}
           <div className="bg-white border border-gray-100 rounded-xl p-4 shadow-sm space-y-3">
-            {/* Row count slider — only shown for Kaggle/CTGAN mode */}
-            {mode === "kaggle" && (
+
+            {/* Per-table row count when 2+ tables */}
+            {tables.length >= 2 && (
+              <div className="flex items-center gap-3 pb-1 border-b border-gray-50">
+                <span className="text-xs font-medium text-gray-600 whitespace-nowrap">
+                  Rows for <span className="text-purple-700 font-semibold">{table.name}</span>
+                </span>
+                <input type="range" min={100} max={100_000} step={100}
+                  value={table.rowCount ?? rowCount}
+                  onChange={(e) => updateTableRowCount(table.id, Number(e.target.value))}
+                  className="flex-1 accent-purple-600" />
+                <span className="text-xs font-semibold text-purple-700 w-20 text-right tabular-nums">
+                  {(table.rowCount ?? rowCount).toLocaleString()}
+                </span>
+              </div>
+            )}
+
+            {/* Row count slider — only shown for Kaggle/CTGAN mode with single table */}
+            {mode === "kaggle" && tables.length === 1 && (
               <div className="flex items-center gap-3">
                 <span className="text-xs font-medium text-gray-600 whitespace-nowrap">Row Count</span>
                 <input type="range" min={1_000} max={100_000} step={1_000}
@@ -1445,34 +2287,51 @@ export default function SchemaBuilder() {
               </div>
             )}
 
-            {mode === "llm" && (
+            {mode === "llm" && tables.length === 1 && (
               <p className="text-xs text-purple-600 bg-purple-50 rounded-lg px-3 py-2">
                 ✦ A 200-row template will be generated first. You'll set the final row count before CTGAN scales it up.
               </p>
             )}
 
-            <div className="flex items-center gap-2 pt-1">
-              <button onClick={handleSaveSchema} disabled={saveStatus === "saving"}
-                className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium border transition-colors
-                  ${saveStatus === "saved"  ? "border-green-400 text-green-600 bg-green-50" :
-                    saveStatus === "error"  ? "border-red-400 text-red-600 bg-red-50"   :
-                                              "border-gray-200 text-gray-600 hover:bg-gray-50"}`}>
-                <Save className="w-4 h-4" />
-                {saveStatus === "saving" ? "Saving…" : saveStatus === "saved" ? "Saved!" : saveStatus === "error" ? "Failed" : "Save Schema"}
-              </button>
+            {/* Single-table actions */}
+            {tables.length === 1 && (
+              <div className="flex items-center gap-2 pt-1">
+                <button onClick={handleSaveSchema} disabled={saveStatus === "saving"}
+                  className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium border transition-colors
+                    ${saveStatus === "saved"  ? "border-green-400 text-green-600 bg-green-50" :
+                      saveStatus === "error"  ? "border-red-400 text-red-600 bg-red-50"   :
+                                                "border-gray-200 text-gray-600 hover:bg-gray-50"}`}>
+                  <Save className="w-4 h-4" />
+                  {saveStatus === "saving" ? "Saving…" : saveStatus === "saved" ? "Saved!" : saveStatus === "error" ? "Failed" : "Save Schema"}
+                </button>
 
-              {mode === "llm" ? (
-                <button onClick={handleGenerateTemplate}
-                  className="flex-1 flex items-center justify-center gap-1.5 px-4 py-2 bg-purple-600 text-white rounded-lg text-sm font-medium hover:bg-purple-700 transition-colors">
-                  <Sparkles className="w-4 h-4" /> Generate Template
+                {mode === "llm" ? (
+                  <button onClick={handleGenerateTemplate}
+                    className="flex-1 flex items-center justify-center gap-1.5 px-4 py-2 bg-purple-600 text-white rounded-lg text-sm font-medium hover:bg-purple-700 transition-colors">
+                    <Sparkles className="w-4 h-4" /> Generate Template
+                  </button>
+                ) : (
+                  <button onClick={handleGenerate}
+                    className="flex-1 flex items-center justify-center gap-1.5 px-4 py-2 bg-purple-600 text-white rounded-lg text-sm font-medium hover:bg-purple-700 transition-colors">
+                    Generate with CTGAN
+                  </button>
+                )}
+              </div>
+            )}
+
+            {/* Multi-table actions */}
+            {tables.length >= 2 && (
+              <div className="space-y-2 pt-1">
+                <button onClick={handleGenerateMultiTableZip}
+                  className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-purple-600 text-white rounded-lg text-sm font-semibold hover:bg-purple-700 transition-colors shadow-sm">
+                  <Download className="w-4 h-4" />
+                  Generate All {tables.length} Tables as ZIP
                 </button>
-              ) : (
-                <button onClick={handleGenerate}
-                  className="flex-1 flex items-center justify-center gap-1.5 px-4 py-2 bg-purple-600 text-white rounded-lg text-sm font-medium hover:bg-purple-700 transition-colors">
-                  Generate with CTGAN
-                </button>
-              )}
-            </div>
+                <p className="text-[11px] text-gray-400 text-center">
+                  Each table gets its own CSV with FK values referencing parent table rows
+                </p>
+              </div>
+            )}
 
             {changedCount > 0 && mode === "kaggle" && (
               <p className="text-xs text-amber-600">
@@ -1481,7 +2340,8 @@ export default function SchemaBuilder() {
             )}
           </div>
         </div>
-      ))}
+        );
+      })()}
     </div>
   );
 }
