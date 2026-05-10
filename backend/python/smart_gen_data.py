@@ -1,0 +1,473 @@
+"""
+Shared data pools and column-generation logic used by generate-from-schema
+and generate-hybrid endpoints.
+"""
+import random
+import string
+import uuid as uuid_module
+from datetime import datetime, timedelta
+from typing import Any
+
+import numpy as np
+
+FIRST = [
+    # Filipino male
+    "Jose","Juan","Miguel","Carlo","Antonio","Ricardo","Eduardo","Fernando","Ramon","Roberto",
+    "Noel","Christian","Ryan","Kenneth","Angelo","Jerome","Jason","Brian","Kevin","Ronald",
+    "Emmanuel","Alex","Ivan","Dennis","Arnold","Gilbert","Bernard","Virgilio","Andres","Rodrigo",
+    "Mark","John","Patrick","James","Daniel","Michael","David","Joseph","Robert","Christopher",
+    # Filipino female
+    "Maria","Ana","Rosa","Carmen","Elena","Linda","Grace","Marisol","Luz","Cristina",
+    "Fatima","Lourdes","Teresa","Corazon","Dolores","Jessica","Karen","Michelle","Patricia","Sandra",
+    "Angelica","Kristine","Jenny","Stephanie","Nicole","Maricel","Rowena","Jennylyn","Precious","Lovely",
+    # International
+    "Alice","Bob","Diana","Eve","Frank","Henry","Iris","Leo","Nathan","Oliver",
+    "Priya","Quinn","Rachel","Samuel","Tina","Emma","Liam","Sophia","Noah","Ava",
+    "William","Isabella","James","Mia","Benjamin","Charlotte","Lucas","Amelia","Mason","Harper",
+]
+
+LAST = [
+    # Filipino
+    "Santos","Reyes","Cruz","Bautista","Ocampo","Garcia","Mendoza","Torres","Tan","Flores",
+    "Gonzales","Lopez","Ramos","Villanueva","Castro","Morales","Aquino","De Leon","Dela Cruz","Fernandez",
+    "Salvador","Bernardo","Pascual","Tolentino","Santiago","Francisco","Aguilar","Navarro","Castillo","Guevara",
+    "Rivera","Macaraeg","Soriano","Espiritu","Macapagal","Sison","Lacson","Dizon","Manalo","Pangilinan",
+    "Corpuz","Enriquez","Mercado","Buenaventura","Constantino","Delos Santos","Estrada","Ilagan","Jimenez","Lim",
+    # International
+    "Smith","Johnson","Williams","Brown","Jones","Davis","Miller","Wilson","Moore","Taylor",
+    "Anderson","Martinez","Lee","Thompson","White","Harris","Clark","Lewis","Walker","Hall",
+    "Young","Allen","King","Wright","Scott","Green","Baker","Adams","Nelson","Carter",
+]
+
+STREETS = [
+    "Main St","Oak Ave","Pine Rd","Elm St","Cedar Ln","Maple Dr",
+    "River Rd","Park Blvd","Sunset Blvd","Lake Dr",
+]
+
+DOMAINS = ["gmail.com","yahoo.com","hotmail.com","outlook.com","icloud.com","proton.me"]
+
+_POOLS: dict[str, list[str]] = {
+    "country":     ["United States","Philippines","Canada","Germany","Japan","Australia","Brazil","India","France","United Kingdom","Mexico","South Korea","Italy","Spain","Netherlands"],
+    "city":        ["New York","Los Angeles","Chicago","Houston","Manila","Tokyo","London","Paris","Sydney","Toronto","Berlin","Mumbai","São Paulo","Seoul","Madrid"],
+    "city_from":   ["New York","Los Angeles","Chicago","Houston","Manila","Tokyo","London","Paris","Sydney","Toronto","Berlin","Mumbai","São Paulo","Seoul","Madrid"],
+    "city_to":     ["New York","Los Angeles","Chicago","Houston","Manila","Tokyo","London","Paris","Sydney","Toronto","Berlin","Mumbai","São Paulo","Seoul","Madrid"],
+    "state":       ["California","Texas","Florida","New York","Illinois","Pennsylvania","Ohio","Georgia","North Carolina","Michigan","Metro Manila","Cebu","Davao"],
+    "province":    ["California","Texas","Florida","New York","Illinois","Pennsylvania","Ohio","Georgia","Metro Manila","Cebu","Davao","Laguna","Batangas"],
+    "region":      ["North America","Europe","Asia Pacific","Latin America","Middle East","Africa","Southeast Asia","South Asia"],
+    "department":  ["Engineering","Marketing","Sales","Human Resources","Finance","Operations","Product","Legal","Customer Support","Research & Development"],
+    "dept":        ["Engineering","Marketing","Sales","Human Resources","Finance","Operations","Product","Legal","Customer Support","Research & Development"],
+    "protocol":    ["TCP","UDP","HTTP","HTTPS","FTP","SSH","DNS","ICMP","SMTP","RDP","SMB","TLS"],
+    "attack":      ["SQL Injection","XSS","DDoS","Phishing","Brute Force","Man-in-the-Middle","Ransomware","Zero-Day","Port Scan","Credential Stuffing"],
+    "threat":      ["Malware","Ransomware","Phishing","Insider Threat","APT","DDoS","SQL Injection","Data Exfiltration","Credential Theft","Zero-Day Exploit"],
+    "severity":    ["Low","Medium","High","Critical"],
+    "level":       ["Low","Medium","High","Critical"],
+    "priority":    ["Low","Medium","High","Urgent"],
+    "status":      ["Active","Inactive","Pending","Completed","Cancelled","In Progress","On Hold","Resolved"],
+    "stage":       ["Draft","Review","Approved","Published","Archived","In Progress","Completed"],
+    "grade":       ["A","B","C","D","F"],
+    "category":    ["Category A","Category B","Category C","Category D"],
+    "type":        ["Type A","Type B","Type C","Type D"],
+    "gender":      ["Male","Female","Non-binary","Prefer not to say"],
+    "sex":         ["Male","Female"],
+    "marital":     ["Single","Married","Divorced","Widowed"],
+    "platform":    ["Windows","macOS","Linux","Android","iOS","Ubuntu","CentOS"],
+    "os":          ["Windows 11","Windows 10","macOS Ventura","Ubuntu 22.04","Android 14","iOS 17","CentOS 8"],
+    "browser":     ["Chrome","Firefox","Safari","Edge","Opera","Brave"],
+    "device":      ["Desktop","Laptop","Smartphone","Tablet","Server","IoT Device"],
+    "diagnosis":   ["Hypertension","Diabetes Type 2","Asthma","Pneumonia","COVID-19","Appendicitis","Migraine","Anxiety Disorder","Fracture","Anemia"],
+    "condition":   ["Stable","Critical","Improving","Deteriorating","Under Observation"],
+    "disease":     ["Hypertension","Diabetes","Asthma","Tuberculosis","COVID-19","Dengue","Malaria","Cancer","Heart Disease","Stroke"],
+    "treatment":   ["Surgery","Chemotherapy","Physical Therapy","Medication","Observation","Dialysis","Radiation","Immunotherapy","Vaccination","Rest"],
+    "medication":  ["Paracetamol","Amoxicillin","Ibuprofen","Metformin","Lisinopril","Atorvastatin","Omeprazole","Amlodipine","Azithromycin","Prednisone"],
+    "occupation":  ["Engineer","Doctor","Teacher","Nurse","Accountant","Lawyer","Developer","Designer","Manager","Analyst"],
+    "job":         ["Engineer","Doctor","Teacher","Nurse","Accountant","Lawyer","Developer","Designer","Manager","Analyst"],
+    "role":        ["Admin","User","Manager","Analyst","Developer","Designer","Viewer","Editor","Owner","Guest"],
+    "airline":     ["Philippine Airlines","Cebu Pacific","AirAsia","Delta","United","American Airlines","Emirates","Singapore Airlines","Cathay Pacific","Qatar Airways"],
+    "airport":     ["NAIA","Mactan-Cebu","Clark","Los Angeles (LAX)","New York (JFK)","London (LHR)","Tokyo (NRT)","Sydney (SYD)","Dubai (DXB)","Singapore (SIN)"],
+    "product":     ["Product A","Product B","Product C","Product D","Product E","Widget X","Widget Y","Service Pack 1","Premium Plan","Basic Plan"],
+    "plan":        ["Free","Basic","Pro","Enterprise","Starter","Business","Ultimate"],
+    "currency":    ["USD","EUR","GBP","JPY","PHP","AUD","CAD","SGD","CNY","KRW"],
+    "language":    ["English","Spanish","French","German","Japanese","Mandarin","Filipino","Portuguese","Arabic","Korean"],
+    "color":       ["Red","Blue","Green","Yellow","Orange","Purple","Black","White","Gray","Brown"],
+    "size":        ["XS","S","M","L","XL","XXL"],
+    "education":   ["High School","Bachelor's Degree","Master's Degree","PhD","Associate Degree","Vocational","Some College"],
+    "degree":      ["High School","Bachelor's","Master's","PhD","Associate","Vocational","Doctor of Medicine","Juris Doctor","MBA","MSc","MA"],
+    "action":      ["Login","Logout","Create","Update","Delete","View","Download","Upload","Share","Export"],
+    "event":       ["Login","Logout","Purchase","Signup","Click","View","Download","Error","Warning","Info"],
+    "log":         ["INFO: Request processed","WARNING: High memory usage","ERROR: Connection timeout","DEBUG: Query executed","INFO: User authenticated","ERROR: Invalid token"],
+    "note":        ["Follow up required","No issues found","Escalated to manager","Resolved successfully","Awaiting customer response","Under review","Completed as requested"],
+    "comment":     ["Looks good","Needs revision","Approved","Rejected","Under review","Please clarify","Well done","Requires more detail"],
+    "remark":      ["Satisfactory","Needs improvement","Excellent","Good","Average","Below average","Outstanding","Meets expectations"],
+    "feedback":    ["Very satisfied","Satisfied","Neutral","Dissatisfied","Very dissatisfied","Great service","Could be better","Excellent experience"],
+    "description": ["Standard configuration","Custom setup","Default settings","Advanced configuration","Minimal setup","Full installation","Partial deployment"],
+    "tag":         ["urgent","important","low-priority","follow-up","escalated","new","resolved","archived","flagged","reviewed"],
+    "label":       ["urgent","important","low-priority","follow-up","escalated","new","resolved","archived","flagged","reviewed"],
+    "nationality": ["American","Filipino","Canadian","German","Japanese","Australian","Brazilian","Indian","French","British","Mexican","Korean","Italian","Spanish","Dutch","Singaporean","Thai","Indonesian","Vietnamese","Chinese"],
+    "citizenship": ["American","Filipino","Canadian","German","Japanese","Australian","Brazilian","Indian","French","British","Mexican","Korean","Italian","Spanish","Dutch","Singaporean","Thai","Indonesian"],
+    "ethnicity":   ["Asian","White","Hispanic","Black","Mixed","Pacific Islander","Middle Eastern","Native American","South Asian","Southeast Asian"],
+    "blood":       ["A+","A-","B+","B-","AB+","AB-","O+","O-"],
+    "company":     ["Google","Apple","Microsoft","Amazon","Meta","Netflix","Tesla","Samsung","IBM","Intel","Oracle","Adobe","Salesforce","Shopify","Uber","Airbnb","Spotify","Grab","Lazada","SM Group","Ayala Corporation","BDO Unibank","PLDT","Meralco","Jollibee","Globe Telecom","Ayala Land","BPI","Metrobank"],
+    "organization":["United Nations","World Health Organization","Red Cross","UNICEF","Amnesty International","Greenpeace","World Bank","IMF","ASEAN","APEC","NATO","WHO","UNESCO","UNDP","ILO"],
+    "employer":    ["Google","Apple","Microsoft","Amazon","Meta","Netflix","Tesla","Samsung","IBM","Intel","Oracle","Adobe","Salesforce","Shopify","Uber","Jollibee","Globe","PLDT","SM Group","Ayala"],
+    "brand":       ["Nike","Adidas","Apple","Samsung","Toyota","Honda","Sony","LG","Uniqlo","H&M","Zara","Louis Vuitton","Gucci","Prada","Chanel","Rolex","Nestlé","Coca-Cola","Pepsi","McDonald's"],
+    "job_title":   ["Software Engineer","Product Manager","Data Analyst","UX Designer","Marketing Manager","HR Specialist","Financial Analyst","Operations Manager","Sales Representative","IT Specialist","Customer Service Representative","Business Analyst","Project Manager","QA Engineer","DevOps Engineer","Full Stack Developer","Data Scientist","Content Writer","Graphic Designer","Accountant"],
+    "position":    ["Software Engineer","Product Manager","Data Analyst","UX Designer","Marketing Manager","HR Specialist","Financial Analyst","Operations Manager","Sales Representative","IT Specialist","Business Analyst","Project Manager","Team Lead","Senior Associate","Director","VP","Associate","Intern","Senior Engineer","Lead Developer"],
+    "designation": ["Software Engineer","Product Manager","Data Analyst","Marketing Manager","HR Specialist","Operations Manager","Sales Representative","IT Specialist","Business Analyst","Project Manager","Team Lead","Director","VP","Associate","Senior Engineer","Intern","Consultant","Specialist","Coordinator","Supervisor"],
+    "university":  ["University of the Philippines","De La Salle University","Ateneo de Manila University","University of Santo Tomas","Far Eastern University","Polytechnic University of the Philippines","National University","Mapua University","Harvard University","MIT","Stanford University","Oxford University","Cambridge University","UC Berkeley","Yale University"],
+    "college":     ["University of the Philippines","De La Salle University","Ateneo de Manila University","University of Santo Tomas","Far Eastern University","Polytechnic University of the Philippines","National University","Mapua University","Harvard University","MIT","Stanford University","Oxford University"],
+    "school":      ["UP High School","Ateneo de Manila","La Salle Greenhills","Xavier School","Assumption College","Miriam College","San Beda","Adamson University","Mapua University","National University","Harvard University","Oxford University","MIT"],
+    "institution": ["University of the Philippines","De La Salle University","Ateneo de Manila University","University of Santo Tomas","National University","Mapua University","Harvard University","MIT","Stanford University","Oxford University","Cambridge University"],
+    "course":      ["Computer Science","Business Administration","Nursing","Information Technology","Electronics Engineering","Civil Engineering","Accountancy","Psychology","Architecture","Medicine","Law","Tourism","Communication","Marketing","Finance","Education","Biology","Chemistry","Physics","Mathematics"],
+    "subject":     ["Mathematics","English","Science","History","Geography","Physics","Chemistry","Biology","Computer Science","Physical Education","Art","Music","Social Studies","Philosophy","Economics","Literature","Filipino","Statistics","Trigonometry","Calculus"],
+    "major":       ["Computer Science","Business Administration","Nursing","Information Technology","Engineering","Education","Accountancy","Psychology","Architecture","Liberal Arts","Fine Arts","Mathematics","Biology","Chemistry","Physics","Communication","Marketing","Finance","Law","Medicine"],
+    "year_level":  ["Grade 7","Grade 8","Grade 9","Grade 10","Grade 11","Grade 12","1st Year","2nd Year","3rd Year","4th Year","5th Year","Graduate"],
+    "product_name":["Laptop Pro X","Wireless Earbuds","Smart Watch Series 5","4K Monitor","Mechanical Keyboard","Gaming Mouse","USB-C Hub","Portable Charger","Bluetooth Speaker","Webcam HD","Office Chair","Standing Desk","Notebook Set","Pen Drive 128GB","External SSD","Smart TV 55\"","Air Purifier","Coffee Maker","Electric Fan","Rice Cooker"],
+    "item":        ["Laptop","Smartphone","Tablet","Monitor","Keyboard","Mouse","Headphones","Charger","Speaker","Webcam","Chair","Desk","Notebook","USB Drive","Hard Drive","TV","Printer","Scanner","Router","Switch"],
+    "service":     ["Cloud Hosting","Technical Support","Consulting","Training","Maintenance","Installation","Delivery","Subscription","Premium Access","API Access","Data Storage","Email Service","VPN Service","Security Audit","Software License"],
+    "payment_method":["Credit Card","Debit Card","PayPal","GCash","Maya","Bank Transfer","Cash","Cryptocurrency","Check","Installment"],
+    "payment":     ["Credit Card","Debit Card","PayPal","GCash","Maya","Bank Transfer","Cash","Cryptocurrency","Check","Installment"],
+    "shipping":    ["Standard","Express","Overnight","Same-Day","Free Shipping","Economy","Priority","Tracked","Untracked","International"],
+    "ward":        ["ICU","Emergency","Pediatrics","Cardiology","Oncology","Neurology","Orthopedics","Maternity","Geriatrics","Psychiatry","General"],
+    "hospital":    ["Philippine General Hospital","St. Luke's Medical Center","Makati Medical Center","The Medical City","Asian Hospital","National Kidney Institute","Cardinal Santos Medical Center","Ospital ng Maynila","University of Santo Tomas Hospital","St. Elizabeth Hospital"],
+    "specialist":  ["Cardiologist","Neurologist","Oncologist","Pediatrician","Orthopedic Surgeon","Dermatologist","Psychiatrist","Radiologist","Endocrinologist","Gastroenterologist","General Practitioner","Ophthalmologist","ENT Specialist","Pulmonologist","Rheumatologist"],
+    "symptom":     ["Fever","Cough","Headache","Fatigue","Shortness of breath","Nausea","Chest pain","Dizziness","Back pain","Joint pain","Sore throat","Rash","Vomiting","Diarrhea","Loss of appetite"],
+    "barangay":    ["Barangay 1","Barangay 2","Barangay 3","Barangay 4","Barangay 5","Barangay 6","Barangay 7","Barangay 8","Barangay 9","Barangay 10","Barangay 11","Barangay 12","Barangay 13","Barangay 14","Barangay 15","Barangay 16","Barangay 17","Barretto","East Bajac-Bajac","West Bajac-Bajac","East Tapinac","West Tapinac","Gordon Heights","Kalaklan","Mabayuan","New Cabalan","Old Cabalan","Pag-asa","Sta. Rita"],
+    "brgy":        ["Barangay 1","Barangay 2","Barangay 3","Barangay 4","Barangay 5","Barangay 6","Barangay 7","Barangay 8","Barangay 9","Barangay 10","Barangay 11","Barangay 12","Barangay 13","Barangay 14","Barangay 15","Barangay 16","Barangay 17","Barretto","East Bajac-Bajac","West Bajac-Bajac","East Tapinac","West Tapinac","Gordon Heights","Kalaklan","Mabayuan","New Cabalan","Old Cabalan","Pag-asa","Sta. Rita"],
+    "municipality":["Olongapo","Subic","San Antonio","San Narciso","Castillejos","San Felipe","Santa Cruz","Palauig","Candelaria","Masinloc","Iba","San Marcelino","Cabangan","San Antonio","Botolan"],
+    "district":    ["District 1","District 2","District 3","District 4","District 5","Northern District","Southern District","Eastern District","Western District","Central District"],
+    "ph_region":   ["NCR","Region I","Region II","Region III","Region IV-A","Region IV-B","Region V","Region VI","Region VII","Region VIII","Region IX","Region X","Region XI","Region XII","CARAGA","CAR","BARMM"],
+    "ph_province": ["Metro Manila","Cebu","Davao del Sur","Laguna","Batangas","Pampanga","Bulacan","Cavite","Rizal","Pangasinan","Zambales","Nueva Ecija","Iloilo","Negros Occidental","Leyte","Quezon","Camarines Sur","Albay","Isabela","Cagayan"],
+    "day_of_week": ["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"],
+    "weekday":     ["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"],
+    "month_name":  ["January","February","March","April","May","June","July","August","September","October","November","December"],
+    "quarter":     ["Q1","Q2","Q3","Q4","1st Quarter","2nd Quarter","3rd Quarter","4th Quarter"],
+    "shift":       ["Morning Shift","Afternoon Shift","Night Shift","Graveyard Shift","Day Shift"],
+    "time_slot":   ["8:00 AM","9:00 AM","10:00 AM","11:00 AM","12:00 PM","1:00 PM","2:00 PM","3:00 PM","4:00 PM","5:00 PM","6:00 PM","7:00 PM"],
+    "schedule":    ["Daily","Weekly","Bi-weekly","Monthly","Quarterly","Annually","On-demand","Flexible","Fixed"],
+    "frequency":   ["Daily","Weekly","Bi-weekly","Monthly","Quarterly","Annually","One-time","Recurring"],
+    "semester":    ["1st Semester","2nd Semester","Summer Term"],
+    "school_year": ["2020-2021","2021-2022","2022-2023","2023-2024","2024-2025","2025-2026"],
+    "term":        ["1st Semester","2nd Semester","Summer Term","1st Quarter","2nd Quarter","3rd Quarter","4th Quarter"],
+    "civil_status":["Single","Married","Widowed","Separated","Annulled","Live-in"],
+    "relationship":["Single","Married","Widowed","Separated","Annulled","Divorced","In a Relationship"],
+    "religion":    ["Roman Catholic","Islam","Iglesia ni Cristo","Protestant","Seventh-day Adventist","Buddhism","Jehovah's Witness","Evangelical","Pentecostal","Atheist / Agnostic","Other"],
+    "suffix":      ["Jr.","Sr.","II","III","IV","N/A"],
+    "honorific":   ["Mr.","Ms.","Mrs.","Dr.","Engr.","Atty.","Prof.","Rev."],
+    "salutation":  ["Mr.","Ms.","Mrs.","Dr.","Engr.","Atty.","Prof."],
+    "strand":      ["STEM","ABM","HUMSS","GAS","TVL – Industrial Arts","TVL – Home Economics","TVL – ICT","TVL – Agriculture","Sports Track","Arts and Design Track"],
+    "track":       ["Academic Track","Technical-Vocational-Livelihood Track","Sports Track","Arts and Design Track"],
+    "section":     ["Section A","Section B","Section C","Section D","Section E","Section F","Section G","Section H"],
+    "grading_period":["1st Grading","2nd Grading","3rd Grading","4th Grading","1st Quarter","2nd Quarter","3rd Quarter","4th Quarter"],
+    "learning_mode":["Face-to-Face","Online","Modular","Blended","Homeschool"],
+    "result":      ["Passed","Failed","Incomplete","Pending","Under Review","Conditionally Passed"],
+    "outcome":     ["Successful","Failed","Pending","Completed","Cancelled","In Progress","On Hold"],
+    "verdict":     ["Approved","Rejected","Pending","Under Review","Conditionally Approved","Deferred"],
+    "decision":    ["Approved","Rejected","Pending","Under Review","Escalated","Deferred"],
+    "pass_fail":   ["Pass","Fail"],
+    "approval":    ["Approved","Rejected","Pending","Under Review","Conditionally Approved"],
+    "purpose":     ["Personal","Business","Education","Research","Recreation","Emergency","Medical","Travel","Shopping","Government"],
+    "reason":      ["Personal","Business","Academic","Medical","Travel","Shopping","Recreation","Emergency","Voluntary","Involuntary"],
+    "cause":       ["Natural Causes","Accident","Illness","Unknown","Under Investigation","Negligence"],
+    "mode":        ["Online","Walk-in","Phone","Email","In-person","Remote","Hybrid"],
+    "method":      ["Online","Cash","Bank Transfer","Credit Card","Debit Card","GCash","Maya","Check","Installment","COD"],
+    "channel":     ["Website","Mobile App","Social Media","Email","SMS","Phone Call","In-Store","Partner","Referral"],
+    "source":      ["Website","Social Media","Referral","Email","Walk-in","Advertisement","Search Engine","Word of Mouth","Partner","Agent"],
+    "transport":   ["Car","Bus","Jeepney","Tricycle","Motorcycle","Train (MRT/LRT)","Plane","Ship","Bicycle","UV Express","P2P Bus"],
+    "vehicle":     ["Sedan","SUV","Truck","Van","Motorcycle","Bus","Jeepney","Tricycle","Bicycle","Electric Vehicle"],
+    "access_level":["Full Access","Read Only","Write Only","Admin","Restricted","Guest","Public","Private"],
+    "account_type":["Admin","Regular User","Premium","Guest","Staff","Moderator","Subscriber","Visitor"],
+    "membership":  ["Free","Basic","Standard","Premium","VIP","Gold","Silver","Platinum","Trial"],
+    "subscription":["Free","Monthly","Quarterly","Annual","Lifetime","Trial","Enterprise"],
+    "tier":        ["Bronze","Silver","Gold","Platinum","Diamond","Free","Basic","Pro"],
+    "order_status":["Pending","Confirmed","Processing","Shipped","Out for Delivery","Delivered","Cancelled","Returned","Refunded"],
+    "delivery_status":["Pending","Dispatched","In Transit","Out for Delivery","Delivered","Failed","Returned"],
+    "tracking":    ["Pending","In Transit","Out for Delivery","Delivered","Exception","Returned to Sender"],
+    "return_reason":["Defective","Wrong Item","Changed Mind","Not as Described","Duplicate Order","Other"],
+    "format":      ["PDF","Excel (.xlsx)","CSV","Word (.docx)","JSON","XML","PNG","JPEG","MP4","ZIP","TXT","PowerPoint (.pptx)"],
+    "file_type":   ["Document","Spreadsheet","Image","Video","Audio","Archive","Database","Executable","Text","Presentation"],
+    "extension":   [".pdf",".xlsx",".csv",".docx",".json",".xml",".png",".jpg",".mp4",".zip",".txt",".pptx"],
+    "resolution":  ["1080p","720p","4K","480p","1440p","360p","2160p"],
+    "transaction_type":["Credit","Debit","Transfer","Withdrawal","Deposit","Payment","Refund","Adjustment"],
+    "transaction": ["Credit","Debit","Transfer","Withdrawal","Deposit","Payment","Refund","Adjustment"],
+    "invoice_status":["Paid","Unpaid","Overdue","Partially Paid","Cancelled","Draft","Sent"],
+    "contract_type":["Full-time","Part-time","Contractual","Project-based","Probationary","Consultancy","Internship"],
+    "employment":  ["Full-time","Part-time","Contractual","Project-based","Probationary","Consultancy","Internship","Casual"],
+    "position_level":["Entry Level","Junior","Mid-level","Senior","Lead","Manager","Director","VP","C-Level","Intern"],
+    "occasion":    ["Birthday","Wedding","Anniversary","Christmas","New Year","Valentine's Day","Graduation","Baptism","Reunion","Fiesta","Halloween","Thanksgiving","Easter","Mother's Day","Father's Day"],
+    "event_type":  ["Conference","Seminar","Workshop","Webinar","Training","Meeting","Party","Wedding","Birthday","Graduation","Exhibition","Festival"],
+    "holiday":     ["New Year's Day","Valentine's Day","Holy Week","Labor Day","Independence Day","Bonifacio Day","Christmas Day","Rizal Day","All Saints' Day","Eid al-Fitr","Eid al-Adha"],
+    "satisfaction":["Very Satisfied","Satisfied","Neutral","Dissatisfied","Very Dissatisfied"],
+    "rating_label":["Poor","Fair","Good","Very Good","Excellent"],
+    "recommendation":["Highly Recommended","Recommended","Neutral","Not Recommended","Would Not Recommend"],
+    "log_level":   ["INFO","DEBUG","WARNING","ERROR","CRITICAL","FATAL","TRACE"],
+    "environment": ["Development","Staging","Production","Testing","QA","Pre-production","Sandbox"],
+    "http_method": ["GET","POST","PUT","DELETE","PATCH","HEAD","OPTIONS"],
+    "error_code":  ["200","201","400","401","403","404","422","500","502","503"],
+}
+
+_NUMERIC_SMART: dict[str, tuple[float, float, str]] = {
+    "age":           (18,    80,       "normal"),
+    "salary":        (25000, 150000,   "skewed"),
+    "income":        (25000, 150000,   "skewed"),
+    "wage":          (15,    100,      "skewed"),
+    "price":         (1.0,   999.99,   "skewed"),
+    "cost":          (1.0,   5000.0,   "skewed"),
+    "amount":        (10.0,  10000.0,  "skewed"),
+    "fee":           (1.0,   500.0,    "uniform"),
+    "revenue":       (1000,  1000000,  "skewed"),
+    "budget":        (500,   500000,   "skewed"),
+    "balance":       (0,     100000,   "skewed"),
+    "credit_score":  (300,   850,      "normal"),
+    "score":         (0,     100,      "normal"),
+    "rating":        (1,     5,        "normal"),
+    "gpa":           (1.5,   4.0,      "normal"),
+    "grade":         (60,    100,      "normal"),
+    "year":          (2015,  2025,     "uniform"),
+    "quantity":      (1,     500,      "skewed"),
+    "qty":           (1,     500,      "skewed"),
+    "stock":         (0,     1000,     "uniform"),
+    "weight":        (40,    150,      "normal"),
+    "height":        (150,   200,      "normal"),
+    "bmi":           (17.5,  35.0,     "normal"),
+    "temperature":   (36.0,  39.5,     "normal"),
+    "percent":       (0,     100,      "normal"),
+    "percentage":    (0,     100,      "normal"),
+    "pct":           (0,     100,      "normal"),
+    "ratio":         (0.0,   1.0,      "uniform"),
+    "discount":      (0,     70,       "skewed"),
+    "tax":           (0,     30,       "normal"),
+    "interest":      (0.1,   25.0,     "normal"),
+    "distance":      (1,     10000,    "skewed"),
+    "speed":         (0,     200,      "normal"),
+    "latitude":      (-90,   90,       "uniform"),
+    "longitude":     (-180,  180,      "uniform"),
+    "lat":           (-90,   90,       "uniform"),
+    "lon":           (-180,  180,      "uniform"),
+    "lng":           (-180,  180,      "uniform"),
+    "port":          (1024,  65535,    "uniform"),
+    "duration":      (1,     3600,     "skewed"),
+    "rank":          (1,     1000,     "uniform"),
+    "capacity":      (1,     10000,    "skewed"),
+    "population":    (1000,  10000000, "skewed"),
+    "hours":         (0,     23,       "uniform"),
+    "hour":          (0,     23,       "uniform"),
+    "minutes":       (0,     59,       "uniform"),
+    "seconds":       (0,     59,       "uniform"),
+    "day_num":       (1,     31,       "uniform"),
+    "month_num":     (1,     12,       "uniform"),
+    "units":         (3,     24,       "uniform"),
+    "marks":         (0,     100,      "normal"),
+    "gwa":           (1.0,   4.0,      "normal"),
+    "pulse":         (60,    100,      "normal"),
+    "heart_rate":    (60,    100,      "normal"),
+    "blood_pressure_systolic":  (90,  140, "normal"),
+    "blood_pressure_diastolic": (60,  90,  "normal"),
+    "order_total":   (100,   50000,    "skewed"),
+    "invoice":       (500,   500000,   "skewed"),
+    "tip":           (0,     500,      "skewed"),
+    "profit":        (0,     100000,   "skewed"),
+    "loss":          (0,     50000,    "skewed"),
+    "expense":       (100,   50000,    "skewed"),
+    "payment_amount":(100,   100000,   "skewed"),
+    "transaction_amount":(100, 500000, "skewed"),
+    "views":         (0,     100000,   "skewed"),
+    "clicks":        (0,     10000,    "skewed"),
+    "likes":         (0,     50000,    "skewed"),
+    "shares":        (0,     5000,     "skewed"),
+    "downloads":     (0,     10000,    "skewed"),
+    "impressions":   (0,     500000,   "skewed"),
+    "floor":         (1,     50,       "uniform"),
+    "room":          (100,   999,      "uniform"),
+    "unit":          (1,     200,      "uniform"),
+    "zip":           (1000,  9999,     "uniform"),
+    "passengers":    (1,     500,      "skewed"),
+    "seats":         (1,     100,      "uniform"),
+    "items":         (1,     100,      "skewed"),
+    "pages":         (1,     500,      "skewed"),
+    "chapters":      (1,     50,       "uniform"),
+    "episodes":      (1,     100,      "uniform"),
+    "seasons":       (1,     20,       "uniform"),
+    "attempts":      (1,     10,       "skewed"),
+    "errors":        (0,     50,       "skewed"),
+    "retries":       (0,     5,        "skewed"),
+    "response_time": (10,    5000,     "skewed"),
+    "uptime":        (90.0,  100.0,    "normal"),
+}
+
+
+def _keyword_pool(field_name: str, description: str) -> list | None:
+    hint = (field_name + " " + description).lower().replace("_", " ")
+    for key, pool in _POOLS.items():
+        if key in hint:
+            return pool
+    return None
+
+
+def gen_col(ftype: str, n: int, c: Any, field_name: str = "", description: str = "") -> np.ndarray:
+    """Generate n values for a column given its type, constraints, and name hints."""
+    null_mask = np.random.random(n) < (min(getattr(c, "null_rate", 0) or 0, 50.0) / 100.0)
+    fname = field_name.lower().replace(" ", "_").replace("-", "_")
+
+    # Apply smart numeric ranges when the user left min/max blank
+    if ftype in ("integer", "float"):
+        min_val = getattr(c, "min_val", None)
+        max_val = getattr(c, "max_val", None)
+        if min_val is None and max_val is None:
+            for kw, (s_lo, s_hi, s_dist) in _NUMERIC_SMART.items():
+                if kw in fname:
+                    # Create a simple namespace so attribute access works below
+                    class _C:
+                        pass
+                    _cc = _C()
+                    _cc.min_val      = s_lo
+                    _cc.max_val      = s_hi
+                    _cc.distribution = s_dist
+                    _cc.null_rate    = getattr(c, "null_rate", 0)
+                    _cc.enum_values  = []
+                    _cc.cardinality  = None
+                    _cc.date_from    = None
+                    _cc.date_to      = None
+                    _cc.true_ratio   = 0.5
+                    c = _cc
+                    break
+
+    dist         = getattr(c, "distribution", "uniform") or "uniform"
+    enum_values  = getattr(c, "enum_values",  []) or []
+    cardinality  = getattr(c, "cardinality",  None)
+    date_from    = getattr(c, "date_from",    None)
+    date_to      = getattr(c, "date_to",      None)
+    true_ratio   = getattr(c, "true_ratio",   0.5)
+    min_val      = getattr(c, "min_val",      None)
+    max_val      = getattr(c, "max_val",      None)
+
+    if ftype == "integer":
+        lo = int(min_val) if min_val is not None else 1
+        hi = int(max_val) if max_val is not None else 10_000
+        if hi <= lo: hi = lo + 1
+        if dist == "normal":
+            mean, std = (lo + hi) / 2, (hi - lo) / 6
+            data = np.clip(np.random.normal(mean, std, n), lo, hi).astype(int).astype(object)
+        elif dist == "skewed":
+            data = np.clip(np.random.exponential((hi - lo) / 4, n) + lo, lo, hi).astype(int).astype(object)
+        else:
+            data = np.random.randint(lo, hi + 1, n).astype(object)
+
+    elif ftype == "float":
+        lo = float(min_val) if min_val is not None else 0.0
+        hi = float(max_val) if max_val is not None else 1_000.0
+        if hi <= lo: hi = lo + 1.0
+        if dist == "normal":
+            mean, std = (lo + hi) / 2, (hi - lo) / 6
+            data = np.round(np.clip(np.random.normal(mean, std, n), lo, hi), 2).astype(object)
+        elif dist == "skewed":
+            data = np.round(np.clip(np.random.exponential((hi - lo) / 4, n) + lo, lo, hi), 2).astype(object)
+        else:
+            data = np.round(np.random.uniform(lo, hi, n), 2).astype(object)
+
+    elif ftype == "string":
+        if enum_values:
+            data = np.random.choice(enum_values, n).astype(object)
+
+        elif any(p in fname for p in ("full_name", "fullname", "full name", "complete_name")):
+            data = np.array([f"{random.choice(FIRST)} {random.choice(LAST)}" for _ in range(n)], dtype=object)
+        elif any(p in fname for p in ("first_name", "firstname", "fname", "given_name", "forename")):
+            data = np.array([random.choice(FIRST) for _ in range(n)], dtype=object)
+        elif any(p in fname for p in ("last_name", "lastname", "lname", "surname", "family_name", "middle_name", "middlename")):
+            data = np.array([random.choice(LAST) for _ in range(n)], dtype=object)
+
+        elif any(p in fname for p in ("username", "user_name", "login", "handle", "screen_name", "account_name")):
+            seps = [".", "_", ""]
+            data = np.array([
+                f"{random.choice(FIRST).lower()}{random.choice(seps)}{random.choice(LAST).lower()}"
+                f"{random.randint(1,99) if random.random()<0.4 else ''}"
+                for _ in range(n)
+            ], dtype=object)
+
+        elif any(p in fname for p in ("website", "url", "web_url", "link", "homepage", "site_url", "webpage")):
+            prefixes = ["www.",""]
+            tlds = [".com",".org",".net",".io",".co",".ph"]
+            stems = ["tech","solutions","global","smart","digital","next","alpha","nova","prime","core","hub","lab","works","group","media"]
+            data = np.array([
+                f"https://{random.choice(prefixes)}{random.choice(LAST).lower()}{random.choice(stems)}{random.choice(tlds)}"
+                for _ in range(n)
+            ], dtype=object)
+
+        elif any(p in fname for p in ("zip_code", "zipcode", "zip", "postal_code", "postcode", "postal")):
+            data = np.array([f"{random.randint(1000, 9999)}" for _ in range(n)], dtype=object)
+
+        elif fname == "name" or (
+            "_name" in fname and not any(ex in fname for ex in (
+                "file","column","table","database","domain","host","service","app",
+                "system","page","class","function","variable","method","object",
+                "bucket","key","field","attr","property","product","brand","item",
+                "drug","street","city","country","region","company","org","team",
+                "store","shop","game","song","book","movie","course","subject",
+            ))
+        ):
+            data = np.array([f"{random.choice(FIRST)} {random.choice(LAST)}" for _ in range(n)], dtype=object)
+
+        else:
+            smart_pool = _keyword_pool(field_name, description)
+            if smart_pool:
+                data = np.random.choice(smart_pool, n).astype(object)
+            else:
+                k = max(1, cardinality or 50)
+                pool = ["".join(random.choices(string.ascii_lowercase, k=random.randint(4, 10)))
+                        for _ in range(min(k, 5_000))]
+                data = np.random.choice(pool, n).astype(object)
+
+    elif ftype == "boolean":
+        r = max(0.0, min(1.0, true_ratio))
+        data = np.random.choice([True, False], n, p=[r, 1 - r]).astype(object)
+
+    elif ftype == "date":
+        try:
+            d_from = datetime.strptime(date_from, "%Y-%m-%d") if date_from else datetime(2015, 1, 1)
+        except ValueError:
+            d_from = datetime(2015, 1, 1)
+        try:
+            d_to = datetime.strptime(date_to, "%Y-%m-%d") if date_to else datetime(2024, 12, 31)
+        except ValueError:
+            d_to = datetime(2024, 12, 31)
+        delta = max(1, (d_to - d_from).days)
+        data = np.array([(d_from + timedelta(days=int(d))).strftime("%Y-%m-%d")
+                         for d in np.random.randint(0, delta, n)], dtype=object)
+
+    elif ftype == "email":
+        def _make_email(_):
+            first  = random.choice(FIRST).lower()
+            last   = random.choice(LAST).lower()
+            sep    = random.choice([".", "_", ""])
+            suffix = str(random.randint(1, 99)) if random.random() < 0.3 else ""
+            return f"{first}{sep}{last}{suffix}@{random.choice(DOMAINS)}"
+        data = np.array([_make_email(i) for i in range(n)], dtype=object)
+
+    elif ftype == "uuid":
+        data = np.array([str(uuid_module.uuid4()) for _ in range(n)], dtype=object)
+
+    elif ftype == "phone":
+        data = np.array([
+            f"+1-{random.randint(200,999)}-{random.randint(100,999)}-{random.randint(1000,9999)}"
+            for _ in range(n)
+        ], dtype=object)
+
+    elif ftype == "address":
+        data = np.array([f"{random.randint(1,999)} {random.choice(STREETS)}" for _ in range(n)], dtype=object)
+
+    elif ftype == "name":
+        data = np.array([f"{random.choice(FIRST)} {random.choice(LAST)}" for _ in range(n)], dtype=object)
+
+    elif ftype == "ip":
+        data = np.array([
+            f"{random.randint(1,254)}.{random.randint(0,255)}.{random.randint(0,255)}.{random.randint(1,254)}"
+            for _ in range(n)
+        ], dtype=object)
+
+    else:
+        data = np.array([
+            "".join(random.choices(string.ascii_lowercase, k=random.randint(4, 10)))
+            for _ in range(n)
+        ], dtype=object)
+
+    data[null_mask] = None
+    return data

@@ -35,6 +35,13 @@ interface Field {
   constraints:  FieldConstraints;
   description:  string;
   expanded:     boolean;
+  llmGenerated?: boolean;   // true = auto-added by augment-schema, shown in yellow
+}
+
+interface SmartResult extends KaggleDataset {
+  source:      string;
+  sourceLabel: string;
+  sourceIcon:  string;
 }
 
 interface Table { id: string; name: string; fields: Field[]; }
@@ -48,7 +55,8 @@ interface OriginalField {
   name: string; type: string; nullable: boolean; sample_values?: string[];
 }
 
-type Phase = "idle" | "results" | "loading" | "schema" | "template_preview" | "generating" | "error";
+type Phase = "idle" | "results" | "loading" | "schema" | "template_preview" | "generating" | "error"
+           | "smart_searching" | "smart_results" | "smart_augmenting";
 type Mode  = "kaggle" | "llm";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -85,6 +93,7 @@ export default function SchemaBuilder() {
   const [llmPrompt, setLlmPrompt]   = useState("");
   const [llmLoading, setLlmLoading] = useState(false);
   const [llmError, setLlmError]     = useState("");
+  const [smartResults, setSmartResults] = useState<SmartResult[]>([]);
   const [strikeWarning, setStrikeWarning] = useState<{ strikes: number; banned: boolean } | null>(null);
 
   const [templateDatasetId,   setTemplateDatasetId]   = useState("");
@@ -192,11 +201,10 @@ export default function SchemaBuilder() {
 
   // ── LLM ──────────────────────────────────────────────────────────────────
 
-  const handleLlmGenerate = async () => {
-    if (!llmPrompt.trim()) return;
+  // Pure LLM schema generation (fallback when no real dataset found)
+  const runPureLlmGenerate = async () => {
     setLlmLoading(true);
     setLlmError("");
-    setStrikeWarning(null);
     const userId = localStorage.getItem("user_id") ?? undefined;
     try {
       const res  = await fetch(`${NODE_API}/api/llm/generate-schema`, {
@@ -206,38 +214,23 @@ export default function SchemaBuilder() {
       });
       const data = await res.json();
       if (!res.ok) {
-        if (data.error === "banned") {
-          setStrikeWarning({ strikes: data.strikes ?? 3, banned: true });
-          return;
-        }
-        if (data.error === "inappropriate_prompt") {
-          setStrikeWarning({ strikes: data.strikes ?? 1, banned: false });
-          return;
-        }
+        if (data.error === "banned") { setStrikeWarning({ strikes: data.strikes ?? 3, banned: true }); return; }
+        if (data.error === "inappropriate_prompt") { setStrikeWarning({ strikes: data.strikes ?? 1, banned: false }); return; }
         throw new Error(data.error || "LLM request failed");
       }
-
       const fields: Field[] = data.fields.map((f: any, i: number) =>
         makeField({
-          id:           `llm${i}`,
-          name:         f.name,
-          type:         f.type,
-          null_rate:    typeof f.null_rate === "number" ? Math.round(Math.min(50, Math.max(0, f.null_rate))) : 0,
-          originalName: f.name,
-          originalType: f.type,
-          description:  f.description ?? "",
+          id: `llm${i}`, name: f.name, type: f.type,
+          null_rate: typeof f.null_rate === "number" ? Math.round(Math.min(50, Math.max(0, f.null_rate))) : 0,
+          originalName: f.name, originalType: f.type, description: f.description ?? "",
           constraints: (() => {
             const c = f.constraints ?? {};
             const ev = c.enum_values;
-            return {
-              ...c,
-              enum_values: Array.isArray(ev) ? ev.join(", ") : (ev ?? undefined),
-            };
+            return { ...c, enum_values: Array.isArray(ev) ? ev.join(", ") : (ev ?? undefined) };
           })(),
-          expanded:     false,
+          expanded: false,
         })
       );
-
       setOriginalSchema(data.fields.map((f: any) => ({ name: f.name, type: f.type, nullable: false })));
       setTables([{ id: "1", name: data.table_name, fields }]);
       setDatasetId(""); setKaggleRef(""); setMode("llm"); setPhase("schema");
@@ -246,16 +239,109 @@ export default function SchemaBuilder() {
       if (msg === "Failed to fetch" || msg.includes("NetworkError") || msg.includes("ECONNREFUSED")) {
         setLlmError("Cannot reach the backend. Make sure the Node server is running on port 5000.");
       } else if (msg.includes("401") || msg.toLowerCase().includes("authentication") || msg.toLowerCase().includes("invalid x-api-key")) {
-        setLlmError("Anthropic API key is invalid or expired. Update ANTHROPIC_API_KEY in backend/.env and restart the server.");
+        setLlmError("Anthropic API key is invalid or expired.");
       } else if (msg.toLowerCase().includes("credit") || msg.includes("402")) {
-        setLlmError("Anthropic account has insufficient credits. Top up at console.anthropic.com.");
-      } else if (msg.toLowerCase().includes("model")) {
-        setLlmError("The AI model could not be reached. Try again in a moment.");
+        setLlmError("Anthropic account has insufficient credits.");
       } else {
         setLlmError(msg || "Schema generation failed. Please try again.");
       }
+      setPhase("idle");
     } finally {
       setLlmLoading(false);
+    }
+  };
+
+  // Smart hybrid: search all sources first, then augment with LLM for missing fields
+  const handleLlmGenerate = async () => {
+    if (!llmPrompt.trim()) return;
+    setLlmError("");
+    setStrikeWarning(null);
+    setPhase("smart_searching");
+    setLoadingMsg("Searching all dataset sources for a real match…");
+
+    try {
+      const searchRes = await fetch(`${PYTHON_API}/api/smart-search`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt: llmPrompt }),
+      });
+      if (searchRes.ok) {
+        const searchData = await searchRes.json();
+        const results: SmartResult[] = searchData.datasets ?? [];
+        if (results.length > 0) {
+          setSmartResults(results);
+          setPhase("smart_results");
+          return;
+        }
+      }
+    } catch {
+      // If search fails entirely, fall back to pure LLM
+    }
+
+    // No real matches found — fall back to pure LLM generation
+    setPhase("idle");
+    await runPureLlmGenerate();
+  };
+
+  // User picked a real dataset from smart search results
+  const handleSmartSelect = async (ds: SmartResult) => {
+    setPhase("smart_augmenting");
+    setLoadingMsg(`Downloading "${ds.title}" and identifying missing fields…`);
+
+    const dlEndpoint = DOWNLOAD_ENDPOINTS[ds.source] ?? DOWNLOAD_ENDPOINTS["kaggle"];
+
+    try {
+      // 1. Download the real dataset
+      const dlRes = await fetch(dlEndpoint, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ dataset_ref: ds.ref }),
+      });
+      if (!dlRes.ok) throw new Error(await dlRes.text());
+      const dlData = await dlRes.json();
+
+      setDatasetId(dlData.dataset_id);
+      setKaggleRef(ds.ref);
+
+      const realSchema: OriginalField[] = dlData.schema.map((f: any) => ({
+        name: f.name, type: f.type, nullable: f.nullable, sample_values: f.sample_values ?? [],
+      }));
+      setOriginalSchema(realSchema);
+
+      // 2. Ask LLM which fields from the prompt are missing from the real dataset
+      const augRes = await fetch(`${NODE_API}/api/llm/augment-schema`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          existing_schema: realSchema.map((f) => ({ name: f.name, type: f.type })),
+          user_prompt: llmPrompt,
+        }),
+      });
+      const extraFields: any[] = augRes.ok ? ((await augRes.json()).fields ?? []) : [];
+
+      // 3. Build combined schema: real fields (white) + LLM-added fields (yellow)
+      const realFields: Field[] = realSchema.map((f, i) =>
+        makeField({ id: `r${i}`, name: f.name, type: f.type, originalName: f.name, originalType: f.type })
+      );
+      const llmFields: Field[] = extraFields.map((f: any, i: number) =>
+        makeField({
+          id: `llm${i}`, name: f.name, type: f.type,
+          originalName: f.name, originalType: f.type,
+          description: f.description ?? "",
+          llmGenerated: true,
+          constraints: (() => {
+            const c = f.constraints ?? {};
+            const ev = c.enum_values;
+            return { ...c, enum_values: Array.isArray(ev) ? ev.join(", ") : (ev ?? undefined) };
+          })(),
+          expanded: false,
+        })
+      );
+
+      setTables([{ id: "1", name: ds.title, fields: [...realFields, ...llmFields] }]);
+      setMode("kaggle");
+      setPhase("schema");
+    } catch (e: any) {
+      setErrorMsg(e.message ?? "Failed to download and augment dataset.");
+      setPhase("error");
     }
   };
 
@@ -454,26 +540,49 @@ export default function SchemaBuilder() {
     }
   };
 
-  // ── Generate (Kaggle/CTGAN mode only) ────────────────────────────────────
+  // ── Generate (Kaggle/CTGAN mode; hybrid when LLM-added fields present) ───
 
   const handleGenerate = async () => {
     if (!tables[0]) return;
-
-    // CTGAN mode
     if (!datasetId) return;
     setLoadingMsg(`Training CTGAN · generating ${rowCount.toLocaleString()} rows…`);
     setPhase("generating");
-    const changes = tables[0].fields.map((f) => ({
+
+    const hasLlmFields = tables[0].fields.some((f) => f.llmGenerated);
+    const realFields   = tables[0].fields.filter((f) => !f.llmGenerated);
+    const llmFields    = tables[0].fields.filter((f) =>  f.llmGenerated);
+
+    const changes = realFields.map((f) => ({
       original_name: f.originalName || f.name,
       new_name:      f.name,
       original_type: f.originalType || f.type,
       new_type:      f.type,
       nullable:      f.null_rate > 0,
     }));
+
     try {
-      const res = await fetch(`${PYTHON_API}/api/generate`, {
+      let endpoint = `${PYTHON_API}/api/generate`;
+      let body: any = { dataset_id: datasetId, changes, row_count: rowCount };
+
+      if (hasLlmFields) {
+        endpoint = `${PYTHON_API}/api/generate-hybrid`;
+        body.extra_fields = llmFields.map((f) => ({
+          name:        f.name,
+          field_type:  f.type,
+          description: f.description,
+          constraints: {
+            ...f.constraints,
+            null_rate:   f.null_rate,
+            enum_values: f.constraints.enum_values
+              ? String(f.constraints.enum_values).split(",").map((v) => v.trim()).filter(Boolean)
+              : [],
+          },
+        }));
+      }
+
+      const res = await fetch(endpoint, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ dataset_id: datasetId, changes, row_count: rowCount }),
+        body: JSON.stringify(body),
       });
       if (!res.ok) throw new Error(await res.text());
 
@@ -630,7 +739,7 @@ export default function SchemaBuilder() {
     <div className="space-y-4">
 
       {/* ── LLM panel ── */}
-      {phase !== "loading" && phase !== "generating" && (
+      {phase !== "loading" && phase !== "generating" && phase !== "smart_searching" && phase !== "smart_augmenting" && (
         <div className="bg-white border border-gray-100 rounded-xl shadow-sm overflow-hidden">
           <div className="flex items-center gap-3 px-4 py-3 border-b border-gray-100 bg-gradient-to-r from-purple-50 to-white">
             <div className="w-8 h-8 rounded-full bg-purple-600 flex items-center justify-center flex-shrink-0">
@@ -652,7 +761,7 @@ export default function SchemaBuilder() {
             <button onClick={handleLlmGenerate} disabled={llmLoading || !llmPrompt.trim()}
               className="flex items-center gap-1.5 px-4 py-2 bg-purple-600 text-white rounded-lg text-sm font-medium hover:bg-purple-700 transition-colors disabled:opacity-50 whitespace-nowrap">
               {llmLoading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
-              {llmLoading ? "Generating…" : "Generate Schema"}
+              {llmLoading ? "Searching…" : "Generate Schema"}
             </button>
           </div>
           {llmError && (
@@ -684,6 +793,61 @@ export default function SchemaBuilder() {
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      {/* ── Smart search results panel ── */}
+      {phase === "smart_searching" && (
+        <div className="bg-white border border-gray-100 rounded-xl p-10 shadow-sm flex flex-col items-center gap-3">
+          <RefreshCw className="w-6 h-6 text-purple-600 animate-spin" />
+          <p className="text-sm font-medium text-gray-700">Searching all dataset sources…</p>
+          <p className="text-xs text-gray-400">Checking Kaggle, Hugging Face, UCI, OpenML, Data.gov.ph & PSA simultaneously</p>
+        </div>
+      )}
+
+      {phase === "smart_augmenting" && (
+        <div className="bg-white border border-gray-100 rounded-xl p-10 shadow-sm flex flex-col items-center gap-3">
+          <RefreshCw className="w-6 h-6 text-purple-600 animate-spin" />
+          <p className="text-sm font-medium text-gray-700">{loadingMsg}</p>
+          <p className="text-xs text-gray-400">Downloading real data and detecting missing fields from your description…</p>
+        </div>
+      )}
+
+      {phase === "smart_results" && (
+        <div className="bg-white border border-gray-100 rounded-xl overflow-hidden shadow-sm">
+          <div className="px-4 py-3 border-b border-gray-100 bg-purple-50/50 flex items-center justify-between">
+            <div>
+              <p className="text-sm font-semibold text-gray-800">Real datasets found — pick one as your base</p>
+              <p className="text-xs text-gray-500 mt-0.5">
+                Missing fields from your description will be added automatically by AI
+              </p>
+            </div>
+            <button
+              onClick={() => { setPhase("idle"); runPureLlmGenerate(); }}
+              className="text-xs text-purple-600 hover:text-purple-800 font-medium underline whitespace-nowrap ml-4">
+              Skip — use pure AI
+            </button>
+          </div>
+          <div className="divide-y divide-gray-50">
+            {smartResults.map((ds) => (
+              <button key={`${ds.source}:${ds.ref}`} onClick={() => handleSmartSelect(ds)}
+                className="w-full text-left px-4 py-3 hover:bg-purple-50 transition-colors flex items-center gap-3">
+                <span className="text-lg flex-shrink-0">{ds.sourceIcon}</span>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <p className="text-sm font-medium text-gray-800 truncate">{ds.title}</p>
+                    <span className="text-[10px] px-1.5 py-0.5 bg-gray-100 text-gray-500 rounded-full font-medium flex-shrink-0">
+                      {ds.sourceLabel}
+                    </span>
+                  </div>
+                  <p className="text-xs text-gray-400 mt-0.5 truncate">
+                    {ds.ref} · {ds.size}{ds.downloadCount > 0 ? ` · ${ds.downloadCount.toLocaleString()} downloads` : ""}
+                  </p>
+                </div>
+                <Download className="w-4 h-4 text-gray-300 flex-shrink-0" />
+              </button>
+            ))}
+          </div>
         </div>
       )}
 
@@ -910,10 +1074,17 @@ export default function SchemaBuilder() {
         <div key={table.id} className="space-y-4">
 
           <div className="flex items-center justify-between">
-            <span className={`text-xs font-medium px-2.5 py-1 rounded-full
-              ${mode === "llm" ? "bg-purple-100 text-purple-700" : "bg-blue-100 text-blue-700"}`}>
-              {mode === "llm" ? "✦ AI Generated Schema" : "⬡ Kaggle Dataset"}
-            </span>
+            {(() => {
+              const hasLlm = table.fields.some((f) => f.llmGenerated);
+              if (hasLlm) return (
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xs font-medium px-2.5 py-1 rounded-full bg-blue-100 text-blue-700">⬡ Real Dataset</span>
+                  <span className="text-xs font-medium px-2.5 py-1 rounded-full bg-yellow-100 text-yellow-700">✦ AI Augmented</span>
+                </div>
+              );
+              if (mode === "llm") return <span className="text-xs font-medium px-2.5 py-1 rounded-full bg-purple-100 text-purple-700">✦ AI Generated Schema</span>;
+              return <span className="text-xs font-medium px-2.5 py-1 rounded-full bg-blue-100 text-blue-700">⬡ Real Dataset</span>;
+            })()}
             <button onClick={() => { setPhase("idle"); setSearchQuery(""); setSearchResults([]); setSaveStatus("idle"); }}
               className="text-xs text-gray-400 hover:text-gray-600 transition-colors">
               ← New search
@@ -952,20 +1123,32 @@ export default function SchemaBuilder() {
               <tbody>
                 {table.fields.map((field) => {
                   const origField = originalSchema.find((o) => o.name === field.originalName);
-                  const changed   = mode === "kaggle" && isChanged(field);
+                  const changed   = mode === "kaggle" && isChanged(field) && !field.llmGenerated;
+                  const rowBg = field.expanded
+                    ? "bg-purple-50/30"
+                    : field.llmGenerated
+                      ? "bg-yellow-50/70"
+                      : changed
+                        ? "bg-amber-50"
+                        : "hover:bg-gray-50";
                   return (
                     <Fragment key={field.id}>
-                      <tr
-                        className={`border-b border-gray-50 transition-colors
-                          ${field.expanded ? "bg-purple-50/30" : changed ? "bg-amber-50" : "hover:bg-gray-50"}`}>
+                      <tr className={`border-b border-gray-50 transition-colors ${rowBg}`}>
                         <td className="py-2 px-3 text-gray-300">
                           <GripVertical className="w-3.5 h-3.5" />
                         </td>
                         <td className="py-2 px-3">
                           <div className="flex flex-col gap-0.5 min-w-[140px]">
-                            <input value={field.name}
-                              onChange={(e) => updateField(table.id, field.id, { name: e.target.value })}
-                              className="text-sm bg-transparent focus:outline-none text-gray-800 w-full" />
+                            <div className="flex items-center gap-1.5">
+                              <input value={field.name}
+                                onChange={(e) => updateField(table.id, field.id, { name: e.target.value })}
+                                className="text-sm bg-transparent focus:outline-none text-gray-800 flex-1 min-w-0" />
+                              {field.llmGenerated && (
+                                <span className="flex-shrink-0 text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-yellow-200 text-yellow-800 border border-yellow-300 whitespace-nowrap">
+                                  ✦ AI Added
+                                </span>
+                              )}
+                            </div>
                             <input value={field.description}
                               onChange={(e) => updateField(table.id, field.id, { description: e.target.value })}
                               placeholder="Describe this field…"
@@ -1029,6 +1212,17 @@ export default function SchemaBuilder() {
               </button>
             </div>
           </div>
+
+          {/* LLM-added fields legend */}
+          {table.fields.some((f) => f.llmGenerated) && (
+            <div className="flex items-start gap-2 bg-yellow-50 border border-yellow-200 rounded-xl px-3 py-2.5 text-xs text-yellow-800">
+              <span className="text-base leading-none flex-shrink-0">✦</span>
+              <span>
+                <strong>AI-augmented fields</strong> (highlighted in yellow) were automatically added because your description mentioned them but the real dataset didn't include them.
+                These fields are generated using smart schema rules — not hallucinated values — and are fully editable.
+              </span>
+            </div>
+          )}
 
           {/* Row count + Save + Generate */}
           <div className="bg-white border border-gray-100 rounded-xl p-4 shadow-sm space-y-3">

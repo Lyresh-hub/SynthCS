@@ -20,6 +20,7 @@ import uci_service
 import openml_service
 import datagov_ph_service
 import psa_service
+from smart_gen_data import gen_col
 
 app = FastAPI(title="SynthCS Python Service")
 
@@ -320,6 +321,24 @@ class ExpandRequest(BaseModel):
     row_count:  int
 
 
+class SmartSearchRequest(BaseModel):
+    prompt: str
+
+
+class ExtraFieldDef(BaseModel):
+    name:        str
+    field_type:  str
+    description: str              = ""
+    constraints: FieldConstraints = FieldConstraints()
+
+
+class HybridGenerateRequest(BaseModel):
+    dataset_id:   str
+    changes:      list[FieldChange]
+    row_count:    int
+    extra_fields: list[ExtraFieldDef] = []
+
+
 _TEMPLATE_ROWS = 200
 
 
@@ -331,11 +350,31 @@ def generate_from_schema(req: SchemaGenerateRequest):
     before the user decides how many rows to expand to via CTGAN.
     """
     import pandas as pd
-    import numpy as np
     import uuid as uuid_module
-    import random
-    import string
-    from datetime import datetime, timedelta
+
+    df = pd.DataFrame({
+        f.name: gen_col(f.field_type, _TEMPLATE_ROWS, f.constraints, f.name, f.description)
+        for f in req.fields
+    })
+    dataset_id = str(uuid_module.uuid4())
+    dest = os.path.join(DATASETS_DIR, dataset_id)
+    os.makedirs(dest, exist_ok=True)
+    template_path = os.path.join(dest, "template.csv")
+    df.to_csv(template_path, index=False)
+    preview_df = df.head(20)
+    preview_rows = preview_df.where(preview_df.notna(), None).to_dict(orient="records")
+    return {
+        "dataset_id":    dataset_id,
+        "template_rows": _TEMPLATE_ROWS,
+        "columns":       df.columns.tolist(),
+        "preview":       preview_rows,
+    }
+
+    # ── The code below is unreachable — refactored into smart_gen_data.py ──
+    import numpy as np  # noqa
+    import random       # noqa
+    import string       # noqa
+    from datetime import datetime, timedelta  # noqa
 
     FIRST = [
         # Filipino male
@@ -835,6 +874,99 @@ def expand_with_ctgan(req: ExpandRequest):
         raise HTTPException(status_code=500, detail=f"CTGAN expansion failed: {e}")
 
     return {"dataset_id": req.dataset_id}
+
+
+# ── Smart multi-source search ─────────────────────────────────────────────────
+
+@app.post("/api/smart-search")
+def smart_search(req: SmartSearchRequest) -> dict[str, Any]:
+    """
+    Search all dataset sources concurrently and return top results labelled
+    by source. Used by the hybrid LLM+real-data schema generation flow.
+    """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    sources = {
+        "kaggle":      ("Kaggle",       "🏆", search_datasets),
+        "huggingface": ("Hugging Face", "🤗", huggingface_service.search_datasets),
+        "uci":         ("UCI ML Repo",  "🎓", uci_service.search_datasets),
+        "openml":      ("OpenML",       "📊", openml_service.search_datasets),
+        "datagov_ph":  ("Data.gov.ph",  "🇵🇭", datagov_ph_service.search_datasets),
+        "psa":         ("PSA",          "📋", psa_service.search_datasets),
+    }
+
+    results: list[dict] = []
+
+    def _search(source_id: str, source_label: str, source_icon: str, search_fn):
+        try:
+            datasets = search_fn(req.prompt)
+            for ds in datasets[:3]:
+                ds["source"]      = source_id
+                ds["sourceLabel"] = source_label
+                ds["sourceIcon"]  = source_icon
+            return datasets[:3]
+        except Exception as e:
+            print(f"[smart_search] {source_id} error: {e}")
+            return []
+
+    with ThreadPoolExecutor(max_workers=6) as executor:
+        futures = {
+            executor.submit(_search, sid, lbl, ico, fn): sid
+            for sid, (lbl, ico, fn) in sources.items()
+        }
+        for future in as_completed(futures):
+            try:
+                results.extend(future.result())
+            except Exception:
+                pass
+
+    results.sort(key=lambda x: x.get("downloadCount", 0), reverse=True)
+    return {"datasets": results[:10]}
+
+
+# ── Hybrid generate (CTGAN real fields + schema-based LLM fields) ─────────────
+
+@app.post("/api/generate-hybrid")
+def generate_hybrid(req: HybridGenerateRequest):
+    """
+    Run CTGAN on a real downloaded dataset, then append any LLM-specified
+    extra columns using smart schema-based generation.
+    """
+    import pandas as pd
+
+    dataset_path = os.path.join(DATASETS_DIR, req.dataset_id)
+    if not os.path.isdir(dataset_path):
+        raise HTTPException(status_code=404, detail="Dataset not found.")
+
+    if not (1_000 <= req.row_count <= 100_000):
+        raise HTTPException(status_code=400, detail="row_count must be between 1,000 and 100,000.")
+
+    changes = [c.model_dump() for c in req.changes]
+
+    try:
+        output_path = generate_synthetic_data(
+            dataset_path=dataset_path,
+            changes=changes,
+            row_count=req.row_count,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"CTGAN generation failed: {e}")
+
+    if req.extra_fields:
+        df = pd.read_csv(output_path)
+        n  = len(df)
+        for extra in req.extra_fields:
+            df[extra.name] = gen_col(
+                extra.field_type, n, extra.constraints,
+                extra.name, extra.description,
+            )
+        df.to_csv(output_path, index=False)
+
+    return FileResponse(
+        path=output_path,
+        media_type="text/csv",
+        filename=f"synthetic_{req.dataset_id[:8]}.csv",
+    )
 
 
 @app.get("/api/validate/{dataset_id}")
