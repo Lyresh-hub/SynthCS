@@ -1002,7 +1002,15 @@ Rules:
   - boolean: true_ratio (0.0 to 1.0)
   - date: date_from and date_to in YYYY-MM-DD format
 - enum_values must always be a plain string, never an array
-- Always include a description for each field
+- CRITICAL for descriptions: always include the domain/industry context, especially for name-type fields. Examples:
+  - Grocery store → "Name of the grocery product in store inventory"
+  - Clothing boutique → "Name of the clothing item sold in the boutique"
+  - Hospital → "Name of the medical supply or pharmaceutical product"
+  - Restaurant → "Name of the menu dish or beverage"
+  - Bookstore → "Title of the book"
+  - Gaming store → "Title of the video game"
+  - For generic products: "Name of the product sold in this [domain] store"
+  Never write just "Product name" — always say what KIND of product.
 
 Description: ${prompt.trim()}`;
 

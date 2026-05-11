@@ -129,6 +129,18 @@ _POOLS: dict[str, list[str]] = {
     "vendor_name":  ["PC Express Philippines","Datablitz","iTech Philippines","Villman Computers","CDW Technology","Arrow Electronics","Ingram Micro","TD SYNNEX","Samsung Electronics","ASUS","Logitech","Seagate","Kingston","Corsair","HP Philippines","Canon Philippines","Epson","Acer","MSI","Gigabyte"],
     "manufacturer": ["ASUS","MSI","Gigabyte","Acer","Dell","HP","Lenovo","Samsung","LG","BenQ","Logitech","Razer","Corsair","Kingston","Seagate","Western Digital","Intel","AMD","NVIDIA","Canon"],
     "brand_name":   ["ASUS","MSI","Gigabyte","Acer","Dell","HP","Lenovo","Samsung","Logitech","Razer","Corsair","Kingston","Seagate","Intel","AMD","NVIDIA","Canon","Epson","TP-Link","Netgear"],
+    # ── Domain-specific product pools (checked before generic product_name) ───
+    "grocery_product":["White Rice 5kg","Premium Jasmine Rice 5kg","Brown Rice 2kg","Fresh Whole Milk 1L","Low-Fat Milk 1L","Chocolate Milk 250ml","Sliced White Bread","Whole Wheat Bread","Pandesal 12 pcs","Free-Range Eggs 12 pcs","Brown Eggs 6 pcs","Fresh Chicken Breast 500g","Chicken Whole 1kg","Ground Pork 500g","Pork Belly 500g","Atlantic Salmon 500g","Tilapia 1kg","Fresh Tomatoes 500g","Red Onions 1kg","White Onions 500g","Garlic 250g","Potatoes 1kg","Bananas 1 bunch","Mangoes 1kg","Apples 1kg","Pineapple 1 pc","Cooking Oil 1L","Soy Sauce 350ml","Fish Sauce 350ml","Vinegar 350ml","Instant Noodles Lucky Me","Canned Sardines Tomato Sauce","Corned Beef 260g","Spam Classic 340g","Condensed Milk 300ml","Coffee 3-in-1 10 sachets","Orange Juice 1L","Mineral Water 1.5L","Dishwashing Liquid 500ml","Laundry Detergent 1kg","Fabric Conditioner 500ml","Toilet Paper 12 rolls","Shampoo 200ml","Bath Soap 3-pack"],
+    "clothing_product":["Men's Crew-Neck T-Shirt","Women's V-Neck Blouse","Unisex Polo Shirt","Slim-Fit Denim Jeans Men","High-Waist Skinny Jeans Women","Cargo Pants","Summer Floral Dress","Maxi Skirt","A-Line Skirt","Men's Formal Button-Down Shirt","Women's Blazer","Zip-Up Hoodie","Athletic Running Shorts","Yoga Leggings","Sports Bra","Leather Oxford Shoes","Casual Sneakers Unisex","Women's High Heels","Wool Knit Sweater","Down Jacket","Windbreaker","Baseball Cap","Beanie Hat","Canvas Tote Bag","Boxer Briefs 3-pack","Women's Cotton Underwear 3-pack","Ankle Socks 6-pack","School Uniform Top","School Uniform Pants","Swim Boardshorts","One-Piece Swimsuit","Denim Jacket","Trench Coat","Leather Belt","Silk Scarf"],
+    "medical_product":["Paracetamol 500mg 20 tabs","Paracetamol Syrup 250mg/5ml","Amoxicillin 500mg Capsules 10s","Amoxicillin 250mg/5ml Suspension","Ibuprofen 400mg 10 tabs","Mefenamic Acid 500mg 10 tabs","Cetirizine 10mg 10 tabs","Loratadine 10mg 10 tabs","Omeprazole 20mg Capsules 14s","Antacid Tablets 24s","Oral Rehydration Salts 6 sachets","Multivitamins 30 tabs","Vitamin C 500mg 30 tabs","Vitamin B-Complex 30 tabs","Povidone-Iodine Solution 120ml","70% Isopropyl Alcohol 500ml","Sterile Gauze Pads 10s","Adhesive Bandages 10s","Disposable Surgical Gloves 100 pairs","N95 Respirator Masks 10s","Digital Thermometer","Blood Pressure Monitor","Pulse Oximeter","Glucometer Starter Kit","Saline Solution 500ml","Nasal Saline Spray 100ml","Eye Drops 10ml","Metformin 500mg 30 tabs","Amlodipine 5mg 30 tabs","Atorvastatin 20mg 30 tabs"],
+    "furniture_product":["Ergonomic Mesh Office Chair","High-Back Executive Chair","Stackable Plastic Chair","Height-Adjustable Standing Desk","L-Shaped Computer Desk","Study Writing Desk","3-Seater Fabric Sofa","2-Seater Loveseat","Recliner Armchair","Queen-Size Bed Frame","Single Bed with Storage","Double Bed Frame","6-Door Wardrobe Closet","Bedside Table with Drawer","Chest of Drawers","5-Shelf Bookcase","2-Door Filing Cabinet","Corner Shelf Unit","8-Seater Dining Table Set","4-Seater Round Table","Bar Stool Set of 2","Glass Coffee Table","Wooden Side Table","TV Entertainment Stand","Wall-Mounted Floating Shelf","Outdoor Garden Bench","Foldable Camping Chair","Bean Bag Chair","Kids Study Desk","Shoe Rack 4-Tier"],
+    "food_product":     ["Spaghetti Carbonara","Penne Arrabbiata","Lasagna al Forno","Beef Burger with Fries","Chicken Club Sandwich","BLT Sandwich","Pepperoni Pizza 12 inch","Margherita Pizza 12 inch","Hawaiian Pizza 12 inch","Caesar Salad","Greek Salad","Garden Salad","Chicken Adobo with Rice","Beef Sinigang","Pork Kare-Kare","Cream of Mushroom Soup","Tom Yum Soup","French Onion Soup","Grilled Salmon with Vegetables","Chicken Teriyaki","Beef Stir-Fry","Chocolate Lava Cake","Tiramisu","Crème Brûlée","Iced Caramel Latte","Americano","Matcha Latte","Mango Shake","Lemon Iced Tea","Fresh Buko Juice","Garlic Bread 6 pcs","Onion Rings","Potato Wedges","Crispy Fried Chicken","Fish and Chips"],
+    "book_title":       ["The Alchemist — Paulo Coelho","Atomic Habits — James Clear","Rich Dad Poor Dad — Robert Kiyosaki","The 7 Habits of Highly Effective People — Covey","Thinking Fast and Slow — Daniel Kahneman","Deep Work — Cal Newport","Zero to One — Peter Thiel","The Lean Startup — Eric Ries","Sapiens — Yuval Noah Harari","Educated — Tara Westover","The Great Gatsby — F. Scott Fitzgerald","To Kill a Mockingbird — Harper Lee","1984 — George Orwell","Brave New World — Aldous Huxley","Harry Potter and the Sorcerer's Stone","The Hobbit — J.R.R. Tolkien","The Da Vinci Code — Dan Brown","Gone Girl — Gillian Flynn","The Hunger Games — Suzanne Collins","Dune — Frank Herbert","Noli Me Tangere — Jose Rizal","El Filibusterismo — Jose Rizal","Florante at Laura — Francisco Balagtas","Ibong Adarna — Anonymous","Philippine History — Gregorio Zaide"],
+    "game_title":       ["Minecraft","Grand Theft Auto V","Red Dead Redemption 2","The Legend of Zelda: Breath of the Wild","Elden Ring","God of War Ragnarök","Cyberpunk 2077","Baldur's Gate 3","The Witcher 3: Wild Hunt","Dark Souls III","Call of Duty: Modern Warfare","Apex Legends","Valorant","League of Legends","Dota 2","Mobile Legends: Bang Bang","PUBG Mobile","Honor of Kings","Genshin Impact","Roblox","Among Us","Stardew Valley","Terraria","Counter-Strike 2","FIFA 24","NBA 2K24","Overwatch 2","Fortnite","Diablo IV","Street Fighter 6"],
+    "hardware_product": ["20V Cordless Drill Driver","Angle Grinder 4.5 inch","Circular Saw 7.25 inch","Orbital Sander","Jigsaw with Guide","Bench Vise 4 inch","Combination Wrench Set 12 pcs","Ratchet Socket Set 40 pcs","Screwdriver Set 6 pcs","Claw Hammer 16oz","Measuring Tape 5m","Spirit Level 24 inch","Utility Knife with Blades","Hacksaw Frame","Pliers Set 3 pcs","Wire Stripper","Soldering Iron 60W","Multimeter Digital","Extension Cord 5m 3-socket","PVC Pipe 1 inch 3m","Electrical Tape Roll","Paint Roller Set","Masonry Drill Bit Set","Safety Goggles","Work Gloves Leather"],
+    "cosmetics_product":["Maybelline Fit Me Foundation","L'Oréal Revitalift Moisturizer","Neutrogena Sunscreen SPF50","MAC Ruby Woo Lipstick","Nyx Butter Gloss","Benefit Precisely My Brow Pencil","Urban Decay Eyeshadow Palette","Cetaphil Gentle Cleanser","The Ordinary Hyaluronic Acid Serum","Vitamin C Brightening Serum","Micellar Water 400ml","Toner Pads 60 pcs","Sheet Mask Pack 10s","Eye Cream 15ml","BB Cream SPF30","Contour Palette","Setting Powder","Mascara Volumizing","Eyeliner Felt-Tip","Blush On Peach Nude","Highlighter Champagne","Makeup Brush Set 12 pcs","Makeup Remover Wipes 25s","Rose Water Toner 150ml","Aloe Vera Gel 200ml"],
+    "sports_product":   ["Nike Air Max Running Shoes","Adidas Ultraboost 22","Yoga Mat 6mm Non-slip","Adjustable Dumbbell Set 20kg","Pull-Up Bar Doorframe","Resistance Bands Set 5-pack","Jump Rope Speed","Boxing Gloves 12oz","Basketball Spalding Official","Football Size 5 Adidas","Tennis Racket Wilson","Badminton Racket Set","Swimming Goggles Anti-fog","Cycling Helmet","Water Bottle BPA-free 750ml","Gym Bag Duffel 40L","Compression Leggings","Sports Towel Quick-dry","Foam Roller 45cm","Whey Protein Powder 1kg","Treadmill Folding","Stationary Bike","Kettlebell 16kg","Bench Press Bar Set","Ab Roller Wheel"],
+    "automotive_product":["All-Season Tires 185/65R15","Ceramic Brake Pads Front Set","Engine Oil SAE 5W-30 4L","Oil Filter Standard","Air Filter Engine","Cabin Air Filter","Spark Plugs Set 4 pcs","Wiper Blades 20+18 inch","Car Battery 60Ah MF","Jump Starter Portable","Tire Inflator 12V","Car Vacuum Cleaner","Dashboard Camera 1080p","GPS Navigator 7 inch","Seat Covers Full Set","Car Wax Polish 300g","Microfiber Cloth 5-pack","Coolant/Antifreeze 1L","Power Steering Fluid 500ml","Brake Fluid DOT 4 500ml","Fuel Injector Cleaner","Car Phone Holder Magnetic","Reverse Parking Sensor Kit","LED Headlight Bulbs H4","USB Car Charger Dual Port"],
     "movement_type":["Purchase","Sale","Return","Damaged","Transfer In","Transfer Out","Adjustment","Stock Count","Disposal","Write-off"],
     "stock_movement":["Purchase","Sale","Return","Damaged","Transfer","Adjustment","Stock Count"],
     "transaction_type_inv":["Purchase Order","Sales Invoice","Customer Return","Supplier Return","Stock Transfer","Inventory Adjustment","Damaged Goods Write-off"],
@@ -330,9 +342,50 @@ _NUMERIC_SMART: dict[str, tuple[float, float, str]] = {
 }
 
 
+# Domain keywords → pool key override (checked before generic field-name matching).
+# When a field's hint mentions a product/item but also contains a domain keyword,
+# the domain-specific pool wins over the default electronics "product_name" pool.
+_DOMAIN_PRODUCT_OVERRIDES: list[tuple[tuple[str, ...], str]] = [
+    (("grocery","supermarket","hypermart","tiangge","palengke","wet market",
+      "fresh market","convenience store","sari-sari"),                         "grocery_product"),
+    (("clothing","apparel","fashion","garment","boutique","wear","uniform",
+      "textile","tailoring","retail fashion","clothes"),                        "clothing_product"),
+    (("medicine","pharmacy","pharmaceutical","drug store","medical supply",
+      "health product","clinic supply","hospital supply","drugstore"),          "medical_product"),
+    (("furniture","furnishing","home decor","interior design","home goods",
+      "home store","office furniture"),                                         "furniture_product"),
+    (("restaurant","cafe","cafeteria","canteen","menu","fast food",
+      "food court","bistro","dining","eatery","diner"),                         "food_product"),
+    (("bookstore","book shop","library","novel","textbook","publication",
+      "reading material"),                                                       "book_title"),
+    (("video game","game store","gaming shop","esport","console game",
+      "game title","game shop"),                                                 "game_title"),
+    (("hardware store","home depot","construction supply","tool shop",
+      "building material"),                                                      "hardware_product"),
+    (("cosmetics","beauty store","makeup","skincare","beauty product",
+      "personal care store"),                                                    "cosmetics_product"),
+    (("sports store","sporting goods","gym supply","athletic store",
+      "fitness store"),                                                          "sports_product"),
+    (("auto parts","car parts","automotive store","vehicle supply",
+      "car accessories store"),                                                  "automotive_product"),
+]
+
+_PRODUCT_HINT_TRIGGERS = frozenset(
+    ["product","item","sku","goods","merchandise","inventory","stock"]
+)
+
+
 def _keyword_pool(field_name: str, description: str) -> list | None:
     hint = (field_name + " " + description).lower().replace("_", " ")
-    # Longest keys checked first so "product_name" wins over "product", "name"
+
+    # Domain pre-pass: for product/item name fields, check domain context first
+    # so "grocery product name" returns grocery products, not electronics
+    if any(t in hint for t in _PRODUCT_HINT_TRIGGERS):
+        for keywords, pool_key in _DOMAIN_PRODUCT_OVERRIDES:
+            if pool_key in _POOLS and any(k in hint for k in keywords):
+                return _POOLS[pool_key]
+
+    # Standard pass: longest key wins (so "product_name" beats "product")
     for key in sorted(_POOLS.keys(), key=len, reverse=True):
         if key.replace("_", " ") in hint:
             return _POOLS[key]

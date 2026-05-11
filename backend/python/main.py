@@ -424,7 +424,18 @@ def generate_from_schema(req: SchemaGenerateRequest):
     dest = os.path.join(DATASETS_DIR, dataset_id)
     os.makedirs(dest, exist_ok=True)
 
-    df, entity_tables = generate_relational_dataset(req.fields, _TEMPLATE_ROWS, save_dir=dest)
+    # Inject table name into each field description so domain-aware pool
+    # selection in gen_col can detect context (e.g. "grocery store" → grocery products)
+    table_ctx = req.table_name.lower().replace("_", " ").strip()
+    enriched_fields = []
+    for f in req.fields:
+        ef = f.model_copy()
+        existing = (ef.description or "").lower()
+        if table_ctx and table_ctx not in existing:
+            ef.description = f"{ef.description} [{table_ctx}]".strip(" []") if ef.description else f"[{table_ctx}]"
+        enriched_fields.append(ef)
+
+    df, entity_tables = generate_relational_dataset(enriched_fields, _TEMPLATE_ROWS, save_dir=dest)
 
     template_path = os.path.join(dest, "template.csv")
     df.to_csv(template_path, index=False)
