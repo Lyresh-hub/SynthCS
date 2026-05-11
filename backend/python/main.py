@@ -389,6 +389,11 @@ class SmartSearchRequest(BaseModel):
     prompt: str
 
 
+class PeekRequest(BaseModel):
+    source:      str
+    dataset_ref: str
+
+
 class ExtraFieldDef(BaseModel):
     name:        str
     field_type:  str
@@ -1207,6 +1212,41 @@ def expand_with_ctgan(req: ExpandRequest):
 
 
 # ── Smart multi-source search ─────────────────────────────────────────────────
+
+@app.post("/api/dataset-peek")
+def dataset_peek(req: PeekRequest):
+    """Return column names + 3 sample rows for a dataset without storing it."""
+    import tempfile, shutil
+    import pandas as pd
+
+    DOWNLOAD_FNS = {
+        "kaggle":      lambda ref, d: download_dataset(ref, d),
+        "huggingface": lambda ref, d: huggingface_service.download_dataset(ref, d),
+        "uci":         lambda ref, d: uci_service.download_dataset(ref, d),
+        "openml":      lambda ref, d: openml_service.download_dataset(ref, d),
+        "datagov_ph":  lambda ref, d: datagov_ph_service.download_dataset(ref, d),
+        "psa":         lambda ref, d: psa_service.download_dataset(ref, d),
+    }
+    dl_fn = DOWNLOAD_FNS.get(req.source)
+    if not dl_fn:
+        raise HTTPException(status_code=400, detail=f"Unknown source: {req.source}")
+
+    tmp_dir = tempfile.mkdtemp()
+    try:
+        csv_path = dl_fn(req.dataset_ref, tmp_dir)
+        if not csv_path or not os.path.exists(csv_path):
+            raise HTTPException(status_code=404, detail="Dataset not available for preview.")
+        df = pd.read_csv(csv_path, nrows=5, low_memory=False)
+        columns = [{"name": c, "type": str(df[c].dtype)} for c in df.columns]
+        sample  = df.head(3).where(df.notna(), None).to_dict(orient="records")
+        return {"columns": columns, "preview": sample}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Peek failed: {e}")
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
 
 @app.post("/api/smart-search")
 def smart_search(req: SmartSearchRequest) -> dict[str, Any]:

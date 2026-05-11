@@ -421,6 +421,10 @@ export default function SchemaBuilder() {
   const [searchResults, setSearchResults]     = useState<SmartResult[]>([]);
   const [extSourceFilter, setExtSourceFilter] = useState<string>("all");
   const [selectedDataSource, setSelectedDataSource] = useState("external");
+  const [expandedExtIds,  setExpandedExtIds]  = useState<Set<string>>(new Set());
+  const [selectedExtIds,  setSelectedExtIds]  = useState<Set<string>>(new Set());
+  type ExtColState = { cols: Array<{ name: string; type: string }>; sample: Record<string, unknown>[] } | "loading" | "error";
+  const [extColCache, setExtColCache] = useState<Record<string, ExtColState>>({});
 
   const [llmPrompt, setLlmPrompt]   = useState("");
   const [llmLoading, setLlmLoading] = useState(false);
@@ -1086,6 +1090,90 @@ export default function SchemaBuilder() {
     } catch (e: any) {
       setErrorMsg(e.message ?? "Search failed. Is the Python service running on port 8000?");
       setPhase("error");
+    }
+  };
+
+  const toggleExpandExt = (key: string) => {
+    setExpandedExtIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      return next;
+    });
+  };
+
+  const toggleSelectExt = (key: string) => {
+    setSelectedExtIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      return next;
+    });
+  };
+
+  const loadExtColumns = async (ds: SmartResult, key: string) => {
+    setExtColCache((prev) => ({ ...prev, [key]: "loading" }));
+    try {
+      const res = await fetch(`${PYTHON_API}/api/dataset-peek`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ source: ds.source, dataset_ref: ds.ref }),
+      });
+      if (!res.ok) throw new Error();
+      const data = await res.json();
+      setExtColCache((prev) => ({ ...prev, [key]: { cols: data.columns, sample: data.preview } }));
+    } catch {
+      setExtColCache((prev) => ({ ...prev, [key]: "error" }));
+    }
+  };
+
+  const handleCombineExtDatasets = async () => {
+    const toDownload = searchResults.filter((ds) => selectedExtIds.has(`${ds.source}:${ds.ref}`));
+    if (toDownload.length < 2) return;
+    setPhase("smart_augmenting");
+    setLoadingMsg(`Downloading and combining ${toDownload.length} datasets…`);
+    try {
+      const settled = await Promise.allSettled(
+        toDownload.map((ds) =>
+          fetch(DOWNLOAD_ENDPOINTS[ds.source] ?? DOWNLOAD_ENDPOINTS["kaggle"], {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ dataset_ref: ds.ref }),
+          })
+            .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`Failed: ${ds.title}`))))
+            .then((data) => ({ ds, data }))
+        )
+      );
+      const successful = settled
+        .filter((r): r is PromiseFulfilledResult<{ ds: SmartResult; data: any }> => r.status === "fulfilled")
+        .map((r) => r.value)
+        .sort((a, b) => (b.ds.downloadCount || 0) - (a.ds.downloadCount || 0));
+      if (successful.length === 0) throw new Error("All downloads failed.");
+      const [primary, ...others] = successful;
+      setDatasetId(primary.data.dataset_id);
+      setKaggleRef(primary.ds.ref);
+      const primarySchema: OriginalField[] = primary.data.schema.map((f: any) => ({
+        name: f.name, type: f.type, nullable: f.nullable, sample_values: f.sample_values ?? [],
+      }));
+      setOriginalSchema(primarySchema);
+      const seenNames = new Set(primarySchema.map((f) => f.name.toLowerCase()));
+      const primaryFields: Field[] = primarySchema.map((f, i) =>
+        makeField({ id: `r${i}`, name: f.name, type: f.type, originalName: f.name, originalType: f.type })
+      );
+      const mergedFields: Field[] = [];
+      for (const { ds, data } of others) {
+        const srcLabel = DATA_SOURCES.find((s) => s.id === ds.source)?.label ?? ds.source;
+        for (const f of (data.schema ?? [])) {
+          if (!seenNames.has((f.name as string).toLowerCase())) {
+            seenNames.add((f.name as string).toLowerCase());
+            mergedFields.push(
+              makeField({ id: `m${mergedFields.length}`, name: f.name, type: f.type,
+                originalName: f.name, originalType: f.type, mergedFrom: srcLabel })
+            );
+          }
+        }
+      }
+      const title = toDownload.map((d) => d.title).join(" + ");
+      setTables([{ id: "1", name: title, fields: [...primaryFields, ...mergedFields] }]);
+      setMode("kaggle"); setPhase("schema");
+    } catch (e: any) {
+      setErrorMsg(e.message ?? "Combine failed."); setPhase("error");
     }
   };
 
@@ -1838,6 +1926,7 @@ export default function SchemaBuilder() {
           : searchResults.filter((r) => r.source === extSourceFilter);
         return (
           <div className="bg-white border border-gray-100 rounded-xl overflow-hidden shadow-sm">
+            {/* Header */}
             <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100 bg-gray-50">
               <span className="text-sm font-medium text-gray-700">
                 {filtered.length} dataset{filtered.length !== 1 ? "s" : ""}
@@ -1845,34 +1934,175 @@ export default function SchemaBuilder() {
                   <span className="text-gray-400 font-normal"> from {DATA_SOURCES.find((s) => s.id === extSourceFilter)?.label}</span>
                 )}
               </span>
-              <button onClick={() => { setPhase("idle"); setSearchResults([]); setExtSourceFilter("all"); }}
+              <button onClick={() => { setPhase("idle"); setSearchResults([]); setExtSourceFilter("all"); setSelectedExtIds(new Set()); setExpandedExtIds(new Set()); }}
                 className="text-xs text-gray-400 hover:text-gray-600">← New search</button>
             </div>
+
             {filtered.length === 0
               ? <p className="p-6 text-sm text-gray-400 text-center">No datasets from this source.</p>
               : <div className="divide-y divide-gray-50">
                   {filtered.map((ds) => {
+                    const key = `${ds.source}:${ds.ref}`;
                     const c = SOURCE_COLORS[ds.source] ?? SOURCE_COLORS["kaggle"];
                     const srcLabel = ds.sourceLabel ?? DATA_SOURCES.find((s) => s.id === ds.source)?.label ?? ds.source;
+                    const isExpanded = expandedExtIds.has(key);
+                    const isSelected = selectedExtIds.has(key);
+                    const colState   = extColCache[key];
                     return (
-                      <button key={`${ds.source}:${ds.ref}`} onClick={() => handleSelectDataset(ds)}
-                        className="w-full text-left px-4 py-3 hover:bg-purple-50 transition-colors flex items-center gap-3">
-                        {/* Source dot */}
-                        <span className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${c.dot}`} />
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-medium text-gray-800 truncate">{ds.title}</p>
-                          <p className="text-xs text-gray-400 mt-0.5">
-                            <span className={`font-medium ${c.text}`}>{srcLabel}</span>
-                            {ds.size ? ` · ${ds.size}` : ""}
-                            {ds.downloadCount ? ` · ${ds.downloadCount.toLocaleString()} downloads` : ""}
-                          </p>
+                      <div key={key} className={`transition-colors ${isSelected ? "bg-purple-50/40" : ""}`}>
+                        {/* Main row */}
+                        <div className="flex items-center gap-3 px-4 py-3">
+                          {/* Checkbox */}
+                          <div
+                            onClick={() => toggleSelectExt(key)}
+                            className={`w-4 h-4 rounded border-2 flex-shrink-0 flex items-center justify-center cursor-pointer transition-colors
+                              ${isSelected ? "bg-gray-800 border-gray-800" : "border-gray-300 hover:border-gray-400"}`}
+                          >
+                            {isSelected && (
+                              <svg viewBox="0 0 10 8" className="w-2.5 h-2.5 fill-white">
+                                <path d="M1 4l2.5 2.5L9 1" stroke="white" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round" />
+                              </svg>
+                            )}
+                          </div>
+
+                          {/* Source dot */}
+                          <span className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${c.dot}`} />
+
+                          {/* Info — clicking the text area selects this dataset */}
+                          <div className="flex-1 min-w-0 cursor-pointer" onClick={() => handleSelectDataset(ds)}>
+                            <p className="text-sm font-medium text-gray-800 truncate">{ds.title}</p>
+                            <p className="text-xs text-gray-400 mt-0.5">
+                              <span className={`font-medium ${c.text}`}>{srcLabel}</span>
+                              {ds.size ? ` · ${ds.size}` : ""}
+                              {(ds as any).downloadCount ? ` · ${(ds as any).downloadCount.toLocaleString()} downloads` : ""}
+                            </p>
+                          </div>
+
+                          {/* Expand toggle */}
+                          <button
+                            onClick={() => toggleExpandExt(key)}
+                            className="p-1 text-gray-400 hover:text-gray-600 transition-colors flex-shrink-0"
+                            title={isExpanded ? "Collapse" : "Preview dataset"}
+                          >
+                            <ChevronDown className={`w-4 h-4 transition-transform duration-200 ${isExpanded ? "rotate-180" : ""}`} />
+                          </button>
                         </div>
-                        <Download className="w-4 h-4 text-gray-300 flex-shrink-0" />
-                      </button>
+
+                        {/* Expanded preview panel */}
+                        {isExpanded && (
+                          <div className="px-4 pb-4 pt-1 border-t border-gray-100 bg-gray-50/60 space-y-3">
+                            {/* Description */}
+                            {(ds as any).description
+                              ? <p className="text-xs text-gray-600 leading-relaxed">{(ds as any).description}</p>
+                              : <p className="text-xs text-gray-400 italic">No description available.</p>
+                            }
+
+                            {/* Column preview */}
+                            {!colState && (
+                              <button
+                                onClick={() => loadExtColumns(ds, key)}
+                                className="text-xs font-medium text-purple-600 hover:text-purple-700 flex items-center gap-1"
+                              >
+                                <ChevronRight className="w-3 h-3" /> Load column preview
+                              </button>
+                            )}
+                            {colState === "loading" && (
+                              <div className="flex items-center gap-1.5 text-xs text-gray-400">
+                                <RefreshCw className="w-3 h-3 animate-spin" /> Loading columns…
+                              </div>
+                            )}
+                            {colState === "error" && (
+                              <p className="text-xs text-red-400">Could not load preview.</p>
+                            )}
+                            {colState && colState !== "loading" && colState !== "error" && (
+                              <div className="space-y-2">
+                                <div className="flex flex-wrap gap-1">
+                                  {colState.cols.map((col) => (
+                                    <span key={col.name} className="flex items-center gap-1 text-[10px] px-2 py-0.5 bg-white border border-gray-200 rounded-full text-gray-700">
+                                      <span className="font-medium">{col.name}</span>
+                                      <span className="text-gray-400">{col.type}</span>
+                                    </span>
+                                  ))}
+                                </div>
+                                {colState.sample.length > 0 && (
+                                  <div className="overflow-x-auto rounded border border-gray-200">
+                                    <table className="w-full text-[10px]">
+                                      <thead>
+                                        <tr className="bg-gray-100 border-b border-gray-200">
+                                          {colState.cols.map((c) => (
+                                            <th key={c.name} className="px-2 py-1 text-left font-semibold text-gray-500 whitespace-nowrap">{c.name}</th>
+                                          ))}
+                                        </tr>
+                                      </thead>
+                                      <tbody>
+                                        {colState.sample.slice(0, 3).map((row, i) => (
+                                          <tr key={i} className="border-b border-gray-100 last:border-0">
+                                            {colState.cols.map((c) => (
+                                              <td key={c.name} className="px-2 py-1 text-gray-600 whitespace-nowrap max-w-[120px] truncate">
+                                                {row[c.name] == null ? <span className="text-gray-300 italic">null</span> : String(row[c.name])}
+                                              </td>
+                                            ))}
+                                          </tr>
+                                        ))}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                )}
+                              </div>
+                            )}
+
+                            {/* Quick-use button */}
+                            <button
+                              onClick={() => handleSelectDataset(ds)}
+                              className="flex items-center gap-1.5 text-xs font-semibold text-gray-800 hover:text-purple-700 transition-colors"
+                            >
+                              <Download className="w-3.5 h-3.5" /> Use this dataset
+                            </button>
+                          </div>
+                        )}
+                      </div>
                     );
                   })}
                 </div>
             }
+
+            {/* Action bar — shown when items are selected */}
+            {selectedExtIds.size > 0 && (
+              <div className="px-4 py-3 border-t border-gray-100 bg-gray-50 flex items-center justify-between gap-3">
+                <p className="text-xs text-gray-500">
+                  {selectedExtIds.size === 1
+                    ? "1 dataset selected"
+                    : `${selectedExtIds.size} datasets selected — will be combined`}
+                </p>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setSelectedExtIds(new Set())}
+                    className="text-xs text-gray-400 hover:text-gray-600 font-medium"
+                  >
+                    Clear
+                  </button>
+                  {selectedExtIds.size === 1 && (() => {
+                    const picked = searchResults.find((ds) => selectedExtIds.has(`${ds.source}:${ds.ref}`));
+                    return picked ? (
+                      <button
+                        onClick={() => handleSelectDataset(picked)}
+                        className="flex items-center gap-1.5 px-4 py-1.5 bg-gray-800 text-white rounded-lg text-xs font-semibold hover:bg-gray-900 transition-colors"
+                      >
+                        <Download className="w-3.5 h-3.5" /> Use Dataset
+                      </button>
+                    ) : null;
+                  })()}
+                  {selectedExtIds.size >= 2 && (
+                    <button
+                      onClick={handleCombineExtDatasets}
+                      className="flex items-center gap-1.5 px-4 py-1.5 bg-gray-800 text-white rounded-lg text-xs font-semibold hover:bg-gray-900 transition-colors"
+                    >
+                      <Layers className="w-3.5 h-3.5" /> Combine {selectedExtIds.size} Datasets
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         );
       })()}
