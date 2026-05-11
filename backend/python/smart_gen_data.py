@@ -442,23 +442,52 @@ def gen_col(ftype: str, n: int, c: Any, field_name: str = "", description: str =
         elif any(p in fname for p in ("zip_code", "zipcode", "zip", "postal_code", "postcode", "postal")):
             data = np.array([f"{random.randint(1000, 9999)}" for _ in range(n)], dtype=object)
 
-        elif fname == "name" or (
-            "_name" in fname and not any(ex in fname for ex in (
-                "file","column","table","database","domain","host","service","app",
-                "system","page","class","function","variable","method","object",
-                "bucket","key","field","attr","property",
-                "product","brand","item","drug","street","city","country","region",
-                "company","org","team","store","shop","game","song","book","movie",
-                "course","subject","supplier","vendor","warehouse","manufacturer",
-                "category","sku","model","part","location","station","device",
-            ))
-        ):
-            # Check if description hints at a non-person entity before using person names
+        elif fname == "name" or "_name" in fname:
+            # Always check the pool first — person names are a last resort only for
+            # fields that explicitly reference a person (customer, user, patient, etc.)
             smart_pool = _keyword_pool(field_name, description)
             if smart_pool:
                 data = np.random.choice(smart_pool, n).astype(object)
             else:
-                data = np.array([f"{random.choice(FIRST)} {random.choice(LAST)}" for _ in range(n)], dtype=object)
+                _PERSON_HINTS = (
+                    "customer","user","patient","employee","staff","person",
+                    "doctor","nurse","student","teacher","professor","faculty",
+                    "instructor","advisor","guardian","parent","client","member",
+                    "contact","buyer","seller","author","presenter","worker",
+                    "manager","driver","rider","passenger","candidate","applicant",
+                )
+                _TECH_HINTS = (
+                    "file","column","table","database","domain","host","service","app",
+                    "system","page","class","function","variable","method","object",
+                    "bucket","key","field","attr","property",
+                )
+                hint_text = (field_name + " " + description).lower()
+                has_person = any(p in hint_text for p in _PERSON_HINTS)
+                has_tech   = any(t in fname    for t in _TECH_HINTS)
+
+                if has_person:
+                    data = np.array(
+                        [f"{random.choice(FIRST)} {random.choice(LAST)}" for _ in range(n)],
+                        dtype=object,
+                    )
+                elif has_tech:
+                    # Technical identifier name — random alphanumeric
+                    k = max(1, cardinality or 50)
+                    pool = ["".join(random.choices(string.ascii_lowercase, k=random.randint(4, 10)))
+                            for _ in range(min(k, 5_000))]
+                    data = np.random.choice(pool, n).astype(object)
+                else:
+                    # Non-person entity with no pool (e.g. generic "name" in a products
+                    # table, or a novel entity type) — use a labelled generic fallback
+                    entity = (
+                        fname.replace("_name", "").replace("name_", "").strip("_").title()
+                        or "Item"
+                    )
+                    k = max(1, cardinality or 30)
+                    labels = [f"{entity} {str(j + 1).zfill(2)}" for j in range(min(k, n))]
+                    arr = np.array(labels * (n // len(labels) + 1), dtype=object)[:n]
+                    np.random.shuffle(arr)
+                    data = arr
 
         else:
             smart_pool = _keyword_pool(field_name, description)
@@ -509,7 +538,37 @@ def gen_col(ftype: str, n: int, c: Any, field_name: str = "", description: str =
         data = np.array([f"{random.randint(1,999)} {random.choice(STREETS)}" for _ in range(n)], dtype=object)
 
     elif ftype == "name":
-        data = np.array([f"{random.choice(FIRST)} {random.choice(LAST)}" for _ in range(n)], dtype=object)
+        # Check pool first — product_name, brand_name, etc. should not become person names
+        smart_pool = _keyword_pool(field_name, description)
+        if smart_pool:
+            data = np.random.choice(smart_pool, n).astype(object)
+        else:
+            _PERSON_HINTS = (
+                "customer","user","patient","employee","staff","person",
+                "doctor","nurse","student","teacher","professor","faculty",
+                "instructor","advisor","guardian","parent","client","member",
+                "contact","buyer","seller","author","presenter","worker",
+                "manager","driver","rider","passenger","candidate","applicant",
+                "first","last","full","given","middle","maiden",
+            )
+            hint_text = (field_name + " " + description).lower()
+            has_person = any(p in hint_text for p in _PERSON_HINTS)
+            if has_person or fname in ("name", "full_name", "first_name", "last_name", "given_name"):
+                data = np.array(
+                    [f"{random.choice(FIRST)} {random.choice(LAST)}" for _ in range(n)],
+                    dtype=object,
+                )
+            else:
+                # Non-person entity with type=name but no pool — generic label
+                entity = (
+                    fname.replace("_name", "").replace("name_", "").strip("_").title()
+                    or "Item"
+                )
+                k = max(1, cardinality or 30)
+                labels = [f"{entity} {str(j + 1).zfill(2)}" for j in range(min(k, n))]
+                arr = np.array(labels * (n // len(labels) + 1), dtype=object)[:n]
+                np.random.shuffle(arr)
+                data = arr
 
     elif ftype == "ip":
         data = np.array([
