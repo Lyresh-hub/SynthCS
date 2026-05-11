@@ -96,7 +96,7 @@ interface OriginalField {
 }
 
 type Phase = "idle" | "results" | "loading" | "schema" | "template_preview" | "generating" | "error"
-           | "smart_searching" | "smart_results" | "smart_augmenting";
+           | "smart_searching" | "smart_results" | "smart_augmenting" | "multi_preview";
 type Mode  = "kaggle" | "llm";
 
 // ── Generation modes ──────────────────────────────────────────────────────────
@@ -434,6 +434,10 @@ export default function SchemaBuilder() {
   const [templatePreviewRows, setTemplatePreviewRows] = useState<Record<string, unknown>[]>([]);
   const [entityTables,        setEntityTables]        = useState<Array<{name:string; file:string; rows:number; columns:string[]; preview:Record<string,unknown>[]}>>([]);
 
+  type MultiPreviewTable = { name: string; columns: string[]; rows: Record<string, unknown>[] };
+  const [multiPreviewTables,    setMultiPreviewTables]    = useState<MultiPreviewTable[]>([]);
+  const [multiPreviewActiveTab, setMultiPreviewActiveTab] = useState(0);
+
   const [datasetId, setDatasetId]           = useState("");
   const [kaggleRef, setKaggleRef]           = useState("");
   const [originalSchema, setOriginalSchema] = useState<OriginalField[]>([]);
@@ -615,7 +619,55 @@ export default function SchemaBuilder() {
 
   // ── Multi-table ZIP generation ────────────────────────────────────────────
 
-  const handleGenerateMultiTableZip = async () => {
+  // Step 1 — generate sample rows for each table and show preview
+  const handlePreviewMultiTable = async () => {
+    setLoadingMsg(`Generating previews for ${tables.length} tables…`);
+    setPhase("generating");
+    try {
+      const buildPayload = (t: Table) => ({
+        table_name: t.name,
+        fields: t.fields.map((f) => ({
+          name:        f.name,
+          field_type:  f.type,
+          nullable:    f.null_rate > 0,
+          description: f.description,
+          constraints: {
+            ...f.constraints,
+            null_rate:   f.null_rate,
+            enum_values: f.constraints.enum_values
+              ? String(f.constraints.enum_values).split(",").map((v) => v.trim()).filter(Boolean)
+              : [],
+          },
+        })),
+      });
+
+      const results = await Promise.all(
+        tables.map((t) =>
+          fetch(`${PYTHON_API}/api/generate-from-schema`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(buildPayload(t)),
+          }).then((r) => r.ok ? r.json() : Promise.reject(new Error(`Preview failed for table "${t.name}"`))),
+        )
+      );
+
+      setMultiPreviewTables(
+        results.map((data, i) => ({
+          name:    tables[i].name,
+          columns: data.columns ?? [],
+          rows:    (data.preview ?? []).slice(0, 10),
+        }))
+      );
+      setMultiPreviewActiveTab(0);
+      setPhase("multi_preview");
+    } catch (e: any) {
+      setErrorMsg(e.message ?? "Preview generation failed.");
+      setPhase("error");
+    }
+  };
+
+  // Step 2 — confirmed by user, generate full ZIP
+  const handleConfirmDownloadZip = async () => {
     setLoadingMsg(`Generating ${tables.length} tables and packaging as ZIP…`);
     setPhase("generating");
     try {
@@ -1921,6 +1973,97 @@ export default function SchemaBuilder() {
         </div>
       )}
 
+      {/* ── Multi-table Preview (step before ZIP download) ── */}
+      {phase === "multi_preview" && (
+        <div className="space-y-4">
+          {/* Header */}
+          <div className="bg-white border border-gray-100 rounded-xl shadow-sm overflow-hidden">
+            <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
+              <div>
+                <p className="text-sm font-semibold text-gray-800">Data Preview — {multiPreviewTables.length} tables</p>
+                <p className="text-xs text-gray-400 mt-0.5">First 10 rows of each table. Review before downloading.</p>
+              </div>
+              <button
+                onClick={() => setPhase("schema")}
+                className="text-xs text-gray-400 hover:text-gray-700 underline font-medium">
+                ← Back to Schema
+              </button>
+            </div>
+
+            {/* Table tabs */}
+            <div className="flex overflow-x-auto border-b border-gray-100">
+              {multiPreviewTables.map((t, i) => (
+                <button
+                  key={t.name}
+                  onClick={() => setMultiPreviewActiveTab(i)}
+                  className={`px-4 py-2.5 text-sm font-medium whitespace-nowrap border-r border-gray-100 transition-colors relative flex-shrink-0
+                    ${multiPreviewActiveTab === i ? "bg-purple-50 text-purple-700" : "text-gray-500 hover:bg-gray-50"}`}
+                >
+                  {multiPreviewActiveTab === i && (
+                    <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-purple-600" />
+                  )}
+                  {t.name}
+                  <span className="ml-1.5 text-[10px] text-gray-400">{t.columns.length} cols</span>
+                </button>
+              ))}
+            </div>
+
+            {/* Preview table */}
+            {multiPreviewTables[multiPreviewActiveTab] && (() => {
+              const { columns, rows } = multiPreviewTables[multiPreviewActiveTab];
+              return (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="border-b border-gray-100 bg-gray-50">
+                        {columns.map((col) => (
+                          <th key={col} className="px-3 py-2.5 text-left font-semibold text-gray-500 whitespace-nowrap tracking-wide uppercase text-[10px]">
+                            {col}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-50">
+                      {rows.map((row, i) => (
+                        <tr key={i} className="hover:bg-purple-50/30 transition-colors">
+                          {columns.map((col) => (
+                            <td key={col} className="px-3 py-2 text-gray-700 whitespace-nowrap max-w-[180px] truncate">
+                              {row[col] === null || row[col] === undefined
+                                ? <span className="text-gray-300 italic text-[10px]">null</span>
+                                : String(row[col])}
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              );
+            })()}
+          </div>
+
+          {/* Row count + confirm */}
+          <div className="bg-white border border-gray-100 rounded-xl p-4 shadow-sm space-y-3">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-semibold text-gray-800">Rows per table</p>
+                <p className="text-xs text-gray-400">Set how many rows to generate for each table</p>
+              </div>
+              <span className="text-sm font-bold text-purple-700">{rowCount.toLocaleString()}</span>
+            </div>
+            <input type="range" min={100} max={100000} step={100}
+              value={rowCount} onChange={(e) => setRowCount(Number(e.target.value))}
+              className="w-full accent-purple-600" />
+            <button
+              onClick={handleConfirmDownloadZip}
+              className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-purple-600 text-white rounded-lg text-sm font-semibold hover:bg-purple-700 transition-colors shadow-sm">
+              <Download className="w-4 h-4" />
+              Looks good — Download {tables.length} Tables as ZIP
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Table tabs — shown when 2+ tables */}
       {phase === "schema" && tables.length >= 2 && (
         <div className="bg-white border border-gray-100 rounded-xl overflow-hidden shadow-sm">
@@ -2401,13 +2544,13 @@ export default function SchemaBuilder() {
             {/* Multi-table actions */}
             {tables.length >= 2 && (
               <div className="space-y-2 pt-1">
-                <button onClick={handleGenerateMultiTableZip}
+                <button onClick={handlePreviewMultiTable}
                   className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-purple-600 text-white rounded-lg text-sm font-semibold hover:bg-purple-700 transition-colors shadow-sm">
                   <Download className="w-4 h-4" />
-                  Generate All {tables.length} Tables as ZIP
+                  Preview &amp; Generate All {tables.length} Tables
                 </button>
                 <p className="text-[11px] text-gray-400 text-center">
-                  Each table gets its own CSV with FK values referencing parent table rows
+                  Preview sample rows first, then download as ZIP
                 </p>
               </div>
             )}
