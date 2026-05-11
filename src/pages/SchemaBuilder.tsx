@@ -366,6 +366,47 @@ function splitSchemaIntoTables(mainName: string, fields: Field[]): Table[] {
   return result;
 }
 
+/**
+ * Parse the user prompt for explicit domain/context mentions like
+ * "with hospitals", "including payments", "and lab results".
+ * Returns display labels for detected domains so the UI can show a banner.
+ */
+function detectPromptExtras(prompt: string): string[] {
+  const p = prompt.toLowerCase();
+  const DOMAIN_KEYWORDS: Array<[RegExp, string]> = [
+    [/hospital|ward|clinic|icu|emergency\s*room/,          "Hospital fields"],
+    [/payment|transaction|billing|invoice|checkout/,        "Payment fields"],
+    [/lab\s*result|blood\s*test|diagnosis|clinical/,        "Lab/Clinical fields"],
+    [/location|gps|latitude|longitude|geoloc/,              "Location fields"],
+    [/login|session|activity\s*log|audit\s*trail/,          "Session/Activity fields"],
+    [/review|rating|feedback|satisfaction/,                 "Review fields"],
+    [/fraud|anomaly|suspicious|security\s*event/,           "Fraud/Anomaly fields"],
+    [/inventory|stock|warehouse|shipment/,                  "Inventory fields"],
+    [/enrollment|registration|attendance|schedule/,         "Enrollment fields"],
+    [/insurance|policy|claim|premium/,                      "Insurance fields"],
+    [/prescription|medication|dosage/,                      "Prescription fields"],
+  ];
+  // also detect "with X" / "including X" / "and X" patterns
+  const explicitPatterns = [
+    /\bwith\s+([\w\s]{3,30}?)(?:\s+and|\s+for|\s+data|\s+info|,|$)/gi,
+    /\bincluding\s+([\w\s]{3,30}?)(?:\s+and|\s+for|\s+data|\s+info|,|$)/gi,
+  ];
+  const extras = new Set<string>();
+  for (const [rx, label] of DOMAIN_KEYWORDS) {
+    if (rx.test(p)) extras.add(label);
+  }
+  for (const rx of explicitPatterns) {
+    let m: RegExpExecArray | null;
+    while ((m = rx.exec(prompt)) !== null) {
+      const term = m[1].trim();
+      if (term.length >= 3 && !/dataset|data|field|column|row/i.test(term)) {
+        extras.add(term.charAt(0).toUpperCase() + term.slice(1) + " fields");
+      }
+    }
+  }
+  return Array.from(extras).slice(0, 5);
+}
+
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export default function SchemaBuilder() {
@@ -383,8 +424,9 @@ export default function SchemaBuilder() {
   const [llmPrompt, setLlmPrompt]   = useState("");
   const [llmLoading, setLlmLoading] = useState(false);
   const [llmError, setLlmError]     = useState("");
-  const [smartResults, setSmartResults]       = useState<SmartResult[]>([]);
+  const [smartResults, setSmartResults]         = useState<SmartResult[]>([]);
   const [selectedSmartIds, setSelectedSmartIds] = useState<Set<string>>(new Set());
+  const [detectedExtras, setDetectedExtras]     = useState<string[]>([]);
   const [strikeWarning, setStrikeWarning] = useState<{ strikes: number; banned: boolean } | null>(null);
 
   const [templateDatasetId,   setTemplateDatasetId]   = useState("");
@@ -688,22 +730,38 @@ export default function SchemaBuilder() {
     setLoadingMsg("Searching all dataset sources for a real match…");
 
     try {
-      const searchRes = await fetch(`${PYTHON_API}/api/smart-search`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: llmPrompt }),
-      });
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 30_000);
+      let searchRes: Response;
+      try {
+        searchRes = await fetch(`${PYTHON_API}/api/smart-search`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ prompt: llmPrompt }),
+          signal: controller.signal,
+        });
+      } finally {
+        clearTimeout(timeoutId);
+      }
+
       if (searchRes.ok) {
         const searchData = await searchRes.json();
         const results: SmartResult[] = searchData.datasets ?? [];
         if (results.length > 0) {
+          // Detect explicit extra domains from the prompt (e.g. "with hospitals")
+          const extras = detectPromptExtras(llmPrompt);
+          setDetectedExtras(extras);
           setSmartResults(results);
+          setSelectedSmartIds(new Set());
           setPhase("smart_results");
           return;
         }
       }
-    } catch {
-      // If search fails entirely, fall back to pure LLM
+    } catch (err: any) {
+      if (err?.name !== "AbortError") {
+        // Non-timeout error: show message but still fall back
+        console.warn("smart-search failed:", err?.message);
+      }
     }
 
     // No real matches found — fall back to pure LLM generation
@@ -741,6 +799,7 @@ export default function SchemaBuilder() {
         body: JSON.stringify({
           existing_schema: realSchema.map((f) => ({ name: f.name, type: f.type })),
           user_prompt: llmPrompt,
+          detected_extras: detectedExtras,
         }),
       });
       const extraFields: any[] = augRes.ok ? ((await augRes.json()).fields ?? []) : [];
@@ -839,6 +898,7 @@ export default function SchemaBuilder() {
             body: JSON.stringify({
               existing_schema: allNames.map((n) => ({ name: n, type: "string" })),
               user_prompt: llmPrompt,
+              detected_extras: detectedExtras,
             }),
           });
           const extras: any[] = augRes.ok ? ((await augRes.json()).fields ?? []) : [];
@@ -1462,18 +1522,37 @@ export default function SchemaBuilder() {
           {/* Header */}
           <div className="px-4 py-3 border-b border-gray-100 bg-gray-50 flex items-start justify-between gap-3">
             <div>
-              <p className="text-sm font-semibold text-gray-800">Real datasets found</p>
+              <p className="text-sm font-semibold text-gray-800">
+                Real datasets found — {smartResults.length} match{smartResults.length !== 1 ? "es" : ""}
+              </p>
               <p className="text-xs text-gray-500 mt-0.5">
-                Select one dataset to use as a base, or select multiple to merge their schemas together.
-                Any fields from your description that are missing will be added automatically.
+                Check one or more datasets. Their fields will be merged (duplicates removed) and any fields
+                from your description that are missing will be added automatically.
               </p>
             </div>
             <button
-              onClick={() => { setPhase("idle"); setSelectedSmartIds(new Set()); runPureLlmGenerate(); }}
+              onClick={() => { setPhase("idle"); setSelectedSmartIds(new Set()); setDetectedExtras([]); runPureLlmGenerate(); }}
               className="flex-shrink-0 text-xs text-gray-400 hover:text-gray-700 font-medium underline whitespace-nowrap mt-0.5">
               Skip — use pure AI
             </button>
           </div>
+
+          {/* Detected extras banner */}
+          {detectedExtras.length > 0 && (
+            <div className="px-4 py-2.5 bg-purple-50 border-b border-purple-100 flex items-start gap-2">
+              <Sparkles className="w-3.5 h-3.5 text-purple-600 flex-shrink-0 mt-0.5" />
+              <div>
+                <p className="text-xs font-semibold text-purple-800">Detected from your prompt — will be auto-added:</p>
+                <div className="flex flex-wrap gap-1.5 mt-1">
+                  {detectedExtras.map((e) => (
+                    <span key={e} className="text-[10px] font-medium px-2 py-0.5 bg-purple-100 text-purple-700 rounded-full border border-purple-200">
+                      + {e}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Source legend */}
           <div className="px-4 py-2 border-b border-gray-50 flex flex-wrap gap-2">

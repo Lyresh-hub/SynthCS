@@ -1105,33 +1105,39 @@ app.post("/api/llm/augment-schema", async (req, res) => {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) return res.status(503).json({ error: "ANTHROPIC_API_KEY not configured." });
 
-  const { existing_schema, user_prompt } = req.body;
+  const { existing_schema, user_prompt, detected_extras } = req.body;
   if (!Array.isArray(existing_schema) || !user_prompt?.trim()) {
     return res.status(400).json({ error: "existing_schema (array) and user_prompt are required" });
   }
 
   const existingNames = existing_schema.map((f) => f.name).join(", ");
+  const extrasNote = Array.isArray(detected_extras) && detected_extras.length > 0
+    ? `\n\nThe system also detected these explicit domain requirements from the prompt: ${detected_extras.join(", ")}. Add the most important fields for each of these domains if not already present.`
+    : "";
 
-  const augmentPrompt = `You are a data schema augmenter. A user described a dataset and we found a real dataset for them.
-The real dataset already has these columns: ${existingNames}
+  const augmentPrompt = `You are a data schema augmenter for synthetic dataset generation.
 
-The user's original description was: "${user_prompt.trim()}"
+The user described a dataset: "${user_prompt.trim()}"
+A real dataset was found that already has these columns: ${existingNames}${extrasNote}
 
-Your job: identify ONLY fields the user explicitly requested that are NOT already covered by the existing columns.
-Look for concrete requests like "with IP addresses", "including latitude/longitude", "with email", "with timestamps", etc.
-Do NOT add generic fields that any dataset would have.
-Do NOT add fields just because they might be useful.
-ONLY add fields the user specifically mentioned that are missing from the dataset.
+Your job — add fields that are MISSING from the real dataset but are:
+1. Explicitly mentioned in the user's prompt (e.g. "with hospitals" → add hospital_name, ward, etc.)
+2. Part of a domain/context the user stated (e.g. "diabetes with hospitals" → add hospital_id, hospital_name, ward, admission_date)
+3. Required to make the dataset complete for the user's stated use case
 
-If the user did not request any specific fields beyond what is already present, return an empty fields array.
+Rules:
+- Do NOT duplicate fields already in the dataset (the existing columns listed above)
+- Do NOT add completely generic fields with no connection to the user's prompt
+- For each detected domain/context, add 2-4 relevant fields
+- Use snake_case field names
 
-Return ONLY valid JSON — no markdown, no explanation, no code fences:
+Return ONLY valid JSON — no markdown, no explanation:
 {
   "fields": [
     {
       "name": "field_name",
       "type": "one_of_valid_types",
-      "description": "why this was added based on user's request",
+      "description": "brief reason based on user request",
       "constraints": {}
     }
   ]
