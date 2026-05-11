@@ -373,7 +373,8 @@ class MultiTableDef(BaseModel):
 
 
 class MultiTableRequest(BaseModel):
-    tables: list[MultiTableDef]
+    tables:  list[MultiTableDef]
+    format:  str = "csv"   # "csv" | "json" | "xlsx"
 
 
 class ExpandRequest(BaseModel):
@@ -963,6 +964,51 @@ def download_entity_table(dataset_id: str, table_name: str):
     return FileResponse(path=path, media_type="text/csv", filename=safe_name)
 
 
+@app.get("/api/download-template/{dataset_id}")
+def download_template(dataset_id: str, format: str = "csv"):
+    """Download the 200-row template in CSV, JSON, or XLSX format."""
+    import io
+    import pandas as pd
+    from fastapi.responses import StreamingResponse
+
+    fmt = format.lower().strip()
+    template_path = os.path.join(DATASETS_DIR, dataset_id, "template.csv")
+    if not os.path.exists(template_path):
+        raise HTTPException(status_code=404, detail="Template not found.")
+
+    df = pd.read_csv(template_path)
+
+    if fmt == "xlsx":
+        import openpyxl  # noqa: F401
+        buf = io.BytesIO()
+        with pd.ExcelWriter(buf, engine="openpyxl") as writer:
+            df.to_excel(writer, index=False)
+        buf.seek(0)
+        return StreamingResponse(
+            buf,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": "attachment; filename=template.xlsx"},
+        )
+
+    if fmt == "json":
+        json_str = df.to_json(orient="records", indent=2)
+        buf = io.BytesIO(json_str.encode("utf-8"))
+        return StreamingResponse(
+            buf,
+            media_type="application/json",
+            headers={"Content-Disposition": "attachment; filename=template.json"},
+        )
+
+    # Default: CSV
+    csv_str = df.to_csv(index=False)
+    buf = io.BytesIO(csv_str.encode("utf-8"))
+    return StreamingResponse(
+        buf,
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=template.csv"},
+    )
+
+
 @app.post("/api/generate-multi-table")
 def generate_multi_table(req: MultiTableRequest):
     """
@@ -1047,7 +1093,38 @@ def generate_multi_table(req: MultiTableRequest):
         df = df[col_order + extra]
         generated[tname] = df
 
-    # Build in-memory ZIP
+    fmt = (req.format or "csv").lower().strip()
+
+    if fmt == "xlsx":
+        import openpyxl  # noqa: F401 — ensures it's installed
+        xlsx_buf = io.BytesIO()
+        with pd.ExcelWriter(xlsx_buf, engine="openpyxl") as writer:
+            for tbl in req.tables:
+                if tbl.name in generated:
+                    sheet = tbl.name[:31]  # Excel sheet name limit
+                    generated[tbl.name].to_excel(writer, sheet_name=sheet, index=False)
+        xlsx_buf.seek(0)
+        return StreamingResponse(
+            xlsx_buf,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": "attachment; filename=dataset_tables.xlsx"},
+        )
+
+    if fmt == "json":
+        zip_buf = io.BytesIO()
+        with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
+            for tbl in req.tables:
+                if tbl.name in generated:
+                    json_str = generated[tbl.name].to_json(orient="records", indent=2)
+                    zf.writestr(f"{tbl.name}.json", json_str.encode("utf-8"))
+        zip_buf.seek(0)
+        return StreamingResponse(
+            zip_buf,
+            media_type="application/zip",
+            headers={"Content-Disposition": "attachment; filename=dataset_tables_json.zip"},
+        )
+
+    # Default: CSV ZIP
     zip_buf = io.BytesIO()
     with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
         for tbl in req.tables:

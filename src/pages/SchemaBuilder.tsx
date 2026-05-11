@@ -437,6 +437,7 @@ export default function SchemaBuilder() {
   type MultiPreviewTable = { name: string; columns: string[]; rows: Record<string, unknown>[] };
   const [multiPreviewTables,    setMultiPreviewTables]    = useState<MultiPreviewTable[]>([]);
   const [multiPreviewActiveTab, setMultiPreviewActiveTab] = useState(0);
+  const [downloadFormat, setDownloadFormat] = useState<"csv" | "json" | "xlsx">("csv");
 
   const [datasetId, setDatasetId]           = useState("");
   const [kaggleRef, setKaggleRef]           = useState("");
@@ -666,12 +667,14 @@ export default function SchemaBuilder() {
     }
   };
 
-  // Step 2 — confirmed by user, generate full ZIP
+  // Step 2 — confirmed by user, generate full dataset in chosen format
   const handleConfirmDownloadZip = async () => {
-    setLoadingMsg(`Generating ${tables.length} tables and packaging as ZIP…`);
+    const fmtLabel = downloadFormat.toUpperCase();
+    setLoadingMsg(`Generating ${tables.length} tables as ${fmtLabel}…`);
     setPhase("generating");
     try {
       const payload = {
+        format: downloadFormat,
         tables: tables.map((t) => ({
           name: t.name,
           fields: t.fields.map((f) => ({
@@ -702,7 +705,11 @@ export default function SchemaBuilder() {
       const url  = URL.createObjectURL(blob);
       const a    = document.createElement("a");
       a.href = url;
-      a.download = "dataset_tables.zip";
+      a.download = downloadFormat === "xlsx"
+        ? "dataset_tables.xlsx"
+        : downloadFormat === "json"
+        ? "dataset_tables_json.zip"
+        : "dataset_tables.zip";
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
@@ -710,6 +717,33 @@ export default function SchemaBuilder() {
       setPhase("schema");
     } catch (e: any) {
       setErrorMsg(e.message ?? "Multi-table generation failed.");
+      setPhase("error");
+    }
+  };
+
+  // Download the 200-row template directly in the chosen format (no CTGAN)
+  const handleDownloadTemplate = async () => {
+    if (!templateDatasetId) return;
+    const fmtLabel = downloadFormat.toUpperCase();
+    setLoadingMsg(`Exporting template as ${fmtLabel}…`);
+    setPhase("generating");
+    try {
+      const res = await fetch(
+        `${PYTHON_API}/api/download-template/${templateDatasetId}?format=${downloadFormat}`
+      );
+      if (!res.ok) throw new Error(await res.text());
+      const blob = await res.blob();
+      const url  = URL.createObjectURL(blob);
+      const a    = document.createElement("a");
+      a.href = url;
+      a.download = `template_${getActiveTable()?.name ?? "data"}.${downloadFormat}`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      setPhase("template_preview");
+    } catch (e: any) {
+      setErrorMsg(e.message ?? "Export failed.");
       setPhase("error");
     }
   };
@@ -1957,10 +1991,34 @@ export default function SchemaBuilder() {
               </div>
             </div>
 
+            {/* Format selector */}
+            <div>
+              <p className="text-xs font-medium text-gray-600 mb-2">Download template directly as</p>
+              <div className="flex gap-2">
+                {(["csv", "json", "xlsx"] as const).map((fmt) => (
+                  <button
+                    key={fmt}
+                    onClick={() => setDownloadFormat(fmt)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors
+                      ${downloadFormat === fmt
+                        ? "bg-purple-600 text-white border-purple-600"
+                        : "bg-white text-gray-600 border-gray-200 hover:border-purple-300 hover:text-purple-600"}`}
+                  >
+                    {fmt.toUpperCase()}
+                  </button>
+                ))}
+              </div>
+            </div>
+
             <div className="flex gap-3 pt-1">
               <button onClick={() => setPhase("schema")}
                 className="px-4 py-2.5 border border-gray-200 rounded-lg text-sm text-gray-600 hover:bg-gray-50 transition-colors font-medium">
                 ← Back
+              </button>
+              <button onClick={handleDownloadTemplate}
+                className="flex items-center justify-center gap-2 px-4 py-2.5 border border-purple-200 text-purple-700 rounded-lg text-sm font-medium hover:bg-purple-50 transition-colors">
+                <Download className="w-4 h-4" />
+                Download as {downloadFormat.toUpperCase()}
               </button>
               <button onClick={handleExpand}
                 className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-purple-600 text-white rounded-lg text-sm font-semibold hover:bg-purple-700 transition-colors shadow-sm">
@@ -2054,11 +2112,31 @@ export default function SchemaBuilder() {
             <input type="range" min={100} max={100000} step={100}
               value={rowCount} onChange={(e) => setRowCount(Number(e.target.value))}
               className="w-full accent-purple-600" />
+
+            {/* Format selector */}
+            <div>
+              <p className="text-xs font-medium text-gray-600 mb-2">Download format</p>
+              <div className="flex gap-2">
+                {(["csv", "json", "xlsx"] as const).map((fmt) => (
+                  <button
+                    key={fmt}
+                    onClick={() => setDownloadFormat(fmt)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors
+                      ${downloadFormat === fmt
+                        ? "bg-purple-600 text-white border-purple-600"
+                        : "bg-white text-gray-600 border-gray-200 hover:border-purple-300 hover:text-purple-600"}`}
+                  >
+                    {fmt.toUpperCase()}
+                  </button>
+                ))}
+              </div>
+            </div>
+
             <button
               onClick={handleConfirmDownloadZip}
               className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-purple-600 text-white rounded-lg text-sm font-semibold hover:bg-purple-700 transition-colors shadow-sm">
               <Download className="w-4 h-4" />
-              Looks good — Download {tables.length} Tables as ZIP
+              Looks good — Download {tables.length} Tables as {downloadFormat === "xlsx" ? "Excel" : downloadFormat.toUpperCase()}
             </button>
           </div>
         </div>
