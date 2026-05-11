@@ -417,9 +417,10 @@ export default function SchemaBuilder() {
   const [loadingMsg, setLoadingMsg] = useState("");
   const [errorMsg, setErrorMsg]     = useState("");
 
-  const [dataSource, setDataSource]       = useState("kaggle");
-  const [searchQuery, setSearchQuery]     = useState("");
-  const [searchResults, setSearchResults] = useState<KaggleDataset[]>([]);
+  const [searchQuery, setSearchQuery]         = useState("");
+  const [searchResults, setSearchResults]     = useState<SmartResult[]>([]);
+  const [extSourceFilter, setExtSourceFilter] = useState<string>("all");
+  const [selectedDataSource, setSelectedDataSource] = useState("external");
 
   const [llmPrompt, setLlmPrompt]   = useState("");
   const [llmLoading, setLlmLoading] = useState(false);
@@ -1069,15 +1070,15 @@ export default function SchemaBuilder() {
     psa:         `${PYTHON_API}/api/psa/download`,
   };
 
-  const activeSource = DATA_SOURCES.find((s) => s.id === dataSource) ?? DATA_SOURCES[0];
-
   const handleSearch = async () => {
     if (!searchQuery.trim()) return;
-    setLoadingMsg(`Searching ${activeSource.label}…`); setPhase("loading");
+    setExtSourceFilter("all");
+    setLoadingMsg("Searching all dataset sources…");
+    setPhase("loading");
     try {
-      const res = await fetch(SEARCH_ENDPOINTS[dataSource], {
+      const res = await fetch(`${PYTHON_API}/api/smart-search`, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query: searchQuery }),
+        body: JSON.stringify({ prompt: searchQuery }),
       });
       if (!res.ok) throw new Error(await res.text());
       setSearchResults((await res.json()).datasets ?? []);
@@ -1088,11 +1089,15 @@ export default function SchemaBuilder() {
     }
   };
 
-  const handleSelectDataset = async (ds: KaggleDataset) => {
+  const handleSelectDataset = async (ds: SmartResult) => {
+    const sourceId = ds.source ?? "kaggle";
+    const sourceLabel = ds.sourceLabel ?? DATA_SOURCES.find((s) => s.id === sourceId)?.label ?? sourceId;
+    setSelectedDataSource(sourceLabel);
     setKaggleRef(ds.ref);
-    setLoadingMsg(`Downloading "${ds.title}" from ${activeSource.label}…`); setPhase("loading");
+    setLoadingMsg(`Downloading "${ds.title}" from ${sourceLabel}…`);
+    setPhase("loading");
     try {
-      const res = await fetch(DOWNLOAD_ENDPOINTS[dataSource], {
+      const res = await fetch(DOWNLOAD_ENDPOINTS[sourceId] ?? DOWNLOAD_ENDPOINTS["kaggle"], {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ dataset_ref: ds.ref }),
       });
@@ -1282,7 +1287,7 @@ export default function SchemaBuilder() {
       if (userId) {
         await fetch(`${NODE_API}/api/datasets`, {
           method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ user_id: userId, name: getActiveTable()?.name ?? "dataset", kaggle_ref: kaggleRef, python_dataset_id: datasetId, row_count: rowCount, source: dataSource }),
+          body: JSON.stringify({ user_id: userId, name: getActiveTable()?.name ?? "dataset", kaggle_ref: kaggleRef, python_dataset_id: datasetId, row_count: rowCount, source: selectedDataSource }),
         }).catch(() => {});
       }
       sessionStorage.setItem("preview_params", JSON.stringify({ id: datasetId, name: getActiveTable()?.name ?? "dataset", rows: rowCount, ref: kaggleRef }));
@@ -1744,33 +1749,17 @@ export default function SchemaBuilder() {
         </div>
       )}
 
-      {/* ── Dataset source selector + search ── */}
+      {/* ── Dataset source search ── */}
       {(phase === "idle" || phase === "results") && (
         <div className="bg-white border border-gray-100 rounded-xl p-5 shadow-sm space-y-4">
 
-          {/* Source tabs */}
-          <div className="flex flex-wrap gap-1.5">
-            {DATA_SOURCES.map((src) => {
-              const c = SOURCE_COLORS[src.id];
-              const active = dataSource === src.id;
-              return (
-                <button
-                  key={src.id}
-                  onClick={() => { setDataSource(src.id); setSearchResults([]); setPhase("idle"); }}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border transition-all
-                    ${active
-                      ? `${c.activeBg} ${c.activeText} border-transparent shadow-sm`
-                      : "border-gray-200 text-gray-600 hover:border-gray-300 hover:bg-gray-50"}`}
-                >
-                  <span className={`w-2 h-2 rounded-full flex-shrink-0 ${active ? "bg-white/70" : c.dot}`} />
-                  {src.label}
-                </button>
-              );
-            })}
+          {/* Header */}
+          <div>
+            <p className="text-sm font-semibold text-gray-800">Search Dataset Sources</p>
+            <p className="text-xs text-gray-500 mt-0.5">
+              Searches Kaggle, Hugging Face, UCI, OpenML, Data.gov.ph &amp; PSA simultaneously
+            </p>
           </div>
-
-          {/* Description */}
-          <p className="text-xs text-gray-500">{activeSource.desc} — search for a dataset to use as CTGAN training data</p>
 
           {/* Search bar */}
           <div className="flex gap-2">
@@ -1778,7 +1767,7 @@ export default function SchemaBuilder() {
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && handleSearch()}
-              placeholder={activeSource.placeholder}
+              placeholder="e.g. employee salary, student records, medical diagnosis…"
               className="flex-1 text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500"
             />
             <button
@@ -1788,6 +1777,48 @@ export default function SchemaBuilder() {
               <Search className="w-4 h-4" /> Search
             </button>
           </div>
+
+          {/* Source filter chips — appear after results load */}
+          {phase === "results" && searchResults.length > 0 && (() => {
+            const activeSources = Array.from(new Set(searchResults.map((r) => r.source).filter(Boolean)));
+            return (
+              <div>
+                <p className="text-[10px] font-medium text-gray-400 uppercase tracking-wide mb-2">Filter by source</p>
+                <div className="flex flex-wrap gap-1.5">
+                  <button
+                    onClick={() => setExtSourceFilter("all")}
+                    className={`px-3 py-1 rounded-full text-xs font-medium border transition-all
+                      ${extSourceFilter === "all"
+                        ? "bg-gray-800 text-white border-gray-800"
+                        : "border-gray-200 text-gray-600 hover:border-gray-300 hover:bg-gray-50"}`}
+                  >
+                    All
+                    <span className="ml-1.5 opacity-60">{searchResults.length}</span>
+                  </button>
+                  {activeSources.map((srcId) => {
+                    const c = SOURCE_COLORS[srcId] ?? SOURCE_COLORS["kaggle"];
+                    const src = DATA_SOURCES.find((s) => s.id === srcId);
+                    const count = searchResults.filter((r) => r.source === srcId).length;
+                    const active = extSourceFilter === srcId;
+                    return (
+                      <button
+                        key={srcId}
+                        onClick={() => setExtSourceFilter(srcId)}
+                        className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium border transition-all
+                          ${active
+                            ? `${c.activeBg} ${c.activeText} border-transparent shadow-sm`
+                            : "border-gray-200 text-gray-600 hover:border-gray-300 hover:bg-gray-50"}`}
+                      >
+                        <span className={`w-2 h-2 rounded-full flex-shrink-0 ${active ? "bg-white/70" : c.dot}`} />
+                        {src?.label ?? srcId}
+                        <span className="opacity-60">{count}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })()}
         </div>
       )}
 
@@ -1801,31 +1832,50 @@ export default function SchemaBuilder() {
       )}
 
       {/* ── Search results ── */}
-      {phase === "results" && (
-        <div className="bg-white border border-gray-100 rounded-xl overflow-hidden shadow-sm">
-          <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100 bg-gray-50">
-            <span className="text-sm font-medium text-gray-700">
-              {searchResults.length} dataset{searchResults.length !== 1 ? "s" : ""} found
-            </span>
-            <button onClick={() => setPhase("idle")} className="text-xs text-gray-400 hover:text-gray-600">← Back</button>
+      {phase === "results" && (() => {
+        const filtered = extSourceFilter === "all"
+          ? searchResults
+          : searchResults.filter((r) => r.source === extSourceFilter);
+        return (
+          <div className="bg-white border border-gray-100 rounded-xl overflow-hidden shadow-sm">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100 bg-gray-50">
+              <span className="text-sm font-medium text-gray-700">
+                {filtered.length} dataset{filtered.length !== 1 ? "s" : ""}
+                {extSourceFilter !== "all" && (
+                  <span className="text-gray-400 font-normal"> from {DATA_SOURCES.find((s) => s.id === extSourceFilter)?.label}</span>
+                )}
+              </span>
+              <button onClick={() => { setPhase("idle"); setSearchResults([]); setExtSourceFilter("all"); }}
+                className="text-xs text-gray-400 hover:text-gray-600">← New search</button>
+            </div>
+            {filtered.length === 0
+              ? <p className="p-6 text-sm text-gray-400 text-center">No datasets from this source.</p>
+              : <div className="divide-y divide-gray-50">
+                  {filtered.map((ds) => {
+                    const c = SOURCE_COLORS[ds.source] ?? SOURCE_COLORS["kaggle"];
+                    const srcLabel = ds.sourceLabel ?? DATA_SOURCES.find((s) => s.id === ds.source)?.label ?? ds.source;
+                    return (
+                      <button key={`${ds.source}:${ds.ref}`} onClick={() => handleSelectDataset(ds)}
+                        className="w-full text-left px-4 py-3 hover:bg-purple-50 transition-colors flex items-center gap-3">
+                        {/* Source dot */}
+                        <span className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${c.dot}`} />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium text-gray-800 truncate">{ds.title}</p>
+                          <p className="text-xs text-gray-400 mt-0.5">
+                            <span className={`font-medium ${c.text}`}>{srcLabel}</span>
+                            {ds.size ? ` · ${ds.size}` : ""}
+                            {ds.downloadCount ? ` · ${ds.downloadCount.toLocaleString()} downloads` : ""}
+                          </p>
+                        </div>
+                        <Download className="w-4 h-4 text-gray-300 flex-shrink-0" />
+                      </button>
+                    );
+                  })}
+                </div>
+            }
           </div>
-          {searchResults.length === 0
-            ? <p className="p-6 text-sm text-gray-400 text-center">No datasets found.</p>
-            : <div className="divide-y divide-gray-50">
-                {searchResults.map((ds) => (
-                  <button key={ds.ref} onClick={() => handleSelectDataset(ds)}
-                    className="w-full text-left px-4 py-3 hover:bg-purple-50 transition-colors flex items-center justify-between">
-                    <div>
-                      <p className="text-sm font-medium text-gray-800">{ds.title}</p>
-                      <p className="text-xs text-gray-400">{ds.ref} · {ds.size} · {ds.downloadCount.toLocaleString()} downloads</p>
-                    </div>
-                    <Download className="w-4 h-4 text-gray-300 flex-shrink-0" />
-                  </button>
-                ))}
-              </div>
-          }
-        </div>
-      )}
+        );
+      })()}
 
       {/* ── Error ── */}
       {phase === "error" && (
