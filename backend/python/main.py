@@ -1279,19 +1279,30 @@ def smart_search(req: SmartSearchRequest) -> dict[str, Any]:
             print(f"[smart_search] {source_id} error: {e}")
             return []
 
+    from concurrent.futures import TimeoutError as _FuturesTimeout
+
     with ThreadPoolExecutor(max_workers=6) as executor:
         futures = {
             executor.submit(_search, sid, lbl, ico, fn): sid
             for sid, (lbl, ico, fn) in sources.items()
         }
-        for future in as_completed(futures):
-            try:
-                results.extend(future.result())
-            except Exception:
-                pass
+        try:
+            for future in as_completed(futures, timeout=20):
+                try:
+                    results.extend(future.result())
+                except Exception:
+                    pass
+        except _FuturesTimeout:
+            # Collect whatever finished within the window
+            for future in futures:
+                if future.done():
+                    try:
+                        results.extend(future.result())
+                    except Exception:
+                        pass
 
     results.sort(key=lambda x: x.get("downloadCount", 0), reverse=True)
-    return {"datasets": results[:10]}
+    return {"datasets": results[:18]}
 
 
 # ── Hybrid generate (CTGAN real fields + schema-based LLM fields) ─────────────

@@ -1,39 +1,60 @@
 import os
+import requests
 import pandas as pd
 
 
 def search_datasets(query: str) -> list:
-    try:
-        import openml
-        # Try exact name match first, then substring
+    """
+    Search OpenML via its REST API directly (avoids the slow SDK list_datasets call).
+    Tries each significant word in the query so multi-word prompts get results.
+    """
+    seen_ids: set[str] = set()
+    results:  list[dict] = []
+
+    # Extract significant words (skip short/generic ones)
+    STOP = {"with", "from", "that", "this", "have", "data", "dataset",
+            "using", "based", "about", "into", "over", "some"}
+    words = [w for w in query.lower().split() if len(w) > 3 and w not in STOP]
+    if not words:
+        words = query.split()[:1]
+
+    for word in words[:3]:
         try:
-            datasets = openml.datasets.list_datasets(
-                output_format="dataframe", data_name=query
-            )
-        except Exception:
-            datasets = pd.DataFrame()
+            url = f"https://www.openml.org/api/v1/json/data/list/data_name/{word}/limit/10/status/active"
+            resp = requests.get(url, timeout=8)
+            if not resp.ok:
+                continue
+            data = resp.json()
+            datasets = data.get("data", {}).get("dataset", [])
+            if not isinstance(datasets, list):
+                continue
+            for ds in datasets:
+                did = str(ds.get("did", ""))
+                if not did or did in seen_ids:
+                    continue
+                seen_ids.add(did)
+                qual = {q["name"]: q.get("value", 0) for q in ds.get("quality", [])} if "quality" in ds else {}
+                n_inst = int(float(qual.get("NumberOfInstances", 0) or 0))
+                n_feat = int(float(qual.get("NumberOfFeatures",  0) or 0))
+                n_dl   = int(float(qual.get("NumberOfDownloads", 0) or 0))
+                results.append({
+                    "ref":           did,
+                    "title":         str(ds.get("name", "Unknown")),
+                    "size":          f"{n_inst:,} rows" if n_inst else "unknown",
+                    "lastUpdated":   "",
+                    "downloadCount": n_dl,
+                    "description":   f"{n_feat} features" if n_feat else "",
+                })
+                if len(results) >= 10:
+                    break
+        except Exception as e:
+            print(f"[openml_service] Search error for word '{word}': {e}")
+            continue
 
-        if datasets.empty:
-            all_ds = openml.datasets.list_datasets(output_format="dataframe")
-            datasets = all_ds[all_ds["name"].str.contains(query, case=False, na=False)]
+        if len(results) >= 5:
+            break
 
-        results = []
-        for _, row in datasets.head(10).iterrows():
-            n_inst  = int(row.get("NumberOfInstances", 0) or 0)
-            n_feat  = int(row.get("NumberOfFeatures",  0) or 0)
-            n_dl    = int(row.get("NumberOfDownloads", 0) or 0)
-            results.append({
-                "ref":           str(int(row.get("did", 0))),
-                "title":         str(row.get("name", "Unknown")),
-                "size":          f"{n_inst:,} rows",
-                "lastUpdated":   "",
-                "downloadCount": n_dl,
-                "description":   f"{n_feat} features",
-            })
-        return results
-    except Exception as e:
-        print(f"[openml_service] Search error: {e}")
-        return []
+    return results[:10]
 
 
 def download_dataset(dataset_id: str, dest: str) -> str | None:
