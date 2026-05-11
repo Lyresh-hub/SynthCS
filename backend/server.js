@@ -970,7 +970,7 @@ app.post("/api/llm/generate-schema", async (req, res) => {
 
 Return this exact shape:
 {
-  "table_name": "snake_case_name",
+  "table_name": "snake_case_main_table_name",
   "fields": [
     {
       "name": "field_name",
@@ -994,7 +994,8 @@ Return this exact shape:
 
 Rules:
 - Valid types: ${VALID_TYPES.join(", ")}
-- Include 5-12 realistic fields
+- MULTI-ENTITY RULE: If the description mentions multiple entities (e.g. users, orders, products, reviews, carts, transactions), include fields for EVERY entity using prefix naming: entity_id, entity_name, entity_field. Each entity needs at least entity_id + 2 more prefixed fields. Generate 6-30 fields total to cover all entities.
+- SINGLE-ENTITY: If only one entity, generate 5-10 realistic fields for it.
 - For each field include ONLY the constraints relevant to its type:
   - integer/float: min_val, max_val, distribution (uniform|normal|skewed)
   - string (categories): enum_values as a comma-separated string like "Low, Medium, High"
@@ -1002,14 +1003,12 @@ Rules:
   - boolean: true_ratio (0.0 to 1.0)
   - date: date_from and date_to in YYYY-MM-DD format
 - enum_values must always be a plain string, never an array
-- CRITICAL for descriptions: always include the domain/industry context, especially for name-type fields. Examples:
+- CRITICAL for descriptions: always include the domain/industry context for name-type fields:
   - Grocery store → "Name of the grocery product in store inventory"
-  - Clothing boutique → "Name of the clothing item sold in the boutique"
-  - Hospital → "Name of the medical supply or pharmaceutical product"
+  - Clothing boutique → "Name of the clothing item"
+  - Hospital → "Name of the pharmaceutical product"
   - Restaurant → "Name of the menu dish or beverage"
   - Bookstore → "Title of the book"
-  - Gaming store → "Title of the video game"
-  - For generic products: "Name of the product sold in this [domain] store"
   Never write just "Product name" — always say what KIND of product.
 
 Description: ${prompt.trim()}`;
@@ -1019,7 +1018,7 @@ Description: ${prompt.trim()}`;
     const client = new Anthropic({ apiKey });
     const message = await client.messages.create({
       model: "claude-haiku-4-5-20251001",
-      max_tokens: 2048,
+      max_tokens: 4096,
       messages: [{ role: "user", content: schemaPrompt }],
     });
     let raw = message.content[0].text.trim();
