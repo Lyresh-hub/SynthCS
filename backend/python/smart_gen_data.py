@@ -65,22 +65,306 @@ PH_MOBILE_PREFIXES = [
     "0965","0966","0975","0976","0977","0978","0995","0996","0997","0998","0999",
 ]
 
-PH_CITIES = [
-    "Manila","Quezon City","Caloocan","Las Piñas","Makati","Malabon","Mandaluyong",
-    "Marikina","Muntinlupa","Navotas","Parañaque","Pasay","Pasig","San Juan",
-    "Taguig","Valenzuela","Cebu City","Davao City","Zamboanga City","Iloilo City",
-    "Bacolod","Cagayan de Oro","General Santos","Antipolo","Bacoor","Imus",
-    "Dasmariñas","Calamba","Santa Rosa","San Pedro","Biñan","Malolos",
-    "San Jose del Monte","Meycauayan","San Pablo","Lucena","Lipa","Batangas City",
-    "Naga City","Legazpi City","Puerto Princesa","Cotabato City","Iligan City",
-]
+# ── Philippine geographic data: city → (province, [barangays]) ───────────────
+# Covers NCR and Region 3 (Central Luzon) in full; other regions have lighter coverage.
+_PH_GEO: dict[str, tuple[str, list[str]]] = {
+    # ── NCR ──────────────────────────────────────────────────────────────────
+    "Manila": ("Metro Manila", [
+        "Binondo","Ermita","Intramuros","Malate","Paco","Pandacan",
+        "Port Area","Quiapo","Sampaloc","San Andres","San Miguel",
+        "San Nicolas","Santa Ana","Santa Cruz","Santa Mesa","Tondo",
+    ]),
+    "Quezon City": ("Metro Manila", [
+        "Apolonio Samson","Bagbag","Bagong Pag-asa","Bagong Silangan",
+        "Bagumbayan","Batasan Hills","Betterliving","Caloocan","Commonwealth",
+        "Cubao","Diliman","Don Manuel","Escopa","Fairview","Holy Spirit",
+        "Kamuning","Krus na Ligas","Loyola Heights","Matandang Balara",
+        "New Era","Novaliches Proper","Payatas","Project 6","Project 7",
+        "San Bartolome","San Isidro Labrador","Sta. Lucia","Sta. Monica",
+        "Tandang Sora","UP Campus","Veterans Village","White Plains",
+    ]),
+    "Makati": ("Metro Manila", [
+        "Bel-Air","Cembo","Comembo","Dasmariñas Village","East Rembo",
+        "Forbes Park","Guadalupe Nuevo","Guadalupe Viejo","Kasilawan",
+        "La Paz","Legaspi Village","Magallanes","Olympia","Palanan",
+        "Pembo","Pinagkaisahan","Pio del Pilar","Poblacion","Post Proper Northside",
+        "Post Proper Southside","Rizal","Rockwell","Salcedo Village",
+        "San Antonio","San Isidro","San Lorenzo","Santa Cruz","South Cembo",
+        "Tejeros","Urdaneta","West Rembo",
+    ]),
+    "Taguig": ("Metro Manila", [
+        "Bagumbayan","Bambang","Calzada","Central Bicutan","Central Signal Village",
+        "Fort Bonifacio","Hagonoy","Ibayo-Tipas","Katuparan","Ligid-Tipas",
+        "Lower Bicutan","Maharlika Village","Napindan","New Lower Bicutan",
+        "North Daang Hari","North Signal Village","Palingon","Pinagsama",
+        "San Miguel","Scintilla","South Daang Hari","South Signal Village",
+        "Tanyag","Tuktukan","Upper Bicutan","Ususan","Wawa","Western Bicutan",
+    ]),
+    "Pasig": ("Metro Manila", [
+        "Bagong Ilog","Bagong Katipunan","Bambang","Buting","Caniogan",
+        "Capitol","Dela Paz","Kalawaan","Kapitolyo","Malinao","Manggahan",
+        "Maybunga","Oranbo","Palatiw","Pinagbuhatan","Pineda","Rosario",
+        "Sagad","San Antonio","San Joaquin","San Jose","San Miguel",
+        "Santa Cruz","Santa Lucia","Santa Rosa","Santo Tomas","Santolan",
+        "Sumilang","Ugong",
+    ]),
+    "Marikina": ("Metro Manila", [
+        "Barangka","Calumpang","Concepcion Dos","Concepcion Uno","Fortune",
+        "Industrial Valley","Jesus dela Peña","Malanday","Marikina Heights",
+        "Nangka","Parang","San Roque","Sta. Elena","Sto. Niño","Tañong","Tumana",
+    ]),
+    "Mandaluyong": ("Metro Manila", [
+        "Addition Hills","Bagong Silang","Barangka Drive","Barangka Ibaba",
+        "Barangka Ilaya","Buayang Bato","Burol","Daang Bakal","Hagdang Bato Itaas",
+        "Hagdang Bato Libis","Harapin ang Bukas","Highway Hills","Hulo",
+        "Mauway","Namayan","New Zañiga","Old Zañiga","Pag-asa",
+        "Plainview","Pleasant Hills","Poblacion","San Joaquin","Vergara","Wack-Wack",
+    ]),
+    "Parañaque": ("Metro Manila", [
+        "B.F. Homes","Baclaran","Don Bosco","Don Galo","La Huerta",
+        "Marcelo Green Village","Merville","Moonwalk","San Antonio",
+        "San Dionisio","San Isidro","San Martin de Porres","San Pedro",
+        "Santo Niño","Tambo","Vitalez",
+    ]),
+    "Las Piñas": ("Metro Manila", [
+        "Almanza Dos","Almanza Uno","B.F. International Village",
+        "Daniel Fajardo","Elias Aldana","Ilaya","Manuyo Dos","Manuyo Uno",
+        "Pamplona Dos","Pamplona Tres","Pamplona Uno","Pilar",
+        "Pulang Lupa Dos","Pulang Lupa Uno","Talon Dos","Talon Tres",
+        "Talon Uno","Talon Cuatro","Talon Cinco",
+    ]),
+    "Caloocan": ("Metro Manila", [
+        "Bagong Barrio","Bagong Silang","Baesa","Biglang Awa","Camarin",
+        "Dagat-dagatan","Deparo","Gracepark","Kaunlaran","La Mesa",
+        "Llano","Maypajo","MH del Pilar","Monumento","Noresie",
+        "North Caloocan","Novaliches","Pangarap","San Jose","Tipas",
+        "Tala","Barangay 1 thru 50 (South)",
+    ]),
+    "Muntinlupa": ("Metro Manila", [
+        "Alabang","Ayala Alabang Village","Bayanan","Buli","Cupang",
+        "New Alabang Village","Poblacion","Putatan","Sucat","Tunasan",
+    ]),
+    "Pasay": ("Metro Manila", [
+        "Aseana Business Park","Baclaran","Bagong Ilog","Bagong Pag-asa",
+        "Don Bosco","Malibay","Maricaban","MIA Area","Ninoy Aquino Airport Area",
+        "San Isidro","San Roque","Santa Clara","Victory Village",
+    ]),
+    "Valenzuela": ("Metro Manila", [
+        "Arkong Bato","Balangkas","Bignay","Bisig","Canumay East","Canumay West",
+        "Coloong","Dalandanan","Fortune","Gen. T. de Leon","Isla","Karuhatan",
+        "Lawang Bato","Lingunan","Mabolo","Malanday","Malinta","Mapulang Lupa",
+        "Marulas","Maysan","Parada","Paso de Blas","Pasolo","Polo","Punturin",
+        "Ugong","Viente Reales","Wawang Pulo",
+    ]),
+    "Malabon": ("Metro Manila", [
+        "Acacia","Baritan","Catmon","Concepcion","Dampalit","Flores",
+        "Hulong Duhat","Ibaba","Longos","Maysilo","Niugan","Panghulo",
+        "Potrero","San Agustin","Santolan","Tinajeros","Tonsuya","Tugatog",
+    ]),
+    "Navotas": ("Metro Manila", [
+        "Bangculasi","Daanghari","Navotas East","Navotas West",
+        "North Bay Blvd. North","North Bay Blvd. South",
+        "San Jose","San Roque","Sipac-Almacen","Tangos",
+    ]),
+    "San Juan": ("Metro Manila", [
+        "Addition Hills","Balong Bato","Batis","Corazon de Jesus",
+        "Ermitaño","Greenhills","Kabayanan","Little Baguio",
+        "Maytunas","Onse","Pasadena","Pedro Cruz","Salapan",
+        "St. Joseph","Tibagan","West Crame",
+    ]),
+    # ── Region 3 — Bulacan ───────────────────────────────────────────────────
+    "Malolos City": ("Bulacan", [
+        "Bulihan","Caingin","Calero","Canalate","Caniogan","Catmon",
+        "Cofradia","Dakila","Guinhawa","Ligas","Lugam","Mabolo","Mambog",
+        "Masile","Matimbo","Mojon","Namayan","Niugan","Pamarawan",
+        "Pinagbakahan","San Agustin","San Gabriel","San Juan","Santelmo",
+        "Santisima Trinidad","Santo Cristo","Santo Niño","Sumapang Bata",
+        "Sumapang Matanda","Tikay","Turo",
+    ]),
+    "Meycauayan City": ("Bulacan", [
+        "Bancal","Banga","Bayugo","Caingin","Calvario","Camalig","Catmon",
+        "Caypombo","Langka","Lawa","Libtong","Malhacan","Pag-asa",
+        "Pandayan","Pantoc","Perez","Poblacion","Saluysoy","Tagasan",
+        "Tugatog","Ubihan","Zamora",
+    ]),
+    "San Jose del Monte City": ("Bulacan", [
+        "Assumption","Bagong Buhay","Bagong Nayon 1","Bagong Nayon 2",
+        "Citrus","Dulong Bayan","Fatima 1","Fatima 2","Fatima 3","Fatima 4","Fatima 5",
+        "Gaya-gaya","Graceville","Kaybanban","Maharlika","Muzon",
+        "Paradise 1","Paradise 2","Paradise 3","Poblacion","Sapang Palay",
+        "St. Martin de Porres","Sto. Cristo",
+    ]),
+    "Sta. Maria": ("Bulacan", [
+        "Bagbaguin","Balasing","Buenavista","Camangyanan","Catmon",
+        "Guyong","Lalakhan","Mag-asawang Sapa","Malamig","Manggahan",
+        "Parada","Poblacion","Pulong Buhangin","San Gabriel",
+        "San Jose","Santo Cristo","Santo Niño","Silangan","Tumana",
+    ]),
+    "Marilao": ("Bulacan", [
+        "Abangan Norte","Abangan Sur","Ibayo","Lambakin","Lias",
+        "Loma de Gato","Nagbalon","Paldera","Patubig","Poblacion","Prenza 1",
+        "Prenza 2","Saog","Tabing Ilog",
+    ]),
+    "Bocaue": ("Bulacan", [
+        "Batia","Binagbag","Dulong Malabon","Igbita","Longos","Loriando",
+        "Malipampang","Nipa","Pantubig","Patigui","Quinabucan",
+        "Sta. Ana","Sta. Clara","Wakas",
+    ]),
+    "Balagtas": ("Bulacan", [
+        "Borol 1st","Borol 2nd","Dalig","Longos","Panginay","Poblacion",
+        "Sta. Barbara","Wawa",
+    ]),
+    "Guiguinto": ("Bulacan", [
+        "Burol 1","Burol 2","Burol 3","Ilang-ilang","Malis","Panginay",
+        "Sta. Cruz","Sta. Cruz na Burol","Sta. Rita","Tabang","Tabe",
+    ]),
+    "Plaridel": ("Bulacan", [
+        "Agnaya","Banga","Binuangan","Calizon","Consuelo","Culianin",
+        "Dampol 1","Dampol 2a","Dampol 2b","Dangging","Gandus","Liciada",
+        "Linawan","Malimba","Matatalaib","Maysantol","Naning","Parulan",
+        "Platero","Poblacion","Pungo","San Jose","Santa Ines","Tulisan",
+    ]),
+    # ── Region 3 — Pampanga ──────────────────────────────────────────────────
+    "Angeles City": ("Pampanga", [
+        "Agapito del Rosario","Amsic","Anunas","Balibago","Capaya",
+        "Claro M. Recto","Cuayan","Cutcut","Cutud","Lourdes Norte","Lourdes Sur",
+        "Malabañas","Margot","Marisol","Mining","Pampang","Pandan",
+        "Pulung Bulo","Pulung Cacutud","Pulung Maragul","Salapungan",
+        "San Jose","San Nicolas","Santa Teresita","Santa Trinidad",
+        "Santo Cristo","Santo Domingo","Santo Rosario","Sapalibutad",
+        "Sapangbato","Tabun","Virgen Delos Remedios",
+    ]),
+    "San Fernando City": ("Pampanga", [
+        "Alasas","Baliti","Bulaon","Calulut","Del Carmen","Del Pilar",
+        "Del Rosario","Dela Paz Norte","Dela Paz Sur","Dolores",
+        "Juliana","Lara","Magliman","Maimpis","Malino","Malpitic",
+        "Pandaras","Panipuan","Pulung Bulu","Quebiawan","Saguin",
+        "San Agustin","San Felipe","San Isidro","San Jose","San Juan",
+        "San Nicolas","San Pedro","Santa Lucia","Santa Teresita",
+        "Santo Niño","Santo Rosario","Sindalan","Telabastagan",
+    ]),
+    "Mabalacat City": ("Pampanga", [
+        "Atlu-Bola","Bical","Bundagul","Cacutud","Calumpang","Camachiles",
+        "Dapdap","Dau","Dolores","Duquit","Lakandula","Mawaque",
+        "Paralayunan","Poblacion","San Francisco","San Joaquin",
+        "Santa Ines","Santa Maria","Santo Rosario","Sapang Balen","Tabun",
+    ]),
+    "Mexico": ("Pampanga", [
+        "Anao","Balas","Buenavista","Camuning","Cawayan Bugtong",
+        "Concepcion","Culubasa","Divisoria","Dolores","Eden","Gandus",
+        "Lagundi","Laput","Laug","Lazatin","Masamat","Masangsang",
+        "Nueva Victoria","Parian","Poblacion","San Antonio","San Carlos",
+        "San Jose Malino","San Jose Matulid","San Juan","San Lorenzo",
+        "San Miguel","San Nicolas","San Pablo","San Patricio","San Rafael",
+        "San Roque","San Vicente","Santa Cruz","Santa Maria","Santo Tomas",
+        "Sapang Maisac","Suclaban","Tangle",
+    ]),
+    "Apalit": ("Pampanga", [
+        "Balucuc","Calantipe","Capalangan","Colgante","Paligui",
+        "Sampaloc","San Juan","San Vicente","Sucad","Sulipan","Tabuyuc",
+    ]),
+    "Guagua": ("Pampanga", [
+        "Ascomo","Bancal","Bancal Pugad","Bancal Sinubli","Buayas","Calabutbut",
+        "Magsaysay","Maquiapo","Natividad","Pulungmasle","Rizal","San Agustin",
+        "San Antonio","San Isidro","San Juan Banal","San Juan Bano","San Miguel",
+        "San Nicolas","San Pablo","San Pedro","Santa Filomena","Santo Niño",
+        "Santo Tomas","Uguis","Umingan",
+    ]),
+    # ── Region 3 — Zambales ──────────────────────────────────────────────────
+    "Olongapo City": ("Zambales", [
+        "Barangay 1","Barangay 2","Barangay 3","Barangay 4","Barangay 5",
+        "Barangay 6","Barangay 7","Barangay 8","Barangay 9","Barangay 10",
+        "Barangay 11","Barangay 12","Barangay 13","Barangay 14","Barangay 15",
+        "Barangay 16","Barangay 17","Barretto","East Bajac-Bajac",
+        "West Bajac-Bajac","East Tapinac","West Tapinac","Gordon Heights",
+        "Kalaklan","Mabayuan","New Cabalan","Old Cabalan","Pag-asa","Sta. Rita",
+    ]),
+    "Subic": ("Zambales", [
+        "Asinan","Calapacuan","Calapandayan","Cawag","Ilwas",
+        "Mangan-Vaca","Matain","Naugsol","Pamatawan","San Isidro",
+        "Santo Tomas","Subic Bay Freeport Zone","Wawandue",
+    ]),
+    "Iba": ("Zambales", [
+        "Bangantalinga","Dirita-Baloguen","Lipay-Dingin-Panibuatan",
+        "Palanginan","Poblacion","San Agustin","San Juan",
+        "Sta. Barbara","Sto. Rosario",
+    ]),
+    "Castillejos": ("Zambales", [
+        "Balaybay","Buenavista","Del Pilar","Looc","Magsaysay","Nagbayan",
+        "Nagbayani","Pal-ompon","Palanguian","Poblacion","San Alberto","San Jose",
+        "San Pablo","Sta. Maria","Sto. Niño",
+    ]),
+    "San Antonio": ("Zambales", [
+        "Burgos","East Poblacion","Pundaquit","San Isidro","San Jose",
+        "San Nicolas","Sta. Fe","Sto. Tomas","Tejero","West Poblacion",
+    ]),
+    # ── Region 3 — Bataan ────────────────────────────────────────────────────
+    "Balanga City": ("Bataan", [
+        "Bagong Silang","Cabog-cabog","Camacho","Cataning","Central",
+        "Cupang Norte","Cupang Proper","Cupang West","Dangcol","Ibayo",
+        "Lote","Malabia","Munting Batangas","Poblacion","Portero",
+        "Puerto Rivas","San Jose","Sibacan","Talisay","Tanato","Tenejero","Tortugas","Tuyo",
+    ]),
+    "Dinalupihan": ("Bataan", [
+        "Aquino","Bangal","Bayan-bayanan","Dampol","Gutad","Mabini",
+        "Macabacle","Maligaya","Mapaniqui","Pag-asa","Pagalanggang",
+        "Payangan","Pita","Poblacion","San Ramon","Sapang Balas","Torres",
+    ]),
+    "Hermosa": ("Bataan", [
+        "A. Rivera","Bacong","Balsic","Bamban","Burgos","Daungan",
+        "Mabiga","Mabuco","Maite","Mambog","Palihan","Pandatung",
+        "Pulo","Saba","San Pedro","Taugtog","Tipo",
+    ]),
+    "Mariveles": ("Bataan", [
+        "Alas-asin","Alion","Balon-Anito","Baseco","Batangas 2",
+        "Cabcaben","Camaya","Cayangnan","Lamao","Lucanin","Malaya",
+        "Maligaya","Poblacion","San Carlos","Sisiman","Townsite",
+    ]),
+    # ── Region 3 — Nueva Ecija ───────────────────────────────────────────────
+    "Cabanatuan City": ("Nueva Ecija", [
+        "Aduas Centro","Aduas Norte","Aduas Sur","Bagong Buhay","Bakero",
+        "Bangad","Bitas","Campo Tinio","Communal","Cruz Roja","Daang Sarile",
+        "Dicarma","Fatima","Kalikid Norte","Kalikid Sur","Kapitan Pepe",
+        "Lagare","Lourdes","Magsaysay Norte","Magsaysay Sur","Matadero",
+        "Pampuan","Poblacion","Rafael Rueda Sr.","Rizdelan","Sabit",
+        "Sangitan","Santa Arcadia","Santo Niño","Sumacab Este",
+        "Sumacab Norte","Valle Cruz","Villa Ofelia",
+    ]),
+    "Gapan City": ("Nueva Ecija", [
+        "Bayanihan","Bulak","Kapalangan","Lagare","Licab","Mahipon",
+        "Malimba","Maliwalo","Napnud","Pambuan","Pinagbayanan",
+        "Poblacion Norte","Poblacion Sur","San Lorenzo","San Vicente",
+        "Tagumpay","Tuburan",
+    ]),
+    # ── Region 3 — Tarlac ────────────────────────────────────────────────────
+    "Tarlac City": ("Tarlac", [
+        "Aguso","Amucao","Armenia","Asturias","Balete","Balibago Norte",
+        "Balibago Sur","Balingcanaway","Banaba","Binauganan","Bora",
+        "Buenavista","Capehan","Carangian","Central","Culipat",
+        "Cut-cut Primero","Cut-cut Segundo","Dalayap","Dela Paz","Dolores",
+        "Laoag","Ligtasan","Maliwalo","Mapalacsiao","Matatalaib",
+        "Paraiso","Poblacion","San Carlos","San Francisco","San Isidro",
+        "San Jose","San Miguel","Santa Cruz","Santa Lucia","Santa Maria",
+        "Santo Niño 1st","Santo Niño 2nd","Santo Rosario","Victoria",
+    ]),
+    "Capas": ("Tarlac", [
+        "Aranguren","Bueno","Florida","Kaito","Maruglu","O'Donnell",
+        "Poblacion","San Antonio","San Jose","Sta. Juliana","Sta. Lucia","Sto. Domingo",
+    ]),
+    # ── Other key cities (lighter coverage) ──────────────────────────────────
+    "Cebu City":     ("Cebu", ["Lahug","Mabolo","Banilad","Talamban","Pardo","Guadalupe","Basak San Nicolas","Talisay","Carbon","Colon"]),
+    "Davao City":    ("Davao del Sur", ["Agdao","Buhangin","Bunawan","Calinan","Marilog","Paquibato","Poblacion","Talomo","Toril","Tugbok"]),
+    "Iloilo City":   ("Iloilo", ["Jaro","La Paz","Mandurriao","Molo","Arevalo","City Proper","Lapuz","Oton"]),
+    "Bacolod":       ("Negros Occidental", ["Alijis","Bata","Bugo","Estefania","Handumanan","Mansilingan","Pahanocoy","Singcang-Airport","Taculing","Vista Alegre"]),
+    "Cagayan de Oro":("Misamis Oriental", ["Bulua","Canitoan","Carmen","Consolacion","Gusa","Iponan","Kauswagan","Macabalan","Nazareth","Puerto"]),
+    "Bacoor":        ("Cavite", ["Alima","Aniban 1","Aniban 2","Banalo","Bayanan","Campo Santo","Daang Bukid","Digman","Dulong Bayan","Habay","Kaingin","Ligas","Mambog","Molino 1","Molino 2","Niog","Panapaan","Queen's Row","Real de Bacoor","Salinas","San Nicolas","Sineguelasan","Talaba","Zapote"]),
+    "Dasmariñas":    ("Cavite", ["Burol 1","Burol 2","Burol 3","Datu Esmael","Emmanuel Bergado","Fatima 1","Fatima 3","Langkaan","Luzviminda","Paliparan","Sabang","Salawag","San Agustin","San Antonio","Sampaloc","Sanghaya","Victoria Reyes"]),
+}
 
-PH_PROVINCES = [
-    "Metro Manila","Cebu","Davao del Sur","Laguna","Batangas","Pampanga",
-    "Bulacan","Cavite","Rizal","Pangasinan","Zambales","Nueva Ecija",
-    "Iloilo","Negros Occidental","Leyte","Quezon Province","Camarines Sur",
-    "Albay","Isabela","Cagayan",
-]
+# Flat city list for backwards-compat pool references
+PH_CITIES = list(_PH_GEO.keys())
+
+PH_PROVINCES = sorted({v[0] for v in _PH_GEO.values()})
 
 # Keywords that indicate Philippine locale context
 _PH_KEYWORDS = (
@@ -88,12 +372,23 @@ _PH_KEYWORDS = (
     "metro manila","luzon","visayas","mindanao","batangas","laguna","pampanga",
     "bulacan","cavite","iloilo","bacolod","cagayan","negros","leyte","bicol",
     "zamboanga","cotabato","olongapo","subic","palawan","bohol","samar","marikina",
+    "tarlac","nueva ecija","bataan","zambales","central luzon","region 3","ncr",
 )
 
 
 def _is_ph_locale(field_name: str, description: str) -> bool:
     hint = (field_name + " " + description).lower()
     return any(k in hint for k in _PH_KEYWORDS)
+
+
+def _ph_address() -> str:
+    """Generate a realistic Philippine address with matching city-barangay-province."""
+    city = random.choice(PH_CITIES)
+    province, barangays = _PH_GEO[city]
+    brgy   = random.choice(barangays)
+    street = random.choice(PH_STREETS)
+    house  = random.randint(1, 999)
+    return f"{house} {street}, Brgy. {brgy}, {city}, {province}"
 
 
 DOMAINS = ["gmail.com","yahoo.com","hotmail.com","outlook.com","icloud.com","proton.me"]
@@ -564,7 +859,7 @@ def gen_col(ftype: str, n: int, c: Any, field_name: str = "", description: str =
                                        "residential_address", "billing_address", "shipping_address")):
             if _is_ph_locale(field_name, description):
                 data = np.array([
-                    f"{random.randint(1,999)} {random.choice(PH_STREETS)}, Brgy. {random.choice(_POOLS['barangay'])}, {random.choice(PH_CITIES)}"
+                    _ph_address()
                     for _ in range(n)
                 ], dtype=object)
             else:
@@ -671,7 +966,7 @@ def gen_col(ftype: str, n: int, c: Any, field_name: str = "", description: str =
     elif ftype == "address":
         if _is_ph_locale(field_name, description):
             data = np.array([
-                f"{random.randint(1,999)} {random.choice(PH_STREETS)}, Brgy. {random.choice(_POOLS['barangay'])}, {random.choice(PH_CITIES)}"
+                _ph_address()
                 for _ in range(n)
             ], dtype=object)
         else:
