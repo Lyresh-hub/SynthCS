@@ -1010,6 +1010,9 @@ Rules:
   - Restaurant → "Name of the menu dish or beverage"
   - Bookstore → "Title of the book"
   Never write just "Product name" — always say what KIND of product.
+- LOCALE RULE: If the description mentions a country or city, always include that location in the descriptions of phone, address, city, and contact fields so locale-aware generation can use the right format. Examples:
+  - "in the Philippines" → phone description: "Philippine mobile number in +63 format", address description: "Full Philippine address with barangay, city, and province"
+  - "in the US" → phone description: "US phone number", address description: "US street address"
 
 Description: ${prompt.trim()}`;
 

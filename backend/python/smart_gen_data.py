@@ -44,6 +44,58 @@ STREETS = [
     "River Rd","Park Blvd","Sunset Blvd","Lake Dr",
 ]
 
+PH_STREETS = [
+    "Rizal Avenue","Aguinaldo Highway","EDSA","Commonwealth Avenue","Aurora Boulevard",
+    "Katipunan Avenue","España Boulevard","Taft Avenue","Roxas Boulevard","Quezon Avenue",
+    "Marcos Highway","Ortigas Avenue","Shaw Boulevard","Timog Avenue","Ayala Avenue",
+    "Makati Avenue","Gil Puyat Avenue","P. Burgos Street","C.P. Garcia Avenue",
+    "White Plains Avenue","Boni Avenue","Scout Rallos Street","Quezon Boulevard",
+    "C5 Road","Mindanao Avenue","East-West Road","McArthur Highway","Magsaysay Avenue",
+    "Circumferential Road","Session Road","Osmeña Boulevard","Colon Street",
+    "Mango Avenue","General Maxilom Avenue","Imus Boulevard","Governor's Drive",
+    "Molino Boulevard","Zapote Road","Coastal Road","Laguna Boulevard",
+    "National Highway","Provincial Road","Barangay Road","Mayon Street",
+    "Sampaguita Street","Maharlika Highway","Bonifacio Street","Mabini Street",
+]
+
+PH_MOBILE_PREFIXES = [
+    "0905","0906","0915","0916","0917","0918","0919","0920","0921","0922",
+    "0923","0926","0927","0928","0929","0932","0933","0935","0936","0939",
+    "0942","0943","0945","0946","0948","0949","0951","0955","0956","0961",
+    "0965","0966","0975","0976","0977","0978","0995","0996","0997","0998","0999",
+]
+
+PH_CITIES = [
+    "Manila","Quezon City","Caloocan","Las Piñas","Makati","Malabon","Mandaluyong",
+    "Marikina","Muntinlupa","Navotas","Parañaque","Pasay","Pasig","San Juan",
+    "Taguig","Valenzuela","Cebu City","Davao City","Zamboanga City","Iloilo City",
+    "Bacolod","Cagayan de Oro","General Santos","Antipolo","Bacoor","Imus",
+    "Dasmariñas","Calamba","Santa Rosa","San Pedro","Biñan","Malolos",
+    "San Jose del Monte","Meycauayan","San Pablo","Lucena","Lipa","Batangas City",
+    "Naga City","Legazpi City","Puerto Princesa","Cotabato City","Iligan City",
+]
+
+PH_PROVINCES = [
+    "Metro Manila","Cebu","Davao del Sur","Laguna","Batangas","Pampanga",
+    "Bulacan","Cavite","Rizal","Pangasinan","Zambales","Nueva Ecija",
+    "Iloilo","Negros Occidental","Leyte","Quezon Province","Camarines Sur",
+    "Albay","Isabela","Cagayan",
+]
+
+# Keywords that indicate Philippine locale context
+_PH_KEYWORDS = (
+    "philippine","philippines","phil","manila","cebu","davao","quezon city","makati",
+    "metro manila","luzon","visayas","mindanao","batangas","laguna","pampanga",
+    "bulacan","cavite","iloilo","bacolod","cagayan","negros","leyte","bicol",
+    "zamboanga","cotabato","olongapo","subic","palawan","bohol","samar","marikina",
+)
+
+
+def _is_ph_locale(field_name: str, description: str) -> bool:
+    hint = (field_name + " " + description).lower()
+    return any(k in hint for k in _PH_KEYWORDS)
+
+
 DOMAINS = ["gmail.com","yahoo.com","hotmail.com","outlook.com","icloud.com","proton.me"]
 
 _POOLS: dict[str, list[str]] = {
@@ -495,6 +547,29 @@ def gen_col(ftype: str, n: int, c: Any, field_name: str = "", description: str =
         elif any(p in fname for p in ("zip_code", "zipcode", "zip", "postal_code", "postcode", "postal")):
             data = np.array([f"{random.randint(1000, 9999)}" for _ in range(n)], dtype=object)
 
+        elif any(p in fname for p in ("phone", "mobile", "contact_number", "contact_no",
+                                       "cell", "cellphone", "telephone", "landline", "tel")):
+            if _is_ph_locale(field_name, description):
+                data = np.array([
+                    f"{random.choice(PH_MOBILE_PREFIXES)}-{random.randint(100,999)}-{random.randint(1000,9999)}"
+                    for _ in range(n)
+                ], dtype=object)
+            else:
+                data = np.array([
+                    f"+1-{random.randint(200,999)}-{random.randint(100,999)}-{random.randint(1000,9999)}"
+                    for _ in range(n)
+                ], dtype=object)
+
+        elif any(p in fname for p in ("address", "street", "home_address", "mailing_address",
+                                       "residential_address", "billing_address", "shipping_address")):
+            if _is_ph_locale(field_name, description):
+                data = np.array([
+                    f"{random.randint(1,999)} {random.choice(PH_STREETS)}, Brgy. {random.choice(_POOLS['barangay'])}, {random.choice(PH_CITIES)}"
+                    for _ in range(n)
+                ], dtype=object)
+            else:
+                data = np.array([f"{random.randint(1,999)} {random.choice(STREETS)}" for _ in range(n)], dtype=object)
+
         elif fname == "name" or "_name" in fname:
             # Always check the pool first — person names are a last resort only for
             # fields that explicitly reference a person (customer, user, patient, etc.)
@@ -582,13 +657,25 @@ def gen_col(ftype: str, n: int, c: Any, field_name: str = "", description: str =
         data = np.array([str(uuid_module.uuid4()) for _ in range(n)], dtype=object)
 
     elif ftype == "phone":
-        data = np.array([
-            f"+1-{random.randint(200,999)}-{random.randint(100,999)}-{random.randint(1000,9999)}"
-            for _ in range(n)
-        ], dtype=object)
+        if _is_ph_locale(field_name, description):
+            data = np.array([
+                f"{random.choice(PH_MOBILE_PREFIXES)}-{random.randint(100,999)}-{random.randint(1000,9999)}"
+                for _ in range(n)
+            ], dtype=object)
+        else:
+            data = np.array([
+                f"+1-{random.randint(200,999)}-{random.randint(100,999)}-{random.randint(1000,9999)}"
+                for _ in range(n)
+            ], dtype=object)
 
     elif ftype == "address":
-        data = np.array([f"{random.randint(1,999)} {random.choice(STREETS)}" for _ in range(n)], dtype=object)
+        if _is_ph_locale(field_name, description):
+            data = np.array([
+                f"{random.randint(1,999)} {random.choice(PH_STREETS)}, Brgy. {random.choice(_POOLS['barangay'])}, {random.choice(PH_CITIES)}"
+                for _ in range(n)
+            ], dtype=object)
+        else:
+            data = np.array([f"{random.randint(1,999)} {random.choice(STREETS)}" for _ in range(n)], dtype=object)
 
     elif ftype == "name":
         # Check pool first — product_name, brand_name, etc. should not become person names
