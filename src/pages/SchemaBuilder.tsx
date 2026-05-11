@@ -1766,49 +1766,137 @@ export default function SchemaBuilder() {
           {/* Result rows */}
           <div className="divide-y divide-gray-50">
             {smartResults.map((ds) => {
-              const key = `${ds.source}:${ds.ref}`;
-              const selected = selectedSmartIds.has(key);
-              const c = SOURCE_COLORS[ds.source] ?? SOURCE_COLORS["kaggle"];
+              const key        = `${ds.source}:${ds.ref}`;
+              const selected   = selectedSmartIds.has(key);
+              const isExpanded = expandedExtIds.has(key);
+              const colState   = extColCache[key];
+              const c          = SOURCE_COLORS[ds.source] ?? SOURCE_COLORS["kaggle"];
               return (
-                <div
-                  key={key}
-                  className={`flex items-center gap-3 px-4 py-3 transition-colors cursor-pointer
-                    ${selected ? "bg-gray-50" : "hover:bg-gray-50/60"}`}
-                  onClick={() => {
-                    setSelectedSmartIds((prev) => {
-                      const next = new Set(prev);
-                      if (next.has(key)) next.delete(key);
-                      else next.add(key);
-                      return next;
-                    });
-                  }}
-                >
-                  {/* Checkbox */}
-                  <div className={`w-4 h-4 rounded border-2 flex-shrink-0 flex items-center justify-center transition-colors
-                    ${selected ? "bg-gray-800 border-gray-800" : "border-gray-300"}`}>
-                    {selected && (
-                      <svg viewBox="0 0 10 8" className="w-2.5 h-2.5 fill-white">
-                        <path d="M1 4l2.5 2.5L9 1" stroke="white" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round" />
-                      </svg>
-                    )}
-                  </div>
-
-                  {/* Source dot */}
-                  <span className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${c.dot}`} />
-
-                  {/* Info */}
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <p className="text-sm font-medium text-gray-800 truncate">{ds.title}</p>
-                      <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded border ${c.badge} ${c.text} flex-shrink-0`}>
-                        {ds.sourceLabel}
-                      </span>
+                <div key={key} className={`transition-colors ${selected ? "bg-gray-50" : ""}`}>
+                  {/* Main row */}
+                  <div className="flex items-center gap-3 px-4 py-3">
+                    {/* Checkbox */}
+                    <div
+                      onClick={() => setSelectedSmartIds((prev) => {
+                        const next = new Set(prev);
+                        if (next.has(key)) next.delete(key); else next.add(key);
+                        return next;
+                      })}
+                      className={`w-4 h-4 rounded border-2 flex-shrink-0 flex items-center justify-center cursor-pointer transition-colors
+                        ${selected ? "bg-gray-800 border-gray-800" : "border-gray-300 hover:border-gray-400"}`}
+                    >
+                      {selected && (
+                        <svg viewBox="0 0 10 8" className="w-2.5 h-2.5 fill-white">
+                          <path d="M1 4l2.5 2.5L9 1" stroke="white" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round" />
+                        </svg>
+                      )}
                     </div>
-                    <p className="text-xs text-gray-400 mt-0.5 truncate">
-                      {ds.size}{ds.downloadCount > 0 ? ` · ${ds.downloadCount.toLocaleString()} downloads` : ""}
-                      {ds.lastUpdated ? ` · Updated ${ds.lastUpdated}` : ""}
-                    </p>
+
+                    {/* Source dot */}
+                    <span className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${c.dot}`} />
+
+                    {/* Info */}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <p className="text-sm font-medium text-gray-800 truncate">{ds.title}</p>
+                        <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded border ${c.badge} ${c.text} flex-shrink-0`}>
+                          {ds.sourceLabel}
+                        </span>
+                      </div>
+                      <p className="text-xs text-gray-400 mt-0.5 truncate">
+                        {ds.size}{ds.downloadCount > 0 ? ` · ${ds.downloadCount.toLocaleString()} downloads` : ""}
+                        {ds.lastUpdated ? ` · Updated ${ds.lastUpdated}` : ""}
+                      </p>
+                    </div>
+
+                    {/* Expand toggle */}
+                    <button
+                      onClick={() => toggleExpandExt(key)}
+                      className="p-1 text-gray-400 hover:text-gray-600 transition-colors flex-shrink-0"
+                      title={isExpanded ? "Collapse" : "Preview real data"}
+                    >
+                      <ChevronDown className={`w-4 h-4 transition-transform duration-200 ${isExpanded ? "rotate-180" : ""}`} />
+                    </button>
                   </div>
+
+                  {/* Expanded preview panel */}
+                  {isExpanded && (
+                    <div className="px-4 pb-4 pt-1 border-t border-gray-100 bg-gray-50/60 space-y-3">
+                      {/* Description */}
+                      {(ds as any).description
+                        ? <p className="text-xs text-gray-600 leading-relaxed">{(ds as any).description}</p>
+                        : <p className="text-xs text-gray-400 italic">No description available.</p>
+                      }
+
+                      {/* Column preview */}
+                      {!colState && (
+                        <button
+                          onClick={() => loadExtColumns(ds, key)}
+                          className="text-xs font-medium text-purple-600 hover:text-purple-700 flex items-center gap-1"
+                        >
+                          <ChevronRight className="w-3 h-3" /> Preview real data columns
+                        </button>
+                      )}
+                      {colState === "loading" && (
+                        <div className="flex items-center gap-1.5 text-xs text-gray-400">
+                          <RefreshCw className="w-3 h-3 animate-spin" /> Loading columns…
+                        </div>
+                      )}
+                      {colState === "error" && (
+                        <p className="text-xs text-red-400">Could not load preview.</p>
+                      )}
+                      {colState && colState !== "loading" && colState !== "error" && (
+                        <div className="space-y-2">
+                          <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide">
+                            Real columns — AI will build on these
+                          </p>
+                          <div className="flex flex-wrap gap-1">
+                            {colState.cols.map((col) => (
+                              <span key={col.name} className="flex items-center gap-1 text-[10px] px-2 py-0.5 bg-white border border-gray-200 rounded-full text-gray-700">
+                                <span className="font-medium">{col.name}</span>
+                                <span className="text-gray-400">{col.type}</span>
+                              </span>
+                            ))}
+                          </div>
+                          {colState.sample.length > 0 && (
+                            <div className="overflow-x-auto rounded border border-gray-200">
+                              <table className="w-full text-[10px]">
+                                <thead>
+                                  <tr className="bg-gray-100 border-b border-gray-200">
+                                    {colState.cols.map((c) => (
+                                      <th key={c.name} className="px-2 py-1 text-left font-semibold text-gray-500 whitespace-nowrap">{c.name}</th>
+                                    ))}
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {colState.sample.slice(0, 3).map((row, i) => (
+                                    <tr key={i} className="border-b border-gray-100 last:border-0">
+                                      {colState.cols.map((c) => (
+                                        <td key={c.name} className="px-2 py-1 text-gray-600 whitespace-nowrap max-w-[120px] truncate">
+                                          {row[c.name] == null ? <span className="text-gray-300 italic">null</span> : String(row[c.name])}
+                                        </td>
+                                      ))}
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Use this as base button */}
+                      <button
+                        onClick={() => {
+                          setSelectedSmartIds(new Set([key]));
+                          handleSmartSelect(ds);
+                        }}
+                        className="flex items-center gap-1.5 text-xs font-semibold text-purple-700 hover:text-purple-800 transition-colors"
+                      >
+                        <Sparkles className="w-3.5 h-3.5" /> Use as AI base — generate schema from this
+                      </button>
+                    </div>
+                  )}
                 </div>
               );
             })}
