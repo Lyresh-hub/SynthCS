@@ -358,6 +358,227 @@ def _apply_schedule_consistency(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+# ── HR / Payroll behavioral consistency ──────────────────────────────────────
+# Salary, bonus, experience, and benefits are derived from role+hire_date,
+# not generated independently.
+
+_ROLE_SALARY: list[tuple[str, tuple[int, int]]] = [
+    ("ceo",            (300_000, 600_000)),
+    ("chief",          (260_000, 500_000)),
+    ("coo",            (260_000, 460_000)),
+    ("cto",            (260_000, 460_000)),
+    ("cfo",            (260_000, 460_000)),
+    ("president",      (200_000, 420_000)),
+    ("vice president", (190_000, 380_000)),
+    ("vp",             (190_000, 380_000)),
+    ("executive",      (180_000, 380_000)),
+    ("director",       (150_000, 280_000)),
+    ("head",           (120_000, 220_000)),
+    ("principal",      (100_000, 180_000)),
+    ("architect",      (100_000, 180_000)),
+    ("manager",        (85_000,  175_000)),
+    ("supervisor",     (65_000,  120_000)),
+    ("lead",           (75_000,  140_000)),
+    ("senior",         (60_000,  115_000)),
+    ("specialist",     (42_000,   88_000)),
+    ("analyst",        (35_000,   72_000)),
+    ("engineer",       (38_000,   80_000)),
+    ("developer",      (38_000,   80_000)),
+    ("associate",      (28_000,   55_000)),
+    ("junior",         (20_000,   40_000)),
+    ("entry",          (16_000,   32_000)),
+    ("staff",          (26_000,   52_000)),
+    ("officer",        (30_000,   65_000)),
+    ("coordinator",    (25_000,   50_000)),
+    ("assistant",      (18_000,   38_000)),
+    ("trainee",        (14_000,   22_000)),
+    ("intern",         (10_000,   18_000)),
+]
+
+_ROLE_BONUS: list[tuple[str, tuple[float, float]]] = [
+    ("ceo",       (25.0, 55.0)),
+    ("chief",     (22.0, 50.0)),
+    ("executive", (20.0, 48.0)),
+    ("president", (20.0, 45.0)),
+    ("vp",        (18.0, 40.0)),
+    ("director",  (15.0, 35.0)),
+    ("manager",   (12.0, 25.0)),
+    ("lead",      (10.0, 20.0)),
+    ("supervisor",(8.0,  18.0)),
+    ("senior",    (8.0,  18.0)),
+    ("specialist",(6.0,  14.0)),
+    ("analyst",   (5.0,  12.0)),
+    ("engineer",  (5.0,  12.0)),
+    ("associate", (4.0,  10.0)),
+    ("staff",     (3.0,  10.0)),
+    ("junior",    (2.0,   8.0)),
+    ("officer",   (4.0,  12.0)),
+    ("coordinator",(2.0,  8.0)),
+    ("assistant", (1.0,   6.0)),
+    ("trainee",   (0.5,   4.0)),
+    ("intern",    (0.0,   3.0)),
+]
+
+_DEPT_MULT: list[tuple[str, float]] = [
+    ("engineering", 1.15), ("software",   1.15),
+    ("technology",  1.13), ("data",       1.13),
+    ("research",    1.10), ("finance",    1.08),
+    ("legal",       1.08), ("sales",      1.05),
+    ("marketing",   1.03), ("operations", 1.00),
+    ("hr",          0.95), ("human resource", 0.95),
+    ("admin",       0.93), ("administration", 0.93),
+    ("support",     0.90), ("logistics",  0.92),
+    ("security",    0.95), ("procurement",1.00),
+]
+
+
+def _hr_salary(role: str, experience: int, dept: str) -> int:
+    r = str(role).lower()
+    for kw, (lo, hi) in _ROLE_SALARY:
+        if kw in r:
+            break
+    else:
+        lo, hi = 26_000, 62_000
+
+    d = str(dept).lower()
+    mult = 1.0
+    for kw, m in _DEPT_MULT:
+        if kw in d:
+            mult = m
+            break
+
+    exp_mult = 1.0 + min(max(experience, 0), 25) * 0.018
+    return round(random.uniform(lo, hi) * exp_mult * mult)
+
+
+def _hr_bonus(role: str) -> float:
+    r = str(role).lower()
+    for kw, (lo, hi) in _ROLE_BONUS:
+        if kw in r:
+            return round(random.uniform(lo, hi), 1)
+    return round(random.uniform(3.0, 10.0), 1)
+
+
+def _hr_benefits(role: str, emp_type: str) -> bool:
+    r, e = str(role).lower(), str(emp_type).lower()
+    excluded = any(k in r for k in ("intern", "trainee")) or \
+               any(k in e for k in ("part", "contract", "temporary", "casual", "project"))
+    return random.choices([True, False], weights=[15, 85] if excluded else [92, 8])[0]
+
+
+def _apply_hr_payroll_consistency(
+    df: pd.DataFrame,
+    role_lookup: dict | None = None,
+    dept_lookup: dict | None = None,
+    hire_lookup: dict | None = None,
+    id_col: str | None = None,
+) -> pd.DataFrame:
+    """
+    Fix salary / bonus / experience / benefits to be causally consistent.
+
+    Works in two modes:
+      - Single-table (role_lookup=None): role + salary are in the same DataFrame.
+      - Cross-table  (role_lookup given): role comes from a parent table, looked
+        up via id_col (the FK column in this DataFrame).
+    """
+    from datetime import datetime as _dt
+
+    role_col     = _find_col(df, ("job_role", "role", "position", "job_title",
+                                   "title", "designation", "rank"))
+    salary_col   = _find_col(df, ("base_salary", "annual_salary", "monthly_salary",
+                                   "salary", "gross_salary", "net_salary",
+                                   "total_compensation", "compensation"))
+    exp_col      = _find_col(df, ("years_of_experience", "years_experience",
+                                   "experience_years", "experience", "tenure_years", "tenure"))
+    hire_col     = _find_col(df, ("hire_date", "start_date", "employment_date",
+                                   "date_hired", "joined_date", "joining_date"))
+    bonus_col    = _find_col(df, ("bonus_percentage", "bonus_pct", "bonus_rate", "bonus"))
+    benefits_col = _find_col(df, ("benefits_eligible", "health_insurance",
+                                   "insurance_eligible", "benefits"))
+    dept_col     = _find_col(df, ("department", "dept", "division", "business_unit"))
+    emp_type_col = _find_col(df, ("employment_type", "contract_type",
+                                   "employment_status", "worker_type"))
+
+    has_own_role   = role_col is not None
+    has_cross_role = role_lookup is not None and id_col is not None and id_col in df.columns
+
+    if not has_own_role and not has_cross_role:
+        return df  # nothing HR-related here
+    if not (salary_col or bonus_col or exp_col or benefits_col or hire_col):
+        return df  # no payroll fields to fix
+
+    df = df.copy()
+    n  = len(df)
+    current_year = _dt.now().year
+
+    def _get_role(i: int) -> str:
+        if has_own_role:
+            return str(df[role_col].iloc[i])
+        emp_id = df[id_col].iloc[i]
+        return str((role_lookup or {}).get(emp_id, ""))
+
+    def _get_dept(i: int) -> str:
+        if dept_col:
+            return str(df[dept_col].iloc[i])
+        if dept_lookup and id_col and id_col in df.columns:
+            return str((dept_lookup or {}).get(df[id_col].iloc[i], ""))
+        return ""
+
+    def _get_emp_type(i: int) -> str:
+        return str(df[emp_type_col].iloc[i]) if emp_type_col else ""
+
+    # 1. Derive experience from hire_date (takes priority over random)
+    if hire_col and exp_col:
+        new_exp = []
+        for val in df[hire_col]:
+            try:
+                hy = pd.to_datetime(str(val), errors="coerce")
+                yrs = max(0, current_year - hy.year) if not pd.isnull(hy) else random.randint(1, 8)
+            except Exception:
+                yrs = random.randint(1, 8)
+            new_exp.append(yrs)
+        df[exp_col] = new_exp
+
+    # Also fix cross-table hire_date → experience
+    if hire_lookup and id_col and id_col in df.columns and exp_col:
+        new_exp = []
+        for emp_id in df[id_col]:
+            hire_val = hire_lookup.get(emp_id)
+            if hire_val:
+                try:
+                    hy = pd.to_datetime(str(hire_val), errors="coerce")
+                    yrs = max(0, current_year - hy.year) if not pd.isnull(hy) else random.randint(1, 8)
+                except Exception:
+                    yrs = random.randint(1, 8)
+            else:
+                yrs = random.randint(1, 8)
+            new_exp.append(yrs)
+        df[exp_col] = new_exp
+
+    # 2. Salary = f(role, experience, department)
+    if salary_col:
+        new_sal = []
+        for i in range(n):
+            role = _get_role(i)
+            dept = _get_dept(i)
+            exp  = 0
+            if exp_col:
+                try: exp = int(df[exp_col].iloc[i])
+                except: pass
+            new_sal.append(_hr_salary(role, exp, dept))
+        df[salary_col] = new_sal
+
+    # 3. Bonus = f(role)
+    if bonus_col:
+        df[bonus_col] = [_hr_bonus(_get_role(i)) for i in range(n)]
+
+    # 4. Benefits = f(role, employment_type)
+    if benefits_col:
+        df[benefits_col] = [_hr_benefits(_get_role(i), _get_emp_type(i)) for i in range(n)]
+
+    return df
+
+
 # ── Main entry point ──────────────────────────────────────────────────────────
 
 ENTITY_COUNTS = {
@@ -443,5 +664,6 @@ def generate_relational_dataset(
     main_df = _apply_professor_subject_consistency(main_df)
     main_df = _apply_schedule_consistency(main_df)
     main_df = _apply_grade_attendance_correlation(main_df)
+    main_df = _apply_hr_payroll_consistency(main_df)
 
     return main_df, entity_tables

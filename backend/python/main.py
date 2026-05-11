@@ -1093,6 +1093,40 @@ def generate_multi_table(req: MultiTableRequest):
         df = df[col_order + extra]
         generated[tname] = df
 
+    # ── Cross-table HR payroll consistency ────────────────────────────────
+    # If a parent table has role/dept/hire_date and a child references it via FK,
+    # correct salary/bonus/experience in the child using the parent's role data.
+    from relational_gen import _find_col, _apply_hr_payroll_consistency
+    for child_tbl in req.tables:
+        child_df = generated.get(child_tbl.name)
+        if child_df is None:
+            continue
+        # Find FK fields whose parent table has role information
+        for fld in child_tbl.fields:
+            if not fld.fk_table or fld.fk_table not in generated:
+                continue
+            parent_df = generated[fld.fk_table]
+            role_col  = _find_col(parent_df, ("job_role", "role", "position",
+                                               "job_title", "title", "designation"))
+            if not role_col:
+                continue
+            dept_col = _find_col(parent_df, ("department", "dept", "division"))
+            hire_col = _find_col(parent_df, ("hire_date", "start_date",
+                                              "date_hired", "joining_date"))
+            fk_field = fld.fk_field
+            if not fk_field or fk_field not in parent_df.columns:
+                continue
+            role_lookup = dict(zip(parent_df[fk_field], parent_df[role_col]))
+            dept_lookup = dict(zip(parent_df[fk_field], parent_df[dept_col])) if dept_col else None
+            hire_lookup = dict(zip(parent_df[fk_field], parent_df[hire_col])) if hire_col else None
+            generated[child_tbl.name] = _apply_hr_payroll_consistency(
+                child_df,
+                role_lookup=role_lookup,
+                dept_lookup=dept_lookup,
+                hire_lookup=hire_lookup,
+                id_col=fld.name,
+            )
+
     fmt = (req.format or "csv").lower().strip()
 
     if fmt == "xlsx":
