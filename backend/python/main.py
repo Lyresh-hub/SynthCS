@@ -1248,13 +1248,129 @@ def dataset_peek(req: PeekRequest):
         shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
+_STOP_WORDS = {
+    "a","an","the","and","or","but","in","on","at","to","for","of","with",
+    "by","from","as","is","are","was","were","be","been","have","has","had",
+    "do","does","did","will","would","could","should","may","might","that",
+    "this","these","those","which","who","what","when","where","how","all",
+    "both","some","such","very","just","data","dataset","using","based",
+    "about","into","over","where","their","there","than","then","only","also",
+    "make","need","want","generate","create","show","find","get","use",
+}
+
+# Domain-aware synonym expansion — maps a detected keyword to related search terms
+_DOMAIN_SYNONYMS: dict[str, list[str]] = {
+    # Education
+    "student":      ["student", "academic", "education", "school"],
+    "academic":     ["academic", "student", "education", "grades"],
+    "education":    ["education", "student", "school", "learning"],
+    "school":       ["school", "student", "education", "grades"],
+    "performance":  ["performance", "grades", "achievement", "results"],
+    "grades":       ["grades", "student", "academic", "gpa"],
+    "learning":     ["learning", "education", "student", "training"],
+    "university":   ["university", "student", "academic", "college"],
+    "college":      ["college", "student", "university", "academic"],
+    # Medical / Health
+    "medical":      ["medical", "health", "clinical", "patient"],
+    "health":       ["health", "medical", "clinical", "patient"],
+    "clinical":     ["clinical", "medical", "patient", "health"],
+    "patient":      ["patient", "medical", "clinical", "health"],
+    "disease":      ["disease", "medical", "diagnosis", "health"],
+    "diagnosis":    ["diagnosis", "disease", "medical", "clinical"],
+    "hospital":     ["hospital", "medical", "patient", "clinical"],
+    "diabetes":     ["diabetes", "glucose", "medical", "health"],
+    "cancer":       ["cancer", "tumor", "medical", "clinical"],
+    "heart":        ["heart", "cardiac", "medical", "health"],
+    # Finance / Banking
+    "fraud":        ["fraud", "transaction", "financial", "anomaly"],
+    "financial":    ["financial", "finance", "banking", "transaction"],
+    "banking":      ["banking", "financial", "credit", "transaction"],
+    "credit":       ["credit", "financial", "loan", "banking"],
+    "transaction":  ["transaction", "financial", "payment", "fraud"],
+    "loan":         ["loan", "credit", "financial", "banking"],
+    # HR / Payroll
+    "employee":     ["employee", "hr", "payroll", "salary", "workforce"],
+    "payroll":      ["payroll", "salary", "employee", "compensation"],
+    "salary":       ["salary", "payroll", "employee", "compensation"],
+    "workforce":    ["workforce", "employee", "hr", "labor"],
+    "recruitment":  ["recruitment", "employee", "hr", "hiring"],
+    # E-commerce / Retail
+    "ecommerce":    ["ecommerce", "retail", "sales", "product"],
+    "retail":       ["retail", "sales", "ecommerce", "product"],
+    "sales":        ["sales", "retail", "revenue", "ecommerce"],
+    "product":      ["product", "sales", "retail", "inventory"],
+    "inventory":    ["inventory", "product", "stock", "retail"],
+    "customer":     ["customer", "retail", "sales", "crm"],
+    # Social / Demographics
+    "census":       ["census", "population", "demographic", "survey"],
+    "population":   ["population", "census", "demographic", "household"],
+    "demographic":  ["demographic", "census", "population", "survey"],
+    "household":    ["household", "census", "population", "income"],
+    "income":       ["income", "salary", "economic", "poverty"],
+    "poverty":      ["poverty", "income", "economic", "household"],
+    # Technology / Security
+    "network":      ["network", "traffic", "intrusion", "security"],
+    "security":     ["security", "intrusion", "network", "attack"],
+    "intrusion":    ["intrusion", "network", "security", "attack"],
+    "spam":         ["spam", "email", "text", "classification"],
+    "sentiment":    ["sentiment", "review", "text", "nlp"],
+    "text":         ["text", "nlp", "sentiment", "classification"],
+    # Environment / Science
+    "climate":      ["climate", "weather", "temperature", "environment"],
+    "weather":      ["weather", "climate", "temperature", "forecast"],
+    "energy":       ["energy", "electricity", "power", "consumption"],
+    # Agriculture
+    "agriculture":  ["agriculture", "crop", "farm", "yield"],
+    "crop":         ["crop", "agriculture", "farm", "yield"],
+    # Philippines-specific
+    "philippines":  ["philippines", "philippine", "filipino", "psa"],
+    "philippine":   ["philippines", "philippine", "filipino"],
+    "filipino":     ["filipino", "philippines", "philippine"],
+}
+
+
+def _expand_query(prompt: str) -> list[str]:
+    """
+    Turn a natural-language prompt into a ranked list of search terms.
+    The first entry is always the full prompt (or first 3 words).
+    Subsequent entries are domain-expanded synonyms, deduplicated.
+    """
+    raw_words = prompt.lower().replace("-", " ").replace("_", " ").split()
+    keywords  = [w for w in raw_words if len(w) >= 4 and w not in _STOP_WORDS]
+
+    terms: list[str] = []
+    seen:  set[str]  = set()
+
+    def _add(t: str):
+        t = t.strip()
+        if t and t not in seen:
+            seen.add(t)
+            terms.append(t)
+
+    # 1. Full prompt (short prompts work well as-is)
+    _add(prompt.strip())
+
+    # 2. Domain synonyms for every detected keyword
+    for kw in keywords:
+        for syn in _DOMAIN_SYNONYMS.get(kw, [kw]):
+            _add(syn)
+
+    # 3. Raw keywords themselves as fallback
+    for kw in keywords:
+        _add(kw)
+
+    return terms[:8]   # cap at 8 variations
+
+
 @app.post("/api/smart-search")
 def smart_search(req: SmartSearchRequest) -> dict[str, Any]:
     """
-    Search all dataset sources concurrently and return top results labelled
-    by source. Used by the hybrid LLM+real-data schema generation flow.
+    Search all dataset sources concurrently using query expansion.
+    Each source is searched with multiple related terms derived from the prompt,
+    so 'student academic performance' also tries 'student', 'academic',
+    'grades', 'education', etc. Results are deduplicated by source+ref.
     """
-    from concurrent.futures import ThreadPoolExecutor, as_completed
+    from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as _FT
 
     sources = {
         "kaggle":      ("Kaggle",       "🏆", search_datasets),
@@ -1265,44 +1381,55 @@ def smart_search(req: SmartSearchRequest) -> dict[str, Any]:
         "psa":         ("PSA",          "📋", psa_service.search_datasets),
     }
 
-    results: list[dict] = []
+    search_terms = _expand_query(req.prompt)
+    seen_refs: set[str]  = set()
+    results:   list[dict] = []
 
-    def _search(source_id: str, source_label: str, source_icon: str, search_fn):
+    def _search_one(source_id: str, source_label: str, source_icon: str, search_fn, term: str):
         try:
-            datasets = search_fn(req.prompt)
-            for ds in datasets[:3]:
+            datasets = search_fn(term)
+            for ds in datasets:
                 ds["source"]      = source_id
                 ds["sourceLabel"] = source_label
                 ds["sourceIcon"]  = source_icon
-            return datasets[:3]
+            return datasets[:5]
         except Exception as e:
-            print(f"[smart_search] {source_id} error: {e}")
+            print(f"[smart_search] {source_id}/{term!r} error: {e}")
             return []
 
-    from concurrent.futures import TimeoutError as _FuturesTimeout
+    # Fan out: every source × every search term (up to 8 terms × 6 sources = 48 tasks max)
+    # Workers cap keeps Railway/Render memory reasonable
+    with ThreadPoolExecutor(max_workers=12) as executor:
+        futures: dict = {}
+        for sid, (lbl, ico, fn) in sources.items():
+            for term in search_terms:
+                fut = executor.submit(_search_one, sid, lbl, ico, fn, term)
+                futures[fut] = (sid, term)
 
-    with ThreadPoolExecutor(max_workers=6) as executor:
-        futures = {
-            executor.submit(_search, sid, lbl, ico, fn): sid
-            for sid, (lbl, ico, fn) in sources.items()
-        }
         try:
-            for future in as_completed(futures, timeout=20):
+            for future in as_completed(futures, timeout=22):
                 try:
-                    results.extend(future.result())
+                    for ds in future.result():
+                        key = f"{ds['source']}:{ds['ref']}"
+                        if key not in seen_refs:
+                            seen_refs.add(key)
+                            results.append(ds)
                 except Exception:
                     pass
-        except _FuturesTimeout:
-            # Collect whatever finished within the window
+        except _FT:
             for future in futures:
                 if future.done():
                     try:
-                        results.extend(future.result())
+                        for ds in future.result():
+                            key = f"{ds['source']}:{ds['ref']}"
+                            if key not in seen_refs:
+                                seen_refs.add(key)
+                                results.append(ds)
                     except Exception:
                         pass
 
     results.sort(key=lambda x: x.get("downloadCount", 0), reverse=True)
-    return {"datasets": results[:18]}
+    return {"datasets": results[:24]}
 
 
 # ── Hybrid generate (CTGAN real fields + schema-based LLM fields) ─────────────
