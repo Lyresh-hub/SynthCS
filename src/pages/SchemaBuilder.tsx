@@ -1077,12 +1077,30 @@ export default function SchemaBuilder() {
   const handleSearch = async () => {
     if (!searchQuery.trim()) return;
     setExtSourceFilter("all");
+    setSelectedExtIds(new Set());
+    setExpandedExtIds(new Set());
     setLoadingMsg("Searching all dataset sources…");
     setPhase("loading");
     try {
+      // Ask the LLM to expand the query into related search terms (best-effort)
+      let expandedTerms: string[] = [];
+      try {
+        const expandRes = await fetch(`${NODE_API}/api/llm/expand-search-query`, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ query: searchQuery }),
+          signal: AbortSignal.timeout(6000),
+        });
+        if (expandRes.ok) {
+          const data = await expandRes.json();
+          expandedTerms = data.terms ?? [];
+        }
+      } catch {
+        // Silent fallback — domain map in Python will still kick in
+      }
+
       const res = await fetch(`${PYTHON_API}/api/smart-search`, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: searchQuery }),
+        body: JSON.stringify({ prompt: searchQuery, expanded_terms: expandedTerms }),
       });
       if (!res.ok) throw new Error(await res.text());
       setSearchResults((await res.json()).datasets ?? []);

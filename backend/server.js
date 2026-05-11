@@ -1260,6 +1260,42 @@ async function cleanupExpiredDatasets() {
   }
 }
 
+// ── Search query expansion ────────────────────────────────────────────────────
+app.post("/api/llm/expand-search-query", async (req, res) => {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  const { query } = req.body;
+  if (!query?.trim()) return res.status(400).json({ error: "query is required" });
+
+  // If no API key, return empty so caller falls back to domain map
+  if (!apiKey) return res.json({ terms: [] });
+
+  try {
+    const client = new Anthropic({ apiKey });
+    const message = await client.messages.create({
+      model: "claude-haiku-4-5-20251001",
+      max_tokens: 120,
+      messages: [{
+        role: "user",
+        content: `You help find datasets in repositories like Kaggle, UCI, OpenML, and HuggingFace.
+Given this search query: "${query.trim()}"
+Return ONLY a JSON array of 6–8 short search terms (1–3 words each) that would help find relevant datasets.
+Include synonyms, related concepts, and domain-specific keywords. No explanation, just the array.
+Example output: ["term1", "term two", "term3"]`,
+      }],
+    });
+    const raw = message.content[0].text.trim();
+    const match = raw.match(/\[[\s\S]*?\]/);
+    if (match) {
+      const terms = JSON.parse(match[0]);
+      return res.json({ terms: terms.map(t => String(t).toLowerCase().trim()).filter(Boolean).slice(0, 8) });
+    }
+    res.json({ terms: [] });
+  } catch (err) {
+    console.error("expand-search-query error:", err.message);
+    res.json({ terms: [] }); // silent fallback — caller uses domain map
+  }
+});
+
 // ── Start ─────────────────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 5000;
 
