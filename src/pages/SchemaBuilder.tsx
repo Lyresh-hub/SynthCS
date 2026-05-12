@@ -443,7 +443,7 @@ export default function SchemaBuilder() {
   const [multiPreviewTables,    setMultiPreviewTables]    = useState<MultiPreviewTable[]>([]);
   const [multiPreviewActiveTab, setMultiPreviewActiveTab] = useState(0);
   const [downloadFormat, setDownloadFormat] = useState<"csv" | "json" | "xlsx">("csv");
-  const [sortBy,     setSortBy]     = useState<"downloads" | "rows_desc" | "rows_asc" | "alpha">("downloads");
+  const [sortBy,     setSortBy]     = useState<"downloads" | "rows_desc" | "rows_asc" | "alpha" | "newest" | "oldest">("downloads");
   const [sizeFilter, setSizeFilter] = useState<"any" | "small" | "medium" | "large">("any");
 
   const [datasetId, setDatasetId]           = useState("");
@@ -1094,11 +1094,30 @@ export default function SchemaBuilder() {
         return true;
       });
     }
+    const dateOf = (ds: SmartResult) => ds.lastUpdated ?? "";
     switch (sortBy) {
       case "downloads": out.sort((a, b) => (b.downloadCount || 0) - (a.downloadCount || 0)); break;
       case "rows_desc":  out.sort((a, b) => parseRowCount(b.size) - parseRowCount(a.size)); break;
       case "rows_asc":   out.sort((a, b) => parseRowCount(a.size) - parseRowCount(b.size)); break;
       case "alpha":      out.sort((a, b) => a.title.localeCompare(b.title)); break;
+      case "newest":
+        out.sort((a, b) => {
+          const da = dateOf(a), db = dateOf(b);
+          if (!da && !db) return 0;
+          if (!da) return 1;   // no date → bottom
+          if (!db) return -1;
+          return db.localeCompare(da);
+        });
+        break;
+      case "oldest":
+        out.sort((a, b) => {
+          const da = dateOf(a), db = dateOf(b);
+          if (!da && !db) return 0;
+          if (!da) return 1;   // no date → bottom
+          if (!db) return -1;
+          return da.localeCompare(db);
+        });
+        break;
     }
     return out;
   };
@@ -2075,6 +2094,8 @@ export default function SchemaBuilder() {
                     className="text-xs border border-gray-200 rounded-lg px-2 py-1 text-gray-600 bg-white focus:outline-none focus:ring-2 focus:ring-purple-400"
                   >
                     <option value="downloads">Most downloaded</option>
+                    <option value="newest">Newest first</option>
+                    <option value="oldest">Oldest first</option>
                     <option value="rows_desc">Most rows</option>
                     <option value="rows_asc">Fewest rows</option>
                     <option value="alpha">A – Z</option>
@@ -2159,6 +2180,7 @@ export default function SchemaBuilder() {
                               <span className={`font-medium ${c.text}`}>{srcLabel}</span>
                               {ds.size ? ` · ${ds.size}` : ""}
                               {(ds as any).downloadCount ? ` · ${(ds as any).downloadCount.toLocaleString()} downloads` : ""}
+                              {ds.lastUpdated ? ` · Updated ${ds.lastUpdated}` : ""}
                             </p>
                           </div>
 

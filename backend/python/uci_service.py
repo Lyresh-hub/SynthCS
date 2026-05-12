@@ -41,11 +41,16 @@ def search_datasets(query: str) -> list:
                     continue
                 seen_ids.add(did)
                 n_inst = ds.get("num_instances") or ds.get("NumInstances") or "?"
+                # Extract date — API returns "date_donated" (YYYY-MM-DD) or "year_donated" (int)
+                date_raw = (ds.get("date_donated") or ds.get("DateDonated") or
+                            ds.get("donationDate") or ds.get("donation_date") or "")
+                year_raw = str(ds.get("year_donated") or ds.get("YearDonated") or ds.get("year") or "")
+                last_updated = str(date_raw)[:10] if date_raw else year_raw
                 results.append({
                     "ref":           did,
                     "title":         ds.get("name") or ds.get("Name") or "Unknown",
                     "size":          f"{n_inst} rows",
-                    "lastUpdated":   "",
+                    "lastUpdated":   last_updated,
                     "downloadCount": int(ds.get("num_hits") or ds.get("NumHits") or 0),
                     "description":   (ds.get("abstract") or ds.get("Abstract") or "")[:200],
                 })
