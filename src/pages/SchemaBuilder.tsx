@@ -1083,28 +1083,40 @@ export default function SchemaBuilder() {
     return m ? parseInt(m[1], 10) : 0;
   };
 
-  const applyFiltersSort = (results: SmartResult[], sourceFilter = extSourceFilter): SmartResult[] => {
+  const applyFiltersSort = (
+    results: SmartResult[],
+    sourceFilter: string,
+    activeSortBy: string,
+    activeSizeFilter: string,
+  ): SmartResult[] => {
     let out = sourceFilter === "all" ? [...results] : results.filter((r) => r.source === sourceFilter);
-    if (sizeFilter !== "any") {
+    if (activeSizeFilter !== "any") {
       out = out.filter((ds) => {
         const rows = parseRowCount(ds.size);
-        if (sizeFilter === "small")  return rows > 0 && rows < 1_000;
-        if (sizeFilter === "medium") return rows >= 1_000 && rows <= 50_000;
-        if (sizeFilter === "large")  return rows > 50_000;
+        if (activeSizeFilter === "small")  return rows > 0 && rows < 1_000;
+        if (activeSizeFilter === "medium") return rows >= 1_000 && rows <= 50_000;
+        if (activeSizeFilter === "large")  return rows > 50_000;
         return true;
       });
     }
     const dateOf = (ds: SmartResult) => ds.lastUpdated ?? "";
-    switch (sortBy) {
+    const titleOf = (ds: SmartResult) => (ds.title ?? "").toLowerCase().replace(/^[^a-z0-9]+/i, "").trim();
+    switch (activeSortBy) {
       case "downloads": out.sort((a, b) => (b.downloadCount || 0) - (a.downloadCount || 0)); break;
       case "rows_desc":  out.sort((a, b) => parseRowCount(b.size) - parseRowCount(a.size)); break;
       case "rows_asc":   out.sort((a, b) => parseRowCount(a.size) - parseRowCount(b.size)); break;
-      case "alpha":      out.sort((a, b) => a.title.localeCompare(b.title)); break;
+      case "alpha": {
+        out.sort((a, b) => {
+          const ta = titleOf(a), tb = titleOf(b);
+          return ta < tb ? -1 : ta > tb ? 1 : 0;
+        });
+        break;
+      }
       case "newest":
         out.sort((a, b) => {
           const da = dateOf(a), db = dateOf(b);
           if (!da && !db) return 0;
-          if (!da) return 1;   // no date → bottom
+          if (!da) return 1;
           if (!db) return -1;
           return db.localeCompare(da);
         });
@@ -1113,7 +1125,7 @@ export default function SchemaBuilder() {
         out.sort((a, b) => {
           const da = dateOf(a), db = dateOf(b);
           if (!da && !db) return 0;
-          if (!da) return 1;   // no date → bottom
+          if (!da) return 1;
           if (!db) return -1;
           return da.localeCompare(db);
         });
@@ -1839,7 +1851,7 @@ export default function SchemaBuilder() {
 
           {/* Result rows */}
           <div className="divide-y divide-gray-50">
-            {applyFiltersSort(smartResults, "all").map((ds) => {
+            {applyFiltersSort(smartResults, "all", sortBy, sizeFilter).map((ds) => {
               const key        = `${ds.source}:${ds.ref}`;
               const selected   = selectedSmartIds.has(key);
               const isExpanded = expandedExtIds.has(key);
@@ -2128,7 +2140,7 @@ export default function SchemaBuilder() {
 
       {/* ── Search results ── */}
       {phase === "results" && (() => {
-        const filtered = applyFiltersSort(searchResults);
+        const filtered = applyFiltersSort(searchResults, extSourceFilter, sortBy, sizeFilter);
         return (
           <div className="bg-white border border-gray-100 rounded-xl overflow-hidden shadow-sm">
             {/* Header */}
