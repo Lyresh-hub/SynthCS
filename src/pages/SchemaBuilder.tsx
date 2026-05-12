@@ -443,6 +443,8 @@ export default function SchemaBuilder() {
   const [multiPreviewTables,    setMultiPreviewTables]    = useState<MultiPreviewTable[]>([]);
   const [multiPreviewActiveTab, setMultiPreviewActiveTab] = useState(0);
   const [downloadFormat, setDownloadFormat] = useState<"csv" | "json" | "xlsx">("csv");
+  const [sortBy,     setSortBy]     = useState<"downloads" | "rows_desc" | "rows_asc" | "alpha">("downloads");
+  const [sizeFilter, setSizeFilter] = useState<"any" | "small" | "medium" | "large">("any");
 
   const [datasetId, setDatasetId]           = useState("");
   const [kaggleRef, setKaggleRef]           = useState("");
@@ -817,6 +819,8 @@ export default function SchemaBuilder() {
     if (!llmPrompt.trim()) return;
     setLlmError("");
     setStrikeWarning(null);
+    setSortBy("downloads");
+    setSizeFilter("any");
     setPhase("smart_searching");
     setLoadingMsg("Searching all dataset sources for a real match…");
 
@@ -1074,9 +1078,36 @@ export default function SchemaBuilder() {
     psa:         `${PYTHON_API}/api/psa/download`,
   };
 
+  const parseRowCount = (size: string): number => {
+    const m = size.replace(/,/g, "").match(/(\d+)/);
+    return m ? parseInt(m[1], 10) : 0;
+  };
+
+  const applyFiltersSort = (results: SmartResult[], sourceFilter = extSourceFilter): SmartResult[] => {
+    let out = sourceFilter === "all" ? [...results] : results.filter((r) => r.source === sourceFilter);
+    if (sizeFilter !== "any") {
+      out = out.filter((ds) => {
+        const rows = parseRowCount(ds.size);
+        if (sizeFilter === "small")  return rows > 0 && rows < 1_000;
+        if (sizeFilter === "medium") return rows >= 1_000 && rows <= 50_000;
+        if (sizeFilter === "large")  return rows > 50_000;
+        return true;
+      });
+    }
+    switch (sortBy) {
+      case "downloads": out.sort((a, b) => (b.downloadCount || 0) - (a.downloadCount || 0)); break;
+      case "rows_desc":  out.sort((a, b) => parseRowCount(b.size) - parseRowCount(a.size)); break;
+      case "rows_asc":   out.sort((a, b) => parseRowCount(a.size) - parseRowCount(b.size)); break;
+      case "alpha":      out.sort((a, b) => a.title.localeCompare(b.title)); break;
+    }
+    return out;
+  };
+
   const handleSearch = async () => {
     if (!searchQuery.trim()) return;
     setExtSourceFilter("all");
+    setSortBy("downloads");
+    setSizeFilter("any");
     setSelectedExtIds(new Set());
     setExpandedExtIds(new Set());
     setLoadingMsg("Searching all dataset sources…");
@@ -1751,21 +1782,45 @@ export default function SchemaBuilder() {
             </div>
           )}
 
-          {/* Source legend */}
-          <div className="px-4 py-2 border-b border-gray-50 flex flex-wrap gap-2">
-            {Object.entries(SOURCE_COLORS)
-              .filter(([id]) => smartResults.some((r) => r.source === id))
-              .map(([id, c]) => (
-                <span key={id} className={`flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded-full border ${c.badge} ${c.text}`}>
-                  <span className={`w-1.5 h-1.5 rounded-full ${c.dot}`} />
-                  {DATA_SOURCES.find((s) => s.id === id)?.label ?? id}
-                </span>
-              ))}
+          {/* Source legend + sort/size controls */}
+          <div className="px-4 py-2 border-b border-gray-100 flex flex-wrap items-center gap-x-4 gap-y-2">
+            <div className="flex flex-wrap gap-2">
+              {Object.entries(SOURCE_COLORS)
+                .filter(([id]) => smartResults.some((r) => r.source === id))
+                .map(([id, c]) => (
+                  <span key={id} className={`flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded-full border ${c.badge} ${c.text}`}>
+                    <span className={`w-1.5 h-1.5 rounded-full ${c.dot}`} />
+                    {DATA_SOURCES.find((s) => s.id === id)?.label ?? id}
+                  </span>
+                ))}
+            </div>
+            <div className="flex items-center gap-2 ml-auto">
+              <select
+                value={sortBy}
+                onChange={(e) => setSortBy(e.target.value as typeof sortBy)}
+                className="text-xs border border-gray-200 rounded-lg px-2 py-1 text-gray-600 bg-white focus:outline-none focus:ring-2 focus:ring-purple-400"
+              >
+                <option value="downloads">Most downloaded</option>
+                <option value="rows_desc">Most rows</option>
+                <option value="rows_asc">Fewest rows</option>
+                <option value="alpha">A – Z</option>
+              </select>
+              <select
+                value={sizeFilter}
+                onChange={(e) => setSizeFilter(e.target.value as typeof sizeFilter)}
+                className="text-xs border border-gray-200 rounded-lg px-2 py-1 text-gray-600 bg-white focus:outline-none focus:ring-2 focus:ring-purple-400"
+              >
+                <option value="any">Any size</option>
+                <option value="small">Small (&lt; 1K rows)</option>
+                <option value="medium">Medium (1K – 50K rows)</option>
+                <option value="large">Large (50K+ rows)</option>
+              </select>
+            </div>
           </div>
 
           {/* Result rows */}
           <div className="divide-y divide-gray-50">
-            {smartResults.map((ds) => {
+            {applyFiltersSort(smartResults, "all").map((ds) => {
               const key        = `${ds.source}:${ds.ref}`;
               const selected   = selectedSmartIds.has(key);
               const isExpanded = expandedExtIds.has(key);
@@ -1972,12 +2027,12 @@ export default function SchemaBuilder() {
             </button>
           </div>
 
-          {/* Source filter chips — appear after results load */}
+          {/* Source filter chips + sort/size controls — appear after results load */}
           {phase === "results" && searchResults.length > 0 && (() => {
             const activeSources = Array.from(new Set(searchResults.map((r) => r.source).filter(Boolean)));
             return (
-              <div>
-                <p className="text-[10px] font-medium text-gray-400 uppercase tracking-wide mb-2">Filter by source</p>
+              <div className="space-y-2">
+                <p className="text-[10px] font-medium text-gray-400 uppercase tracking-wide">Filter by source</p>
                 <div className="flex flex-wrap gap-1.5">
                   <button
                     onClick={() => setExtSourceFilter("all")}
@@ -2010,6 +2065,31 @@ export default function SchemaBuilder() {
                     );
                   })}
                 </div>
+
+                {/* Sort + size filter row */}
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-[10px] font-medium text-gray-400 uppercase tracking-wide">Sort &amp; filter:</span>
+                  <select
+                    value={sortBy}
+                    onChange={(e) => setSortBy(e.target.value as typeof sortBy)}
+                    className="text-xs border border-gray-200 rounded-lg px-2 py-1 text-gray-600 bg-white focus:outline-none focus:ring-2 focus:ring-purple-400"
+                  >
+                    <option value="downloads">Most downloaded</option>
+                    <option value="rows_desc">Most rows</option>
+                    <option value="rows_asc">Fewest rows</option>
+                    <option value="alpha">A – Z</option>
+                  </select>
+                  <select
+                    value={sizeFilter}
+                    onChange={(e) => setSizeFilter(e.target.value as typeof sizeFilter)}
+                    className="text-xs border border-gray-200 rounded-lg px-2 py-1 text-gray-600 bg-white focus:outline-none focus:ring-2 focus:ring-purple-400"
+                  >
+                    <option value="any">Any size</option>
+                    <option value="small">Small (&lt; 1K rows)</option>
+                    <option value="medium">Medium (1K – 50K rows)</option>
+                    <option value="large">Large (50K+ rows)</option>
+                  </select>
+                </div>
               </div>
             );
           })()}
@@ -2027,9 +2107,7 @@ export default function SchemaBuilder() {
 
       {/* ── Search results ── */}
       {phase === "results" && (() => {
-        const filtered = extSourceFilter === "all"
-          ? searchResults
-          : searchResults.filter((r) => r.source === extSourceFilter);
+        const filtered = applyFiltersSort(searchResults);
         return (
           <div className="bg-white border border-gray-100 rounded-xl overflow-hidden shadow-sm">
             {/* Header */}
