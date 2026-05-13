@@ -2840,6 +2840,19 @@ export default function SchemaBuilder() {
             </button>
           </div>
 
+          {/* Pure-AI disclaimer */}
+          {mode === "llm" && !datasetId && !table.fields.some((f) => f.mergedFrom) && (
+            <div className="flex items-start gap-2.5 px-4 py-3 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-800">
+              <AlertCircle className="w-4 h-4 text-amber-500 flex-shrink-0 mt-0.5" />
+              <div>
+                <span className="font-semibold">AI-only schema — no real dataset was used.</span>
+                {" "}Value ranges, distributions, and category lists are AI estimates.
+                They may not reflect actual real-world data patterns.
+                Review and adjust each field's constraints before generating.
+              </div>
+            </div>
+          )}
+
           {/* Field table */}
           <div className="bg-white border border-gray-100 rounded-xl overflow-hidden shadow-sm">
             <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100 bg-gray-50">
