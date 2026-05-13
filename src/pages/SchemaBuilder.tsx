@@ -111,6 +111,79 @@ const GENERATION_MODES: Array<{ id: GenerationMode; label: string; desc: string;
 type PresetField = { name: string; type: string; description: string; constraints?: Partial<FieldConstraints> };
 interface Preset { name: string; table: string; fields: PresetField[] }
 
+type MultiPresetField = PresetField & { fk_table?: string; fk_field?: string };
+interface MultiPresetTable { name: string; rowCount: number; fields: MultiPresetField[] }
+interface MultiTablePreset { name: string; description: string; tables: MultiPresetTable[] }
+
+const MULTI_TABLE_PRESETS: MultiTablePreset[] = [
+  {
+    name: "Gift Shop E-Commerce (Olongapo)",
+    description: "4 tables: users · products · orders · deliveries with FK links",
+    tables: [
+      {
+        name: "users", rowCount: 80,
+        fields: [
+          { name: "user_id",             type: "uuid",    description: "Primary key — unique customer ID" },
+          { name: "full_name",           type: "name",    description: "Filipino customer full name" },
+          { name: "age_group",           type: "string",  description: "Age bracket — one of 18-25, 26-35, 36-50",         constraints: { enum_values: "18-25, 26-35, 36-50" } },
+          { name: "gender",              type: "string",  description: "Gender — M or F",                                  constraints: { enum_values: "M, F" } },
+          { name: "barangay",            type: "string",  description: "Barangay in Olongapo — one of East Tapinac, West Tapinac, Sta. Rita, New Cabalan, Kalaklan, Pag-asa, Gordon Heights, Barretto, Mabayuan", constraints: { enum_values: "East Tapinac, West Tapinac, Sta. Rita, New Cabalan, Kalaklan, Pag-asa, Gordon Heights, Barretto, Mabayuan" } },
+          { name: "budget_range",        type: "string",  description: "Spending level — one of Low, Mid, High",           constraints: { enum_values: "Low, Mid, High" } },
+          { name: "preferred_occasions", type: "string",  description: "Shopping occasion — one of Birthday, Fiesta, Christmas, New Year, Valentine's Day, Graduation, Anniversary", constraints: { enum_values: "Birthday, Fiesta, Christmas, New Year, Valentine's Day, Graduation, Anniversary" } },
+          { name: "lat",                 type: "float",   description: "Latitude within Olongapo City",                    constraints: { min_val: 14.80, max_val: 14.85 } },
+          { name: "lng",                 type: "float",   description: "Longitude within Olongapo City",                   constraints: { min_val: 120.26, max_val: 120.30 } },
+          { name: "created_at",          type: "date",    description: "Account creation date",                            constraints: { date_from: "2022-01-01", date_to: "2024-12-31" } },
+        ],
+      },
+      {
+        name: "products", rowCount: 100,
+        fields: [
+          { name: "product_id",       type: "uuid",    description: "Primary key — unique product ID" },
+          { name: "name",             type: "string",  description: "Name of the gift or hamper product from an Olongapo shop" },
+          { name: "category",         type: "string",  description: "Product type — one of food, hamper, craft",           constraints: { enum_values: "food, hamper, craft" } },
+          { name: "price",            type: "float",   description: "Price in Philippine pesos",                           constraints: { min_val: 150, max_val: 3500 } },
+          { name: "occasion_tags",    type: "string",  description: "Occasions this suits — one of Birthday, Fiesta, Christmas, New Year, Valentine's Day, Graduation, Anniversary", constraints: { enum_values: "Birthday, Fiesta, Christmas, New Year, Valentine's Day, Graduation, Anniversary" } },
+          { name: "recipient_tags",   type: "string",  description: "Who it is for — one of parent, friend, partner, sibling, colleague", constraints: { enum_values: "parent, friend, partner, sibling, colleague" } },
+          { name: "local_vendor",     type: "boolean", description: "True if from a local Olongapo vendor",                constraints: { true_ratio: 0.7 } },
+          { name: "avg_rating",       type: "float",   description: "Average customer rating from 1.0 to 5.0",             constraints: { min_val: 1.0, max_val: 5.0 } },
+          { name: "stock",            type: "integer", description: "Units currently available",                           constraints: { min_val: 0, max_val: 200 } },
+          { name: "vendor_name",      type: "string",  description: "Name of the Olongapo vendor supplying this product" },
+          { name: "weight_score",     type: "float",   description: "AI recommendation relevance score from 0.0 to 1.0",  constraints: { min_val: 0.0, max_val: 1.0 } },
+        ],
+      },
+      {
+        name: "orders", rowCount: 800,
+        fields: [
+          { name: "order_id",       type: "uuid",    description: "Primary key — unique order ID" },
+          { name: "user_id",        type: "uuid",    description: "FK — customer who placed the order",   fk_table: "users",    fk_field: "user_id" },
+          { name: "product_id",     type: "uuid",    description: "FK — product that was ordered",        fk_table: "products", fk_field: "product_id" },
+          { name: "occasion",       type: "string",  description: "Occasion for the order — one of Birthday, Fiesta, Christmas, New Year, Valentine's Day, Graduation, Anniversary", constraints: { enum_values: "Birthday, Fiesta, Christmas, New Year, Valentine's Day, Graduation, Anniversary" } },
+          { name: "recipient_type", type: "string",  description: "Who the gift is for — one of parent, friend, partner, sibling, colleague", constraints: { enum_values: "parent, friend, partner, sibling, colleague" } },
+          { name: "rating",         type: "integer", description: "Customer rating after delivery from 1 to 5", constraints: { min_val: 1, max_val: 5 } },
+          { name: "order_date",     type: "date",    description: "Date the order was placed — last 12 months", constraints: { date_from: "2024-01-01", date_to: "2024-12-31" } },
+          { name: "total_price",    type: "float",   description: "Total amount paid in Philippine pesos",  constraints: { min_val: 150, max_val: 3500 } },
+          { name: "status",         type: "string",  description: "Order status — always completed",        constraints: { enum_values: "completed" } },
+        ],
+      },
+      {
+        name: "deliveries", rowCount: 300,
+        fields: [
+          { name: "delivery_id",  type: "uuid",    description: "Primary key — unique delivery ID" },
+          { name: "order_id",     type: "uuid",    description: "FK — order this delivery is for",          fk_table: "orders", fk_field: "order_id" },
+          { name: "rider_id",     type: "integer", description: "Rider assigned, one of 8 riders",          constraints: { min_val: 1, max_val: 8 } },
+          { name: "barangay",     type: "string",  description: "Delivery barangay in Olongapo — one of East Tapinac, West Tapinac, Sta. Rita, New Cabalan, Kalaklan, Pag-asa, Gordon Heights, Barretto, Mabayuan", constraints: { enum_values: "East Tapinac, West Tapinac, Sta. Rita, New Cabalan, Kalaklan, Pag-asa, Gordon Heights, Barretto, Mabayuan" } },
+          { name: "lat",          type: "float",   description: "Delivery latitude within Olongapo",        constraints: { min_val: 14.80, max_val: 14.85 } },
+          { name: "lng",          type: "float",   description: "Delivery longitude within Olongapo",       constraints: { min_val: 120.26, max_val: 120.30 } },
+          { name: "time_slot",    type: "string",  description: "Delivery time window — one of Morning, PM, Eve", constraints: { enum_values: "Morning, PM, Eve" } },
+          { name: "distance_km",  type: "float",   description: "Distance traveled in km from 0.5 to 8.0", constraints: { min_val: 0.5, max_val: 8.0 } },
+          { name: "assigned_at",  type: "date",    description: "When the delivery was assigned to a rider", constraints: { date_from: "2024-01-01", date_to: "2024-12-31" } },
+          { name: "status",       type: "string",  description: "Delivery status — always delivered",        constraints: { enum_values: "delivered" } },
+        ],
+      },
+    ],
+  },
+];
+
 const PRESETS: Record<GenerationMode, Preset[]> = {
   mock: [
     { name: "User Directory", table: "users", fields: [
@@ -482,6 +555,34 @@ export default function SchemaBuilder() {
 
   const removeRelRule = (id: string) =>
     setRelRules((prev) => prev.filter((r) => r.id !== id));
+
+  const loadMultiTablePreset = (preset: MultiTablePreset) => {
+    const tables: Table[] = preset.tables.map((t, i) => ({
+      id: `t_pre_${i}`,
+      name: t.name,
+      rowCount: t.rowCount,
+      fields: t.fields.map((f, j) =>
+        makeField({
+          id: `p${i}_${j}`,
+          name: f.name, type: f.type,
+          originalName: f.name, originalType: f.type,
+          description: f.description,
+          fk_table: f.fk_table,
+          fk_field: f.fk_field,
+          constraints: (() => {
+            const c = f.constraints ?? {};
+            const ev = (c as any).enum_values;
+            return { ...c, enum_values: Array.isArray(ev) ? ev.join(", ") : (ev ?? undefined) } as FieldConstraints;
+          })(),
+        })
+      ),
+    }));
+    setTables(tables);
+    setActiveTableId(tables[0].id);
+    setOriginalSchema([]);
+    setDatasetId(""); setKaggleRef(""); setMode("llm"); setPhase("schema");
+    setShowPresets(false);
+  };
 
   const loadPreset = (preset: Preset) => {
     const fields: Field[] = preset.fields.map((f, i) =>
@@ -1680,22 +1781,39 @@ export default function SchemaBuilder() {
 
           {/* Presets strip */}
           {showPresets && (
-            <div className="border-t border-gray-100 px-4 py-3 bg-gray-50">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-xs font-semibold text-gray-600">Preset Schemas</span>
-                <button onClick={() => setShowPresets(false)} className="text-xs text-gray-400 hover:text-gray-600">Dismiss</button>
+            <div className="border-t border-gray-100 px-4 py-3 bg-gray-50 space-y-3">
+              {/* Multi-table presets */}
+              <div>
+                <p className="text-xs font-semibold text-gray-600 mb-1.5">Multi-Table Schemas</p>
+                <div className="flex flex-wrap gap-2">
+                  {MULTI_TABLE_PRESETS.map((preset) => (
+                    <button
+                      key={preset.name}
+                      onClick={() => loadMultiTablePreset(preset)}
+                      className="flex flex-col items-start px-3 py-2 bg-white border border-purple-200 rounded-lg hover:border-purple-400 hover:bg-purple-50 transition-colors shadow-sm text-left"
+                    >
+                      <span className="text-xs font-semibold text-purple-700">{preset.name}</span>
+                      <span className="text-[10px] text-gray-400 mt-0.5">{preset.description}</span>
+                    </button>
+                  ))}
+                </div>
               </div>
-              <div className="flex flex-wrap gap-2">
-                {PRESETS[genMode].map((preset) => (
-                  <button
-                    key={preset.name}
-                    onClick={() => loadPreset(preset)}
-                    className="text-xs px-3 py-1.5 bg-white border border-gray-200 rounded-full hover:border-purple-400 hover:text-purple-700 transition-colors font-medium text-gray-700 shadow-sm"
-                  >
-                    {preset.name}
-                  </button>
-                ))}
+              {/* Single-table presets */}
+              <div>
+                <p className="text-xs font-semibold text-gray-600 mb-1.5">Single-Table Schemas</p>
+                <div className="flex flex-wrap gap-2">
+                  {PRESETS[genMode].map((preset) => (
+                    <button
+                      key={preset.name}
+                      onClick={() => loadPreset(preset)}
+                      className="text-xs px-3 py-1.5 bg-white border border-gray-200 rounded-full hover:border-purple-400 hover:text-purple-700 transition-colors font-medium text-gray-700 shadow-sm"
+                    >
+                      {preset.name}
+                    </button>
+                  ))}
+                </div>
               </div>
+              <button onClick={() => setShowPresets(false)} className="text-xs text-gray-400 hover:text-gray-600">Dismiss</button>
             </div>
           )}
         </div>
