@@ -1003,6 +1003,16 @@ Rules:
   - boolean: true_ratio (0.0 to 1.0)
   - date: date_from and date_to in YYYY-MM-DD format
 - enum_values must always be a plain string, never an array
+- ENUM EXTRACTION RULE (most important): If the user's description explicitly lists the allowed values for a field — using words like "one of", "from", "either", "choose from", a parenthesised list, or a colon followed by values — you MUST capture those exact values as enum_values. Examples:
+  - "budget_range: Low, Mid, or High" → enum_values: "Low, Mid, High"
+  - "barangay: real barangay from Olongapo City (East Tapinac, West Tapinac, Sta. Rita)" → enum_values: "East Tapinac, West Tapinac, Sta. Rita"
+  - "status is either Active or Inactive" → enum_values: "Active, Inactive"
+  - "age_group: 18-25, 26-35, or 36-50" → enum_values: "18-25, 26-35, 36-50"
+  - "gender: M or F" → enum_values: "M, F"
+  - "preferred_occasions: 1-2 from: Birthday, Fiesta, Christmas, New Year" → enum_values: "Birthday, Fiesta, Christmas, New Year"
+  Never ignore explicit value lists in the prompt. Always set them as enum_values even if the field type is string.
+- RANGE RULE: If the user specifies a numeric range (e.g. "lat: between 14.80 and 14.85"), set min_val and max_val to those exact numbers.
+- DATE RANGE RULE: If the user specifies a date range (e.g. "created_at: between 2022-01-01 and 2024-12-31"), set date_from and date_to to those exact values.
 - CRITICAL for descriptions: always include the domain/industry context for name-type fields:
   - Grocery store → "Name of the grocery product in store inventory"
   - Clothing boutique → "Name of the clothing item"
@@ -1140,6 +1150,10 @@ Rules:
 - Do NOT add completely generic fields with no connection to the user's prompt
 - For each detected domain/context, add 2-4 relevant fields
 - Use snake_case field names
+- ENUM EXTRACTION: If the user's prompt explicitly lists allowed values for a field, set those exact values as enum_values (plain comma-separated string). Examples:
+  - "budget_range: Low, Mid, or High" → constraints: { "enum_values": "Low, Mid, High" }
+  - "status is Active or Inactive" → constraints: { "enum_values": "Active, Inactive" }
+- RANGE: If the prompt specifies a numeric range, set min_val and max_val accordingly.
 
 Return ONLY valid JSON — no markdown, no explanation:
 {
