@@ -1288,14 +1288,12 @@ app.post("/api/llm/expand-search-query", async (req, res) => {
     const client = new Anthropic({ apiKey });
     const message = await client.messages.create({
       model: "claude-haiku-4-5-20251001",
-      max_tokens: 120,
+      max_tokens: 80,
       messages: [{
         role: "user",
-        content: `You help find datasets in repositories like Kaggle, UCI, OpenML, and HuggingFace.
-Given this search query: "${query.trim()}"
-Return ONLY a JSON array of 6–8 short search terms (1–3 words each) that would help find relevant datasets.
-Include synonyms, related concepts, and domain-specific keywords. No explanation, just the array.
-Example output: ["term1", "term two", "term3"]`,
+        content: `Given this dataset search query: "${query.trim()}"
+Return ONLY a JSON array of 5–6 short search terms (1–2 words each) — synonyms and related keywords. No explanation.
+Example: ["term1", "term two", "term3"]`,
       }],
     });
     const raw = message.content[0].text.trim();

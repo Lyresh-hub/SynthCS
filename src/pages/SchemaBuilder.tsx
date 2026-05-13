@@ -1251,7 +1251,7 @@ export default function SchemaBuilder() {
         const expandRes = await fetch(`${NODE_API}/api/llm/expand-search-query`, {
           method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ query: searchQuery }),
-          signal: AbortSignal.timeout(6000),
+          signal: AbortSignal.timeout(2000),
         });
         if (expandRes.ok) {
           const data = await expandRes.json();
