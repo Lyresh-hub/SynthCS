@@ -2,7 +2,7 @@ import { useState, useEffect, Fragment } from "react";
 import { useLocation } from "wouter";
 import {
   Plus, Trash2, GripVertical, Layers, X,
-  Search, Download, RefreshCw, AlertCircle, Save, ChevronDown, ChevronRight, Sparkles,
+  Search, Download, RefreshCw, AlertCircle, Save, ChevronDown, ChevronRight, Sparkles, Upload,
 } from "lucide-react";
 
 import { NODE_API, PYTHON_API } from "../lib/config";
@@ -852,6 +852,38 @@ export default function SchemaBuilder() {
       setPhase("template_preview");
     } catch (e: any) {
       setErrorMsg(e.message ?? "Export failed.");
+      setPhase("error");
+    }
+  };
+
+  // ── Import user's own CSV ────────────────────────────────────────────────
+  const handleUploadDataset = async (file: File) => {
+    setLoadingMsg("Analyzing your CSV…");
+    setPhase("loading");
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      const res = await fetch(`${PYTHON_API}/api/upload-dataset`, {
+        method: "POST",
+        body: form,
+      });
+      if (!res.ok) throw new Error(await res.text());
+      const data = await res.json();
+
+      const realSchema: OriginalField[] = data.schema.map((f: any) => ({
+        name: f.name, type: f.type, nullable: f.nullable, sample_values: f.sample_values ?? [],
+      }));
+      const fields: Field[] = realSchema.map((f, i) =>
+        makeField({ id: `up${i}`, name: f.name, type: f.type, originalName: f.name, originalType: f.type })
+      );
+      setOriginalSchema(realSchema);
+      setDatasetId(data.dataset_id);
+      setKaggleRef("");
+      setMode("kaggle");
+      setTables([{ id: "1", name: data.table_name || "uploaded_dataset", fields }]);
+      setPhase("schema");
+    } catch (e: any) {
+      setErrorMsg(e.message ?? "Upload failed.");
       setPhase("error");
     }
   };
@@ -2111,6 +2143,34 @@ export default function SchemaBuilder() {
           <div className="flex-1 h-px bg-gray-100" />
           <span className="text-xs text-gray-400 font-medium">OR USE AN EXTERNAL DATASET</span>
           <div className="flex-1 h-px bg-gray-100" />
+        </div>
+      )}
+
+      {/* ── Import user CSV ── */}
+      {(phase === "idle" || phase === "results") && (
+        <div className="bg-white border border-gray-100 rounded-xl shadow-sm overflow-hidden">
+          <label className="flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-gray-50 transition-colors group">
+            <div className="w-8 h-8 rounded-full bg-green-600 flex items-center justify-center flex-shrink-0">
+              <Upload className="w-4 h-4 text-white" />
+            </div>
+            <div className="flex-1">
+              <p className="text-sm font-semibold text-gray-800">Import Your Own Dataset</p>
+              <p className="text-xs text-gray-400">Upload a CSV file — system analyzes its columns and types automatically</p>
+            </div>
+            <span className="text-xs text-green-700 font-medium border border-green-200 rounded-full px-3 py-1 bg-green-50 group-hover:bg-green-100 transition-colors">
+              Choose CSV
+            </span>
+            <input
+              type="file"
+              accept=".csv"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) handleUploadDataset(file);
+                e.target.value = "";
+              }}
+            />
+          </label>
         </div>
       )}
 

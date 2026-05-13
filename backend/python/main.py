@@ -4,7 +4,7 @@ from typing import Any
 from pathlib import Path
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
@@ -259,6 +259,46 @@ def psa_download(req: DownloadRequest) -> dict[str, Any]:
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Schema analysis failed: {e}")
     return {"dataset_id": dataset_id, "csv_file": os.path.basename(csv_path), "schema": schema}
+
+
+# ── User-uploaded dataset ─────────────────────────────────────────────────────
+
+@app.post("/api/upload-dataset")
+async def upload_dataset(file: UploadFile = File(...)) -> dict[str, Any]:
+    """
+    Accept a user-uploaded CSV, analyze its schema, and return the same
+    {dataset_id, table_name, schema} shape as the download endpoints so the
+    frontend can load it into the schema editor immediately.
+    """
+    if not (file.filename or "").lower().endswith(".csv"):
+        raise HTTPException(status_code=400, detail="Only CSV files are supported.")
+
+    dataset_id = str(uuid.uuid4())
+    dest = os.path.join(DATASETS_DIR, dataset_id)
+    os.makedirs(dest, exist_ok=True)
+    csv_path = os.path.join(dest, "dataset.csv")
+
+    content = await file.read()
+    with open(csv_path, "wb") as f:
+        f.write(content)
+
+    # Cap at 20 000 rows — same limit as other sources
+    try:
+        import pandas as pd
+        df = pd.read_csv(csv_path)
+        if len(df) > 20_000:
+            df = df.sample(20_000, random_state=42).reset_index(drop=True)
+            df.to_csv(csv_path, index=False)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Could not read CSV: {e}")
+
+    try:
+        schema = analyze_dataset(csv_path)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Schema analysis failed: {e}")
+
+    table_name = os.path.splitext(file.filename or "uploaded_dataset")[0]
+    return {"dataset_id": dataset_id, "table_name": table_name, "schema": schema}
 
 
 # ── Kaggle generate ───────────────────────────────────────────────────────────
