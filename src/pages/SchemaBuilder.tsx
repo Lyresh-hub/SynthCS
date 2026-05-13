@@ -101,13 +101,6 @@ type Mode  = "kaggle" | "llm";
 
 // ── Generation modes ──────────────────────────────────────────────────────────
 
-const GENERATION_MODES: Array<{ id: GenerationMode; label: string; desc: string; color: string }> = [
-  { id: "mock",           label: "Mock Data",       desc: "Realistic dev / test data",          color: "gray"   },
-  { id: "ai_training",    label: "AI Training",     desc: "Labeled ML-ready datasets",          color: "blue"   },
-  { id: "cybersecurity",  label: "Cybersecurity",   desc: "Attack patterns & security events",  color: "red"    },
-  { id: "stress_testing", label: "Stress Testing",  desc: "Edge cases & high-volume logs",      color: "orange" },
-];
-
 type PresetField = { name: string; type: string; description: string; constraints?: Partial<FieldConstraints> };
 interface Preset { name: string; table: string; fields: PresetField[] }
 
@@ -530,8 +523,8 @@ export default function SchemaBuilder() {
   const [aiFieldLoading, setAiFieldLoading] = useState<string | null>(null);
 
   // ── Advanced generation state ─────────────────────────────────────────────
-  const [genMode, setGenMode] = useState<GenerationMode>("mock");
-  const [showPresets, setShowPresets] = useState(false);
+  const [genMode] = useState<GenerationMode>("mock");
+  const [showPureAiConfirm, setShowPureAiConfirm] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
 
   const [temporal, setTemporal] = useState<TemporalConfig>({
@@ -581,7 +574,6 @@ export default function SchemaBuilder() {
     setActiveTableId(tables[0].id);
     setOriginalSchema([]);
     setDatasetId(""); setKaggleRef(""); setMode("llm"); setPhase("schema");
-    setShowPresets(false);
   };
 
   const loadPreset = (preset: Preset) => {
@@ -600,7 +592,6 @@ export default function SchemaBuilder() {
     setOriginalSchema(preset.fields.map((f) => ({ name: f.name, type: f.type, nullable: false })));
     setTables([{ id: "1", name: preset.table, fields }]);
     setDatasetId(""); setKaggleRef(""); setMode("llm"); setPhase("schema");
-    setShowPresets(false);
   };
 
   // ── Load saved schema from sessionStorage (set by SavedSchemas "Use" button) ──
@@ -1193,15 +1184,6 @@ export default function SchemaBuilder() {
     { id: "psa",         label: "PSA",           placeholder: "e.g. census, labor, poverty…",            desc: "PH Statistics Authority" },
   ];
 
-  const SEARCH_ENDPOINTS: Record<string, string> = {
-    kaggle:      `${PYTHON_API}/api/kaggle/search`,
-    huggingface: `${PYTHON_API}/api/huggingface/search`,
-    uci:         `${PYTHON_API}/api/uci/search`,
-    openml:      `${PYTHON_API}/api/openml/search`,
-    datagov_ph:  `${PYTHON_API}/api/datagov_ph/search`,
-    psa:         `${PYTHON_API}/api/psa/search`,
-  };
-
   const DOWNLOAD_ENDPOINTS: Record<string, string> = {
     kaggle:      `${PYTHON_API}/api/kaggle/download`,
     huggingface: `${PYTHON_API}/api/huggingface/download`,
@@ -1776,6 +1758,45 @@ export default function SchemaBuilder() {
   return (
     <div className="space-y-4">
 
+      {/* ── Pure-AI confirmation modal ── */}
+      {showPureAiConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6 space-y-4">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-full bg-amber-100 flex items-center justify-center flex-shrink-0">
+                <AlertCircle className="w-5 h-5 text-amber-600" />
+              </div>
+              <div>
+                <h3 className="text-base font-semibold text-gray-900">Generate with AI only?</h3>
+                <p className="text-sm text-gray-500 mt-0.5">No real dataset will be used as a reference.</p>
+              </div>
+            </div>
+            <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-sm text-amber-800 space-y-1">
+              <p className="font-semibold">Disclaimer</p>
+              <p>Value ranges, distributions, and category lists are AI estimates. They may not reflect actual real-world data patterns. Review and adjust each field's constraints before generating.</p>
+            </div>
+            <div className="flex gap-2 justify-end pt-1">
+              <button
+                onClick={() => setShowPureAiConfirm(false)}
+                className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800 font-medium rounded-lg hover:bg-gray-100 transition-colors">
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  setShowPureAiConfirm(false);
+                  setPhase("idle");
+                  setSelectedSmartIds(new Set());
+                  setDetectedExtras([]);
+                  runPureLlmGenerate();
+                }}
+                className="px-4 py-2 text-sm bg-purple-600 text-white rounded-lg font-semibold hover:bg-purple-700 transition-colors">
+                Continue with AI
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── Presets strip ── */}
       {phase !== "loading" && phase !== "generating" && phase !== "smart_searching" && phase !== "smart_augmenting" && (
         <div className="bg-white border border-gray-100 rounded-xl shadow-sm overflow-hidden">
@@ -1907,7 +1928,7 @@ export default function SchemaBuilder() {
               </p>
             </div>
             <button
-              onClick={() => { setPhase("idle"); setSelectedSmartIds(new Set()); setDetectedExtras([]); runPureLlmGenerate(); }}
+              onClick={() => setShowPureAiConfirm(true)}
               className="flex-shrink-0 text-xs text-gray-400 hover:text-gray-700 font-medium underline whitespace-nowrap mt-0.5">
               Skip — use pure AI
             </button>
@@ -2839,19 +2860,6 @@ export default function SchemaBuilder() {
               ← New search
             </button>
           </div>
-
-          {/* Pure-AI disclaimer */}
-          {mode === "llm" && !datasetId && !table.fields.some((f) => f.mergedFrom) && (
-            <div className="flex items-start gap-2.5 px-4 py-3 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-800">
-              <AlertCircle className="w-4 h-4 text-amber-500 flex-shrink-0 mt-0.5" />
-              <div>
-                <span className="font-semibold">AI-only schema — no real dataset was used.</span>
-                {" "}Value ranges, distributions, and category lists are AI estimates.
-                They may not reflect actual real-world data patterns.
-                Review and adjust each field's constraints before generating.
-              </div>
-            </div>
-          )}
 
           {/* Field table */}
           <div className="bg-white border border-gray-100 rounded-xl overflow-hidden shadow-sm">
