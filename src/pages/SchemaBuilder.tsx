@@ -1744,65 +1744,34 @@ export default function SchemaBuilder() {
   return (
     <div className="space-y-4">
 
-      {/* ── Generation Mode selector ── */}
+      {/* ── Presets strip ── */}
       {phase !== "loading" && phase !== "generating" && phase !== "smart_searching" && phase !== "smart_augmenting" && (
         <div className="bg-white border border-gray-100 rounded-xl shadow-sm overflow-hidden">
-          <div className="grid grid-cols-4 divide-x divide-gray-100">
-            {GENERATION_MODES.map((m) => {
-              const active = genMode === m.id;
-              const colorMap: Record<string, string> = {
-                gray:   "bg-gray-800 text-white",
-                blue:   "bg-blue-600 text-white",
-                red:    "bg-red-600 text-white",
-                orange: "bg-orange-500 text-white",
-              };
-              const borderMap: Record<string, string> = {
-                gray: "border-b-2 border-gray-800",
-                blue: "border-b-2 border-blue-600",
-                red:  "border-b-2 border-red-600",
-                orange: "border-b-2 border-orange-500",
-              };
-              return (
-                <button
-                  key={m.id}
-                  onClick={() => { setGenMode(m.id); setShowPresets(true); }}
-                  className={`flex flex-col items-start px-4 py-3 text-left transition-colors
-                    ${active ? borderMap[m.color] + " bg-gray-50" : "hover:bg-gray-50/70"}`}
-                >
-                  <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded mb-1.5
-                    ${active ? colorMap[m.color] : "bg-gray-100 text-gray-500"}`}>
-                    {m.label}
-                  </span>
-                  <span className="text-[11px] text-gray-500 leading-tight">{m.desc}</span>
-                </button>
-              );
-            })}
-          </div>
-
-          {/* Presets strip */}
-          {showPresets && (
-            <div className="border-t border-gray-100 px-4 py-3 bg-gray-50 space-y-3">
-              {/* Multi-table presets */}
-              <div>
-                <p className="text-xs font-semibold text-gray-600 mb-1.5">Multi-Table Schemas</p>
-                <div className="flex flex-wrap gap-2">
-                  {MULTI_TABLE_PRESETS.map((preset) => (
-                    <button
-                      key={preset.name}
-                      onClick={() => loadMultiTablePreset(preset)}
-                      className="flex flex-col items-start px-3 py-2 bg-white border border-purple-200 rounded-lg hover:border-purple-400 hover:bg-purple-50 transition-colors shadow-sm text-left"
-                    >
-                      <span className="text-xs font-semibold text-purple-700">{preset.name}</span>
-                      <span className="text-[10px] text-gray-400 mt-0.5">{preset.description}</span>
-                    </button>
-                  ))}
-                </div>
+          <div className="px-4 py-3 bg-gray-50 space-y-3">
+            {/* Multi-table presets */}
+            <div>
+              <p className="text-xs font-semibold text-gray-600 mb-1.5">Multi-Table Schemas</p>
+              <div className="flex flex-wrap gap-2">
+                {MULTI_TABLE_PRESETS.map((preset) => (
+                  <button
+                    key={preset.name}
+                    onClick={() => loadMultiTablePreset(preset)}
+                    className="flex flex-col items-start px-3 py-2 bg-white border border-purple-200 rounded-lg hover:border-purple-400 hover:bg-purple-50 transition-colors shadow-sm text-left"
+                  >
+                    <span className="text-xs font-semibold text-purple-700">{preset.name}</span>
+                    <span className="text-[10px] text-gray-400 mt-0.5">{preset.description}</span>
+                  </button>
+                ))}
               </div>
-              {/* Single-table presets */}
-              <div>
-                <p className="text-xs font-semibold text-gray-600 mb-1.5">Single-Table Schemas</p>
-                <div className="flex flex-wrap gap-2">
-                  {PRESETS[genMode].map((preset) => (
+            </div>
+            {/* Single-table presets — all modes combined */}
+            <div>
+              <p className="text-xs font-semibold text-gray-600 mb-1.5">Single-Table Schemas</p>
+              <div className="flex flex-wrap gap-2">
+                {(Object.values(PRESETS) as Preset[][])
+                  .flat()
+                  .filter((p, i, arr) => arr.findIndex((q) => q.name === p.name) === i)
+                  .map((preset) => (
                     <button
                       key={preset.name}
                       onClick={() => loadPreset(preset)}
@@ -1811,11 +1780,9 @@ export default function SchemaBuilder() {
                       {preset.name}
                     </button>
                   ))}
-                </div>
               </div>
-              <button onClick={() => setShowPresets(false)} className="text-xs text-gray-400 hover:text-gray-600">Dismiss</button>
             </div>
-          )}
+          </div>
         </div>
       )}
 
