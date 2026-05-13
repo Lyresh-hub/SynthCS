@@ -722,6 +722,60 @@ _PRODUCT_HINT_TRIGGERS = frozenset(
 )
 
 
+def _extract_enum_from_description(description: str) -> list[str] | None:
+    """
+    Parse a field description for an explicit value list and return those values.
+    Handles patterns like:
+      - "one of: A, B, C"
+      - "A, B, or C"
+      - "A or B"
+      - "choose from A, B, C"
+      - "either A or B"
+      - "Field label — A, B, C"  (after a dash or colon)
+    Returns None when no clear list is found.
+    """
+    import re
+    if not description:
+        return None
+    desc = description.strip()
+
+    def _split_list(text: str) -> list[str] | None:
+        text = re.sub(r'\bor\b', ',', text, flags=re.IGNORECASE)
+        parts = [p.strip().strip('"\'()') for p in re.split(r'[,;]', text)]
+        parts = [p for p in parts if 1 <= len(p) <= 60 and not p.isspace()]
+        return parts if len(parts) >= 2 else None
+
+    # "one of X, Y, Z"  or  "one of: X, Y, Z"
+    m = re.search(r'one\s+of:?\s+(.+)', desc, re.IGNORECASE)
+    if m:
+        result = _split_list(m.group(1).split('.')[0])
+        if result:
+            return result
+
+    # "choose from X, Y"  or  "from: X, Y"
+    m = re.search(r'(?:choose\s+)?from:?\s+(.+)', desc, re.IGNORECASE)
+    if m:
+        result = _split_list(m.group(1).split('.')[0])
+        if result and len(result) >= 2:
+            return result
+
+    # "either A or B"
+    m = re.search(r'either\s+(.+)', desc, re.IGNORECASE)
+    if m:
+        result = _split_list(m.group(1).split('.')[0])
+        if result:
+            return result
+
+    # "Label: A, B, C"  or  "Label — A, B, C"  (colon/dash followed by short list)
+    m = re.search(r'[:\-–]\s*([A-Za-z0-9\-\s,/]+(?:\s+or\s+[A-Za-z0-9\-\s/]+)?)\s*$', desc)
+    if m:
+        result = _split_list(m.group(1))
+        if result and 2 <= len(result) <= 12:
+            return result
+
+    return None
+
+
 def _keyword_pool(field_name: str, description: str) -> list | None:
     hint = (field_name + " " + description).lower().replace("_", " ")
 
@@ -780,6 +834,11 @@ def gen_col(ftype: str, n: int, c: Any, field_name: str = "", description: str =
 
     dist         = getattr(c, "distribution", "uniform") or "uniform"
     enum_values  = getattr(c, "enum_values",  []) or []
+    # Fallback: extract allowed values from the field description when no enum set
+    if not enum_values and description:
+        extracted = _extract_enum_from_description(description)
+        if extracted:
+            enum_values = extracted
     cardinality  = getattr(c, "cardinality",  None)
     date_from    = getattr(c, "date_from",    None)
     date_to      = getattr(c, "date_to",      None)

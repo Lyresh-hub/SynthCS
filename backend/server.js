@@ -1013,6 +1013,7 @@ Rules:
   Never ignore explicit value lists in the prompt. Always set them as enum_values even if the field type is string.
 - RANGE RULE: If the user specifies a numeric range (e.g. "lat: between 14.80 and 14.85"), set min_val and max_val to those exact numbers.
 - DATE RANGE RULE: If the user specifies a date range (e.g. "created_at: between 2022-01-01 and 2024-12-31"), set date_from and date_to to those exact values.
+- DESCRIPTION + ENUM CONSISTENCY: For every categorical string field, the description MUST explicitly state the allowed values AND enum_values must contain the same values. Example: if budget_range has enum_values "Low, Mid, High", the description should say "Customer budget level — Low, Mid, or High". This creates a two-layer guarantee so the generator can extract values from either source.
 - CRITICAL for descriptions: always include the domain/industry context for name-type fields:
   - Grocery store → "Name of the grocery product in store inventory"
   - Clothing boutique → "Name of the clothing item"
