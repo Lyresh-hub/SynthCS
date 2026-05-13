@@ -14,17 +14,7 @@ interface Schema {
   created_at: string;
 }
 
-// Tinutukoy natin ang kategorya ng schema base sa pangalan nito — para sa color badge
-function inferType(name: string) {
-  const n = name.toLowerCase();
-  if (/health|hospital|patient|medical|clinic/.test(n))
-    return { type: "Healthcare", color: "bg-green-100 text-green-700" };
-  if (/order|sales|product|ecommerce|business|invoice|payment/.test(n))
-    return { type: "Business", color: "bg-blue-100 text-blue-700" };
-  if (/school|grade|student|education|course/.test(n))
-    return { type: "Education", color: "bg-orange-100 text-orange-700" };
-  return { type: "General", color: "bg-gray-100 text-gray-600" };
-}
+
 
 export default function SavedSchemas() {
   const [, setLocation] = useLocation();
@@ -141,7 +131,6 @@ export default function SavedSchemas() {
               <thead>
                 <tr className="border-b border-gray-100 bg-gray-50">
                   <th className="text-left py-3 px-4 text-xs font-medium text-gray-400">Schema Name</th>
-                  <th className="text-left py-3 px-4 text-xs font-medium text-gray-400">Type</th>
                   <th className="text-left py-3 px-4 text-xs font-medium text-gray-400">Fields</th>
                   <th className="text-left py-3 px-4 text-xs font-medium text-gray-400">Created</th>
                   <th className="text-right py-3 px-4 text-xs font-medium text-gray-400">Actions</th>
@@ -150,7 +139,6 @@ export default function SavedSchemas() {
               <tbody>
                 {/* Fini-filter ang mga schema base sa search text bago i-render */}
                 {schemas.filter((s) => s.name.toLowerCase().includes(search.toLowerCase())).map((schema) => {
-                  const { type, color } = inferType(schema.name);
                   const fieldCount = Array.isArray(schema.fields) ? schema.fields.length : 0;
                   return (
                     <tr key={schema.id} className="border-b border-gray-50 hover:bg-gray-50 transition-colors">
@@ -159,10 +147,6 @@ export default function SavedSchemas() {
                           <FileJson className="w-4 h-4 text-gray-400 flex-shrink-0" />
                           <span className="font-medium text-gray-800 text-xs">{schema.name}</span>
                         </div>
-                      </td>
-                      <td className="py-3 px-4">
-                        {/* Color-coded badge para sa kategorya ng schema */}
-                        <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${color}`}>{type}</span>
                       </td>
                       <td className="py-3 px-4 text-xs text-gray-500">{fieldCount} fields</td>
                       <td className="py-3 px-4 text-xs text-gray-500">
