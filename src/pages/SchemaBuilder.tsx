@@ -473,13 +473,28 @@ function detectPromptExtras(prompt: string): string[] {
   return Array.from(extras).slice(0, 5);
 }
 
+// ── Draft persistence helpers ─────────────────────────────────────────────────
+
+// Reads the autosaved draft from sessionStorage. Returns null if a
+// load_schema_id is pending (that flow takes priority) or if no draft exists.
+function readDraft(): { tables: Table[]; activeTableId: string; rowCount: number; mode: Mode } | null {
+  if (sessionStorage.getItem("load_schema_id")) return null;
+  const raw = sessionStorage.getItem("schema_builder_draft");
+  if (!raw) return null;
+  try {
+    const d = JSON.parse(raw);
+    if (Array.isArray(d.tables) && d.tables.length > 0) return d;
+  } catch {}
+  return null;
+}
+
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export default function SchemaBuilder() {
   const [, setLocation] = useLocation();
 
-  const [phase, setPhase]           = useState<Phase>("idle");
-  const [mode, setMode]             = useState<Mode>("kaggle");
+  const [phase, setPhase]           = useState<Phase>(() => readDraft() ? "schema" : "idle");
+  const [mode, setMode]             = useState<Mode>(() => readDraft()?.mode ?? "kaggle");
   const [loadingMsg, setLoadingMsg] = useState("");
   const [errorMsg, setErrorMsg]     = useState("");
 
@@ -515,9 +530,9 @@ export default function SchemaBuilder() {
   const [datasetId, setDatasetId]           = useState("");
   const [kaggleRef, setKaggleRef]           = useState("");
   const [originalSchema, setOriginalSchema] = useState<OriginalField[]>([]);
-  const [tables, setTables]                 = useState<Table[]>([]);
-  const [activeTableId, setActiveTableId]   = useState<string>("");
-  const [rowCount, setRowCount]             = useState(10_000);
+  const [tables, setTables]                 = useState<Table[]>(() => readDraft()?.tables ?? []);
+  const [activeTableId, setActiveTableId]   = useState<string>(() => readDraft()?.activeTableId ?? "");
+  const [rowCount, setRowCount]             = useState<number>(() => readDraft()?.rowCount ?? 10_000);
 
   const [saveStatus, setSaveStatus] = useState<"idle"|"saving"|"saved"|"error">("idle");
   const [aiFieldLoading, setAiFieldLoading] = useState<string | null>(null);
@@ -629,6 +644,13 @@ export default function SchemaBuilder() {
       })
       .catch(() => {});
   }, [loadSchemaId]);
+
+  // Autosave draft to sessionStorage whenever the schema changes
+  useEffect(() => {
+    sessionStorage.setItem("schema_builder_draft", JSON.stringify({
+      tables, activeTableId, rowCount, mode,
+    }));
+  }, [tables, activeTableId, rowCount, mode]);
 
   // Sync activeTableId whenever tables change (e.g. after LLM generation)
   useEffect(() => {
