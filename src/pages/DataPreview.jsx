@@ -93,6 +93,24 @@ export default function DataPreview() {
   const handleExport = async () => {
     setExporting(true);
     try {
+      // Multi-table: download all tables from the backend ZIP/XLSX endpoint
+      if (entityTables.length > 0) {
+        const fmt = exportFormat === "excel" ? "xlsx" : exportFormat === "jsonl" ? "json" : exportFormat;
+        const res = await fetch(`${PYTHON_API}/api/download-multi/${datasetId}?format=${fmt}`);
+        if (!res.ok) throw new Error("Export failed");
+        const blob = await res.blob();
+        const filename =
+          fmt === "xlsx" ? "dataset_tables.xlsx" :
+          fmt === "json" ? "dataset_tables_json.zip" :
+          "dataset_tables.zip";
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url; a.download = filename; a.click();
+        URL.revokeObjectURL(url);
+        return;
+      }
+
+      // Single-table: fetch CSV then convert on the frontend
       const csvRes = await fetch(`${PYTHON_API}/api/download/${datasetId}`);
       const csvText = await csvRes.text();
       const lines = csvText.trim().split("\n");
@@ -115,8 +133,8 @@ export default function DataPreview() {
         filename = `${datasetName}.json`;
 
       } else if (exportFormat === "jsonl") {
-        const lines = allRows.map((row) => JSON.stringify(row)).join("\n");
-        blob = new Blob([lines], { type: "application/jsonl" });
+        const jsonlLines = allRows.map((row) => JSON.stringify(row)).join("\n");
+        blob = new Blob([jsonlLines], { type: "application/jsonl" });
         filename = `${datasetName}.jsonl`;
 
       } else if (exportFormat === "sql") {
@@ -342,6 +360,7 @@ export default function DataPreview() {
               </div>
               <p className="text-[11px] text-gray-400 mt-0.5">
                 {columns.length} columns · {total_rows.toLocaleString()} rows
+                {entityTables.length > 0 && ` · ${entityTables.length + 1} tables`}
                 {kaggleRef && ` · source: ${kaggleRef}`}
               </p>
             </div>
@@ -369,7 +388,10 @@ export default function DataPreview() {
               disabled={exporting}
               className="flex items-center gap-1.5 px-3 py-1.5 bg-purple-600 text-white rounded-md text-xs font-medium hover:bg-purple-700 transition-colors disabled:opacity-60"
             >
-              {exporting ? "⏳" : "↓"} Export {exportFormat.toUpperCase()}
+              {exporting ? "⏳" : "↓"}{" "}
+              {entityTables.length > 0
+                ? `Download All Tables`
+                : `Export ${exportFormat.toUpperCase()}`}
             </button>
           </div>
         </div>
@@ -426,6 +448,9 @@ export default function DataPreview() {
               ["Columns",  columns.length],
               ["Preview",  `${rows.length} rows`],
               ["Source",   kaggleRef || "CTGAN"],
+              ...(entityTables.length > 0
+                ? [["Tables", `${entityTables.length + 1} total`]]
+                : []),
             ].map(([k, v]) => (
               <div key={k} className="flex justify-between text-xs">
                 <span className="text-gray-400">{k}</span>
@@ -544,6 +569,8 @@ export default function DataPreview() {
                       overall_score,
                       status,
                       metrics,
+                      col_stats:  validation.col_stats  || {},
+                      null_rates: validation.null_rates || {},
                     }));
                     setLocation("/validation-report");
                   }}

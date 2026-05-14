@@ -348,7 +348,11 @@ def generate(req: GenerateRequest):
 @app.get("/api/preview/{dataset_id}")
 def preview_dataset(dataset_id: str, limit: int = 100):
     """Return the first `limit` rows of a generated CSV as JSON for in-app preview."""
-    output_path = os.path.join(DATASETS_DIR, dataset_id, "synthetic_output.csv")
+    dataset_path = os.path.join(DATASETS_DIR, dataset_id)
+    # Fall back to template.csv when synthetic_output.csv not yet created (template-only view)
+    output_path = os.path.join(dataset_path, "synthetic_output.csv")
+    if not os.path.exists(output_path):
+        output_path = os.path.join(dataset_path, "template.csv")
     if not os.path.exists(output_path):
         raise HTTPException(status_code=404, detail="File not found or already expired.")
 
@@ -1058,18 +1062,13 @@ def download_template(dataset_id: str, format: str = "csv"):
 @app.post("/api/generate-multi-table")
 def generate_multi_table(req: MultiTableRequest):
     """
-    Generate multiple related tables with FK consistency, then return
-    all CSVs bundled in a single ZIP archive.
-
-    Tables are generated in topological order so that parent tables
-    (the FK targets) always exist before child tables reference them.
+    Generate multiple related tables with FK consistency, save them to
+    temp_datasets/{dataset_id}/, and return dataset metadata for the
+    preview page.  A separate GET endpoint handles the ZIP/XLSX download.
     """
-    import io
     import random
-    import zipfile
 
     import pandas as pd
-    from fastapi.responses import StreamingResponse
     from relational_gen import generate_relational_dataset
     from smart_gen_data import gen_col
 
@@ -1173,50 +1172,98 @@ def generate_multi_table(req: MultiTableRequest):
                 id_col=fld.name,
             )
 
-    fmt = (req.format or "csv").lower().strip()
+    # Save generated tables to temp_datasets so preview & download can serve them
+    dataset_id = str(uuid.uuid4())
+    dest = os.path.join(DATASETS_DIR, dataset_id)
+    os.makedirs(dest, exist_ok=True)
+
+    primary_table = generation_order[0] if generation_order else req.tables[0].name
+    total_rows    = 0
+    saved_names: list[str] = []
+
+    for tname in generation_order:
+        if tname not in generated:
+            continue
+        generated[tname].to_csv(os.path.join(dest, f"{tname}.csv"), index=False)
+        total_rows += len(generated[tname])
+        saved_names.append(tname)
+
+    # synthetic_output.csv is what /api/preview/{dataset_id} reads
+    if primary_table in generated:
+        generated[primary_table].to_csv(
+            os.path.join(dest, "synthetic_output.csv"), index=False
+        )
+
+    return {
+        "dataset_id":    dataset_id,
+        "primary_table": primary_table,
+        "total_rows":    total_rows,
+        "table_names":   saved_names,
+    }
+
+
+@app.get("/api/download-multi/{dataset_id}")
+def download_multi_table(dataset_id: str, format: str = "csv"):
+    """Download all tables for a multi-table dataset as a ZIP or XLSX."""
+    import io
+    import zipfile
+    import pandas as pd
+    from fastapi.responses import StreamingResponse
+
+    dest = os.path.join(DATASETS_DIR, dataset_id)
+    if not os.path.isdir(dest):
+        raise HTTPException(status_code=404, detail="Dataset not found.")
+
+    # Collect individual table CSVs (exclude internal files)
+    _internal = {"synthetic_output.csv", "test_set.csv", "template.csv", "dataset.csv"}
+    csv_files = sorted(
+        f for f in os.listdir(dest)
+        if f.endswith(".csv") and f not in _internal
+    )
+    if not csv_files:
+        raise HTTPException(status_code=404, detail="No table files found.")
+
+    fmt = (format or "csv").lower().strip()
 
     if fmt == "xlsx":
-        import openpyxl  # noqa: F401 — ensures it's installed
-        xlsx_buf = io.BytesIO()
-        with pd.ExcelWriter(xlsx_buf, engine="openpyxl") as writer:
-            for tbl in req.tables:
-                if tbl.name in generated:
-                    sheet = tbl.name[:31]  # Excel sheet name limit
-                    generated[tbl.name].to_excel(writer, sheet_name=sheet, index=False)
-        xlsx_buf.seek(0)
+        import openpyxl  # noqa: F401
+        buf = io.BytesIO()
+        with pd.ExcelWriter(buf, engine="openpyxl") as writer:
+            for fname in csv_files:
+                sheet = fname.replace(".csv", "")[:31]
+                pd.read_csv(os.path.join(dest, fname)).to_excel(
+                    writer, sheet_name=sheet, index=False
+                )
+        buf.seek(0)
         return StreamingResponse(
-            xlsx_buf,
+            buf,
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             headers={"Content-Disposition": "attachment; filename=dataset_tables.xlsx"},
         )
 
     if fmt == "json":
-        zip_buf = io.BytesIO()
-        with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
-            for tbl in req.tables:
-                if tbl.name in generated:
-                    json_str = generated[tbl.name].to_json(orient="records", indent=2)
-                    zf.writestr(f"{tbl.name}.json", json_str.encode("utf-8"))
-        zip_buf.seek(0)
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+            for fname in csv_files:
+                tname = fname.replace(".csv", "")
+                df = pd.read_csv(os.path.join(dest, fname))
+                zf.writestr(f"{tname}.json", df.to_json(orient="records", indent=2).encode())
+        buf.seek(0)
         return StreamingResponse(
-            zip_buf,
+            buf,
             media_type="application/zip",
             headers={"Content-Disposition": "attachment; filename=dataset_tables_json.zip"},
         )
 
     # Default: CSV ZIP
-    zip_buf = io.BytesIO()
-    with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        for tbl in req.tables:
-            if tbl.name in generated:
-                zf.writestr(
-                    f"{tbl.name}.csv",
-                    generated[tbl.name].to_csv(index=False).encode("utf-8"),
-                )
-
-    zip_buf.seek(0)
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for fname in csv_files:
+            with open(os.path.join(dest, fname), "rb") as f:
+                zf.writestr(fname, f.read())
+    buf.seek(0)
     return StreamingResponse(
-        zip_buf,
+        buf,
         media_type="application/zip",
         headers={"Content-Disposition": "attachment; filename=dataset_tables.zip"},
     )
@@ -1640,17 +1687,52 @@ def validate_dataset(dataset_id: str):
     except Exception:
         utility_score = 0.5
 
+    # ── 4. Privacy Score — fraction of synthetic rows not found in real set ──
+    try:
+        real_set    = set(map(tuple, real.astype(str).values))
+        synth_tuples = list(map(tuple, synth.astype(str).values))
+        n_matches   = sum(1 for t in synth_tuples if t in real_set)
+        privacy_score = max(0.0, 1.0 - n_matches / len(synth_tuples))
+    except Exception:
+        privacy_score = 1.0
+
+    # ── 5. Per-column statistics (real vs synthetic) ─────────────────────────
+    col_stats: dict[str, dict] = {}
+    for col in numeric_cols:
+        r = real[col].dropna().values.astype(float)
+        s = synth[col].dropna().values.astype(float)
+        if len(r) == 0 or len(s) == 0:
+            continue
+        col_stats[col] = {
+            "real_mean":  round(float(np.mean(r)), 2),
+            "real_std":   round(float(np.std(r)), 2),
+            "real_min":   round(float(np.min(r)), 2),
+            "real_max":   round(float(np.max(r)), 2),
+            "synth_mean": round(float(np.mean(s)), 2),
+            "synth_std":  round(float(np.std(s)), 2),
+            "synth_min":  round(float(np.min(s)), 2),
+            "synth_max":  round(float(np.max(s)), 2),
+        }
+
+    # ── 6. Null rates per column (real vs synthetic) ─────────────────────────
+    null_rates: dict[str, dict] = {}
+    for col in common_cols:
+        null_rates[col] = {
+            "real":  round(float(real[col].isna().mean() * 100), 1),
+            "synth": round(float(synth[col].isna().mean() * 100), 1),
+        }
+
     # ── Overall ──────────────────────────────────────────────────────────────
     overall_pct = round((0.4 * wasserstein_score + 0.4 * correlation_score + 0.2 * utility_score) * 100, 1)
     status = "Good" if overall_pct >= 75 else ("Acceptable" if overall_pct >= 50 else "Poor")
 
     return {
         "overall_score": overall_pct,
-        "status": status,
+        "status":        status,
         "metrics": {
             "wasserstein": {
-                "score": round(wasserstein_score * 100, 1),
-                "label": "Distribution Similarity",
+                "score":      round(wasserstein_score * 100, 1),
+                "label":      "Distribution Similarity",
                 "per_column": per_column,
             },
             "correlation": {
@@ -1661,14 +1743,23 @@ def validate_dataset(dataset_id: str):
                 "score": round(utility_score * 100, 1),
                 "label": "ML Utility (TSTR)",
             },
+            "privacy": {
+                "score": round(privacy_score * 100, 1),
+                "label": "Privacy Risk Score",
+            },
         },
+        "col_stats":  col_stats,
+        "null_rates": null_rates,
     }
 
 
 @app.get("/api/download/{dataset_id}")
 def download_saved(dataset_id: str):
     """Serve a previously generated CSV file by dataset_id."""
-    output_path = os.path.join(DATASETS_DIR, dataset_id, "synthetic_output.csv")
+    dataset_path = os.path.join(DATASETS_DIR, dataset_id)
+    output_path  = os.path.join(dataset_path, "synthetic_output.csv")
+    if not os.path.exists(output_path):
+        output_path = os.path.join(dataset_path, "template.csv")
     if not os.path.exists(output_path):
         raise HTTPException(status_code=404, detail="File not found or already expired.")
     return FileResponse(

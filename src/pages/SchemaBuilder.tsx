@@ -766,14 +766,12 @@ export default function SchemaBuilder() {
     }
   };
 
-  // Step 2 — confirmed by user, generate full dataset in chosen format
+  // Step 2 — confirmed by user, generate full dataset then navigate to preview
   const handleConfirmDownloadZip = async () => {
-    const fmtLabel = downloadFormat.toUpperCase();
-    setLoadingMsg(`Generating ${tables.length} tables as ${fmtLabel}…`);
+    setLoadingMsg(`Generating ${tables.length} tables…`);
     setPhase("generating");
     try {
       const payload = {
-        format: downloadFormat,
         tables: tables.map((t) => ({
           name: t.name,
           fields: t.fields.map((f) => ({
@@ -800,51 +798,29 @@ export default function SchemaBuilder() {
         body: JSON.stringify(payload),
       });
       if (!res.ok) throw new Error(await res.text());
-      const blob = await res.blob();
-      const url  = URL.createObjectURL(blob);
-      const a    = document.createElement("a");
-      a.href = url;
-      a.download = downloadFormat === "xlsx"
-        ? "dataset_tables.xlsx"
-        : downloadFormat === "json"
-        ? "dataset_tables_json.zip"
-        : "dataset_tables.zip";
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-      setPhase("schema");
+      const data = await res.json();
+      sessionStorage.setItem("preview_params", JSON.stringify({
+        id:            data.dataset_id,
+        name:          data.primary_table,
+        rows:          data.total_rows,
+        entity_tables: (data.table_names as string[]).filter((n) => n !== data.primary_table),
+      }));
+      setLocation("/preview");
     } catch (e: any) {
       setErrorMsg(e.message ?? "Multi-table generation failed.");
       setPhase("error");
     }
   };
 
-  // Download the 200-row template directly in the chosen format (no CTGAN)
-  const handleDownloadTemplate = async () => {
+  // Preview the 200-row template in DataPreview (template.csv served as fallback)
+  const handleDownloadTemplate = () => {
     if (!templateDatasetId) return;
-    const fmtLabel = downloadFormat.toUpperCase();
-    setLoadingMsg(`Exporting template as ${fmtLabel}…`);
-    setPhase("generating");
-    try {
-      const res = await fetch(
-        `${PYTHON_API}/api/download-template/${templateDatasetId}?format=${downloadFormat}`
-      );
-      if (!res.ok) throw new Error(await res.text());
-      const blob = await res.blob();
-      const url  = URL.createObjectURL(blob);
-      const a    = document.createElement("a");
-      a.href = url;
-      a.download = `template_${getActiveTable()?.name ?? "data"}.${downloadFormat}`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-      setPhase("template_preview");
-    } catch (e: any) {
-      setErrorMsg(e.message ?? "Export failed.");
-      setPhase("error");
-    }
+    sessionStorage.setItem("preview_params", JSON.stringify({
+      id:   templateDatasetId,
+      name: getActiveTable()?.name ?? "dataset",
+      rows: 200,
+    }));
+    setLocation("/preview");
   };
 
   // ── Import user's own CSV ────────────────────────────────────────────────
@@ -1507,6 +1483,75 @@ export default function SchemaBuilder() {
       setLocation("/preview");
     } catch (e: any) {
       setErrorMsg(e.message ?? "CTGAN expansion failed."); setPhase("error");
+    }
+  };
+
+  // ── LLM mode single-table: generate template + CTGAN in one step → DataPreview
+  const handleLlmGenerateAndPreview = async () => {
+    const at = getActiveTable();
+    if (!at) return;
+
+    setLoadingMsg("Generating AI template…");
+    setPhase("generating");
+
+    try {
+      // Step 1: generate 200-row template
+      const templateRes = await fetch(`${PYTHON_API}/api/generate-from-schema`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          table_name: at.name,
+          fields: at.fields.map((f) => ({
+            name:        f.name,
+            field_type:  f.type,
+            nullable:    f.null_rate > 0,
+            description: f.description,
+            constraints: {
+              ...f.constraints,
+              null_rate:   f.null_rate,
+              enum_values: f.constraints.enum_values
+                ? String(f.constraints.enum_values).split(",").map((v) => v.trim()).filter(Boolean)
+                : [],
+            },
+          })),
+        }),
+      });
+      if (!templateRes.ok) throw new Error(await templateRes.text());
+      const templateData = await templateRes.json();
+
+      setLoadingMsg(`Expanding to ${rowCount.toLocaleString()} rows with CTGAN…`);
+
+      // Step 2: expand with CTGAN
+      const expandRes = await fetch(`${PYTHON_API}/api/expand-with-ctgan`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          dataset_id: templateData.dataset_id,
+          row_count:  rowCount,
+          temporal,
+          rules: relRules.map(({ id: _id, ...r }) => r),
+          anomaly,
+        }),
+      });
+      if (!expandRes.ok) throw new Error(await expandRes.text());
+      const expandData = await expandRes.json();
+
+      const userId = localStorage.getItem("user_id");
+      if (userId) {
+        await fetch(`${NODE_API}/api/datasets`, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ user_id: userId, name: at.name, kaggle_ref: "", python_dataset_id: expandData.dataset_id, row_count: rowCount, source: "llm" }),
+        }).catch(() => {});
+      }
+
+      sessionStorage.setItem("preview_params", JSON.stringify({
+        id:            expandData.dataset_id,
+        name:          at.name,
+        rows:          rowCount,
+        ref:           "",
+        entity_tables: templateData.entity_tables ?? [],
+      }));
+      setLocation("/preview");
+    } catch (e: any) {
+      setErrorMsg(e.message ?? "Generation failed."); setPhase("error");
     }
   };
 
@@ -2655,25 +2700,6 @@ export default function SchemaBuilder() {
               </div>
             </div>
 
-            {/* Format selector */}
-            <div>
-              <p className="text-xs font-medium text-gray-600 mb-2">Download template directly as</p>
-              <div className="flex gap-2">
-                {(["csv", "json", "xlsx"] as const).map((fmt) => (
-                  <button
-                    key={fmt}
-                    onClick={() => setDownloadFormat(fmt)}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors
-                      ${downloadFormat === fmt
-                        ? "bg-purple-600 text-white border-purple-600"
-                        : "bg-white text-gray-600 border-gray-200 hover:border-purple-300 hover:text-purple-600"}`}
-                  >
-                    {fmt.toUpperCase()}
-                  </button>
-                ))}
-              </div>
-            </div>
-
             <div className="flex gap-3 pt-1">
               <button onClick={() => setPhase("schema")}
                 className="px-4 py-2.5 border border-gray-200 rounded-lg text-sm text-gray-600 hover:bg-gray-50 transition-colors font-medium">
@@ -2681,13 +2707,12 @@ export default function SchemaBuilder() {
               </button>
               <button onClick={handleDownloadTemplate}
                 className="flex items-center justify-center gap-2 px-4 py-2.5 border border-purple-200 text-purple-700 rounded-lg text-sm font-medium hover:bg-purple-50 transition-colors">
-                <Download className="w-4 h-4" />
-                Download as {downloadFormat.toUpperCase()}
+                Preview 200-row Template
               </button>
               <button onClick={handleExpand}
                 className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-purple-600 text-white rounded-lg text-sm font-semibold hover:bg-purple-700 transition-colors shadow-sm">
                 <Layers className="w-4 h-4" />
-                Generate {rowCount.toLocaleString()} Rows with CTGAN
+                Generate {rowCount.toLocaleString()} Rows → Preview
               </button>
             </div>
           </div>
@@ -3270,9 +3295,9 @@ export default function SchemaBuilder() {
                 </button>
 
                 {mode === "llm" ? (
-                  <button onClick={handleGenerateTemplate}
+                  <button onClick={handleLlmGenerateAndPreview}
                     className="flex-1 flex items-center justify-center gap-1.5 px-4 py-2 bg-purple-600 text-white rounded-lg text-sm font-medium hover:bg-purple-700 transition-colors">
-                    <Sparkles className="w-4 h-4" /> Generate Template
+                    <Sparkles className="w-4 h-4" /> Generate → Preview
                   </button>
                 ) : (
                   <button onClick={handleGenerate}
