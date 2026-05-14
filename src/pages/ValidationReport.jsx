@@ -65,14 +65,15 @@ function verdict(key, score) {
   }
 }
 
-export default function ValidationReport() {
+export default function ValidationReport({ inlineData } = {}) {
   const [, setLocation] = useLocation();
   const [report] = useState(() => {
+    if (inlineData) return inlineData;
     const raw = sessionStorage.getItem("validation_report");
     sessionStorage.removeItem("validation_report");
     return raw ? JSON.parse(raw) : null;
   });
-  useEffect(() => { if (!report) setLocation("/downloads"); }, [report]);
+  useEffect(() => { if (!inlineData && !report) setLocation("/downloads"); }, [report, inlineData]);
   if (!report) return null;
 
   const { datasetName, rowCount, columnCount, overall_score, status, metrics, col_stats = {}, null_rates = {} } = report;
@@ -121,16 +122,18 @@ export default function ValidationReport() {
   if (recommendations.length === 0) recommendations.push({ grad: "from-emerald-500 to-teal-600", icon: "✓", label: "All Good", title: "All Metrics Look Great", text: "Your synthetic dataset scores well across all validation dimensions. Ready for academic testing and software development." });
 
   return (
-    <div className="min-h-screen bg-gray-100">
+    <div className={inlineData ? "" : "min-h-screen bg-gray-100"}>
 
       {/* ── Hero ─────────────────────────────────────────────────────────────── */}
-      <div className="bg-gradient-to-br from-[#1E1347] via-[#2d1b69] to-[#1a0f3c] px-6 pt-8 pb-0">
+      <div className="bg-gradient-to-br from-[#1E1347] via-[#2d1b69] to-[#1a0f3c] px-6 pt-8 pb-0 rounded-xl overflow-hidden">
         <div className="max-w-5xl mx-auto">
-          <button onClick={() => setLocation("/preview")}
-            className="flex items-center gap-1.5 text-purple-300 hover:text-white text-sm mb-6 transition-colors group">
-            <ArrowLeft className="w-4 h-4 group-hover:-translate-x-0.5 transition-transform" />
-            Back to Preview
-          </button>
+          {!inlineData && (
+            <button onClick={() => setLocation("/preview")}
+              className="flex items-center gap-1.5 text-purple-300 hover:text-white text-sm mb-6 transition-colors group">
+              <ArrowLeft className="w-4 h-4 group-hover:-translate-x-0.5 transition-transform" />
+              Back to Preview
+            </button>
+          )}
 
           <div className="flex items-start justify-between gap-6 flex-wrap pb-6">
             {/* Left: info */}

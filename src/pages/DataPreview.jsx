@@ -3,6 +3,7 @@ import { useLocation } from "wouter";
 import * as XLSX from "xlsx";
 
 import { PYTHON_API } from "../lib/config";
+import ValidationReport from "./ValidationReport";
 const ROWS_PER_PAGE = 25;
 const TABS = ["Table View", "JSON", "Statistics"];
 
@@ -78,8 +79,7 @@ export default function DataPreview() {
   const [error, setError]         = useState("");
   const [validation, setValidation]   = useState(null);
   const [validating, setValidating]   = useState(false);
-  const [detailsOpen, setDetailsOpen] = useState(false);
-  const [exportFormat, setExportFormat] = useState("csv");
+const [exportFormat, setExportFormat] = useState("csv");
   const [exporting, setExporting]       = useState(false);
 
   const exportFormats = [
@@ -341,7 +341,10 @@ export default function DataPreview() {
   // ── main render ──────────────────────────────────────────────────────────
 
   return (
-    <div className="flex gap-4 h-full">
+    <div className="space-y-4">
+      {/* ── Top row: main card + sidebar ── */}
+      <div className="flex gap-4">
+
       {/* ── Main card ── */}
       <div className="flex-1 bg-white border border-gray-100 rounded-xl overflow-hidden shadow-sm flex flex-col min-h-0">
 
@@ -461,161 +464,6 @@ export default function DataPreview() {
         </div>
 
 
-        {/* Validation */}
-        <div className="bg-white border border-gray-100 rounded-xl p-4 shadow-sm">
-          <p className="text-xs font-semibold text-gray-800 mb-3">⚡ Validation</p>
-
-          {validating && (
-            <div className="flex items-center gap-2 text-xs text-gray-400">
-              <div className="w-3 h-3 border-2 border-purple-500 border-t-transparent rounded-full animate-spin" />
-              Analysing…
-            </div>
-          )}
-
-          {!validating && !validation && (
-            <p className="text-xs text-gray-400">Not available</p>
-          )}
-
-          {!validating && validation && (() => {
-            const { overall_score, status, metrics } = validation;
-            const badgeColor =
-              status === "Good"       ? "bg-green-100 text-green-700"  :
-              status === "Acceptable" ? "bg-yellow-100 text-yellow-700" :
-                                        "bg-red-100 text-red-600";
-            const barColor =
-              status === "Good"       ? "bg-green-500"  :
-              status === "Acceptable" ? "bg-yellow-400" :
-                                        "bg-red-500";
-
-            return (
-              <div className="space-y-3">
-                <div>
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="text-xs text-gray-500">Overall Score</span>
-                    <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full ${badgeColor}`}>
-                      {status}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <div className="flex-1 h-2 bg-gray-100 rounded-full overflow-hidden">
-                      <div className={`h-full rounded-full transition-all ${barColor}`} style={{ width: `${overall_score}%` }} />
-                    </div>
-                    <span className="text-xs font-semibold text-gray-800 w-9 text-right">{overall_score}%</span>
-                  </div>
-                </div>
-
-                {[
-                  {
-                    key: "wasserstein", icon: "≋",
-                    desc: "Measures how closely the value ranges and distributions of each column match the original dataset. A higher score means the synthetic data spreads its values the same way the real data does.",
-                  },
-                  {
-                    key: "correlation", icon: "⊡",
-                    desc: "Measures whether the relationships between columns are preserved. For example, if age and salary tend to increase together in the original, the synthetic data should reflect the same pattern.",
-                  },
-                  {
-                    key: "utility", icon: "⚙",
-                    desc: "Trains a machine learning model on the synthetic data and tests it on real data (TSTR). A higher score means the synthetic data is realistic enough to be used for AI/ML training. A lower score is normal for general-purpose datasets.",
-                  },
-                ].map(({ key, icon, desc }) => {
-                  const m = metrics[key];
-                  return (
-                    <div key={key} className="bg-gray-50 rounded-lg px-3 py-2 space-y-1">
-                      <div className="flex justify-between items-center">
-                        <span className="text-[11px] text-gray-500">{icon} {m.label}</span>
-                        <span className="text-xs font-semibold text-gray-800">{m.score}%</span>
-                      </div>
-                      <div className="h-1 bg-gray-200 rounded-full overflow-hidden">
-                        <div
-                          className={`h-full rounded-full ${m.score >= 75 ? "bg-green-400" : m.score >= 50 ? "bg-yellow-400" : "bg-red-400"}`}
-                          style={{ width: `${m.score}%` }}
-                        />
-                      </div>
-                      <p className="text-[10px] text-gray-400 leading-relaxed">{desc}</p>
-                    </div>
-                  );
-                })}
-
-                {Object.keys(metrics.wasserstein.per_column || {}).length > 0 && (
-                  <div>
-                    <button
-                      onClick={() => setDetailsOpen((o) => !o)}
-                      className="text-[11px] text-purple-600 hover:underline flex items-center gap-1"
-                    >
-                      {detailsOpen ? "▾" : "▸"} View per-column scores
-                    </button>
-                    {detailsOpen && (
-                      <div className="mt-2 space-y-1 max-h-40 overflow-y-auto">
-                        {Object.entries(metrics.wasserstein.per_column).map(([col, score]) => (
-                          <div key={col} className="flex justify-between text-[11px]">
-                            <span className="text-gray-500 truncate max-w-[100px]">{col}</span>
-                            <span className={`font-medium ${score >= 75 ? "text-green-600" : score >= 50 ? "text-yellow-600" : "text-red-500"}`}>
-                              {score}%
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {/* Navigate to full report page — passes data via sessionStorage so the URL stays clean */}
-                <button
-                  onClick={() => {
-                    sessionStorage.setItem("validation_report", JSON.stringify({
-                      datasetName,
-                      rowCount:    total_rows,
-                      columnCount: columns.length,
-                      overall_score,
-                      status,
-                      metrics,
-                      col_stats:  validation.col_stats  || {},
-                      null_rates: validation.null_rates || {},
-                    }));
-                    setLocation("/validation-report");
-                  }}
-                  className="w-full mt-1 py-2 rounded-lg text-xs font-semibold bg-gradient-to-r from-purple-600 to-indigo-600 text-white hover:from-purple-700 hover:to-indigo-700 transition-all shadow-sm"
-                >
-                  View Full Report →
-                </button>
-              </div>
-            );
-          })()}
-        </div>
-
-        {/* Export format + download */}
-        <div className="bg-white border border-gray-100 rounded-xl p-4 shadow-sm space-y-2">
-          <p className="text-xs font-semibold text-gray-800 mb-2">Export Format</p>
-          <div className="grid grid-cols-2 gap-1.5">
-            {exportFormats.map((f) => (
-              <button
-                key={f.id}
-                onClick={() => setExportFormat(f.id)}
-                className={`py-1.5 rounded-md text-xs font-medium border transition-colors ${
-                  exportFormat === f.id
-                    ? "bg-purple-600 text-white border-purple-600"
-                    : "border-gray-200 text-gray-600 hover:border-purple-300"
-                }`}
-              >
-                {f.label}
-              </button>
-            ))}
-          </div>
-          <button
-            onClick={handleExport}
-            disabled={exporting}
-            className="w-full py-2.5 bg-purple-600 hover:bg-purple-700 disabled:opacity-60 text-white text-sm font-semibold rounded-lg transition-colors"
-          >
-            {exporting ? "Exporting…" : `↓ Download ${exportFormat.toUpperCase()}`}
-          </button>
-        </div>
-        <button
-          onClick={() => setLocation("/downloads")}
-          className="w-full py-2.5 border border-gray-200 text-gray-600 text-sm rounded-lg hover:bg-gray-50 transition-colors"
-        >
-          ← Back to Downloads
-        </button>
-
         {/* Related entity master tables */}
         {entityTables.length > 0 && (
           <div className="bg-white border border-gray-100 rounded-xl overflow-hidden shadow-sm">
@@ -644,7 +492,28 @@ export default function DataPreview() {
             </div>
           </div>
         )}
-      </div>
+      </div>{/* end sidebar */}
+      </div>{/* end flex gap-4 */}
+
+      {/* ── Inline Validation Report ── */}
+      {validating && (
+        <div className="flex items-center gap-2 text-xs text-gray-400 px-1">
+          <div className="w-3 h-3 border-2 border-purple-500 border-t-transparent rounded-full animate-spin" />
+          Running validation analysis…
+        </div>
+      )}
+      {!validating && validation && (
+        <ValidationReport inlineData={{
+          datasetName,
+          rowCount:    total_rows,
+          columnCount: columns.length,
+          overall_score: validation.overall_score,
+          status:        validation.status,
+          metrics:       validation.metrics,
+          col_stats:     validation.col_stats  || {},
+          null_rates:    validation.null_rates || {},
+        }} />
+      )}
     </div>
   );
 }
