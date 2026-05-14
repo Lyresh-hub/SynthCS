@@ -1865,46 +1865,6 @@ export default function SchemaBuilder() {
       )}
 
       {/* ── Presets strip ── */}
-      {phase !== "loading" && phase !== "generating" && phase !== "smart_searching" && phase !== "smart_augmenting" && (
-        <div className="bg-white border border-gray-100 rounded-xl shadow-sm overflow-hidden">
-          <div className="px-4 py-3 bg-gray-50 space-y-3">
-            {/* Multi-table presets */}
-            <div>
-              <p className="text-xs font-semibold text-gray-600 mb-1.5">Multi-Table Schemas</p>
-              <div className="flex flex-wrap gap-2">
-                {MULTI_TABLE_PRESETS.map((preset) => (
-                  <button
-                    key={preset.name}
-                    onClick={() => loadMultiTablePreset(preset)}
-                    className="flex flex-col items-start px-3 py-2 bg-white border border-purple-200 rounded-lg hover:border-purple-400 hover:bg-purple-50 transition-colors shadow-sm text-left"
-                  >
-                    <span className="text-xs font-semibold text-purple-700">{preset.name}</span>
-                    <span className="text-[10px] text-gray-400 mt-0.5">{preset.description}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-            {/* Single-table presets — all modes combined */}
-            <div>
-              <p className="text-xs font-semibold text-gray-600 mb-1.5">Single-Table Schemas</p>
-              <div className="flex flex-wrap gap-2">
-                {(Object.values(PRESETS) as Preset[][])
-                  .flat()
-                  .filter((p, i, arr) => arr.findIndex((q) => q.name === p.name) === i)
-                  .map((preset) => (
-                    <button
-                      key={preset.name}
-                      onClick={() => loadPreset(preset)}
-                      className="text-xs px-3 py-1.5 bg-white border border-gray-200 rounded-full hover:border-purple-400 hover:text-purple-700 transition-colors font-medium text-gray-700 shadow-sm"
-                    >
-                      {preset.name}
-                    </button>
-                  ))}
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* ── LLM panel ── */}
       {phase !== "loading" && phase !== "generating" && phase !== "smart_searching" && phase !== "smart_augmenting" && (
