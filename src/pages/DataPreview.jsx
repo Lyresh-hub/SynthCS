@@ -3,7 +3,6 @@ import { useLocation } from "wouter";
 import * as XLSX from "xlsx";
 
 import { PYTHON_API } from "../lib/config";
-import ValidationReport from "./ValidationReport";
 const ROWS_PER_PAGE = 25;
 const TABS = ["Table View", "JSON", "Statistics"];
 
@@ -495,25 +494,71 @@ const [exportFormat, setExportFormat] = useState("csv");
       </div>{/* end sidebar */}
       </div>{/* end flex gap-4 */}
 
-      {/* ── Inline Validation Report ── */}
+      {/* ── Validation metrics row ── */}
       {validating && (
         <div className="flex items-center gap-2 text-xs text-gray-400 px-1">
           <div className="w-3 h-3 border-2 border-purple-500 border-t-transparent rounded-full animate-spin" />
           Running validation analysis…
         </div>
       )}
-      {!validating && validation && (
-        <ValidationReport inlineData={{
-          datasetName,
-          rowCount:    total_rows,
-          columnCount: columns.length,
-          overall_score: validation.overall_score,
-          status:        validation.status,
-          metrics:       validation.metrics,
-          col_stats:     validation.col_stats  || {},
-          null_rates:    validation.null_rates || {},
-        }} />
-      )}
+      {!validating && validation && (() => {
+        const { overall_score, status, metrics } = validation;
+        const metricList = [
+          { key: "wasserstein", icon: "≋", accent: "from-violet-500 to-purple-600" },
+          { key: "correlation", icon: "⊡", accent: "from-blue-500 to-indigo-600" },
+          { key: "utility",     icon: "⚙", accent: "from-emerald-500 to-teal-600" },
+        ];
+        const badgeColor =
+          status === "Good"       ? "bg-green-100 text-green-700" :
+          status === "Acceptable" ? "bg-yellow-100 text-yellow-700" :
+                                    "bg-red-100 text-red-600";
+        return (
+          <div className="bg-white border border-gray-100 rounded-xl shadow-sm p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-semibold text-gray-800">⚡ Validation</span>
+                <span className="text-xs text-gray-400">Overall</span>
+                <span className="text-xs font-bold text-gray-900">{overall_score}%</span>
+                <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full ${badgeColor}`}>{status}</span>
+              </div>
+              <button
+                onClick={() => {
+                  sessionStorage.setItem("validation_report", JSON.stringify({
+                    datasetName, rowCount: total_rows, columnCount: columns.length,
+                    overall_score, status, metrics,
+                    col_stats:  validation.col_stats  || {},
+                    null_rates: validation.null_rates || {},
+                  }));
+                  setLocation("/validation-report");
+                }}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-gradient-to-r from-purple-600 to-indigo-600 text-white rounded-lg hover:from-purple-700 hover:to-indigo-700 transition-all"
+              >
+                View Full Report →
+              </button>
+            </div>
+            <div className="grid grid-cols-3 gap-3">
+              {metricList.map(({ key, icon, accent }) => {
+                const m = metrics[key];
+                const barColor = m.score >= 75 ? "bg-green-400" : m.score >= 50 ? "bg-yellow-400" : "bg-red-400";
+                return (
+                  <div key={key} className="border border-gray-100 rounded-xl overflow-hidden">
+                    <div className={`bg-gradient-to-r ${accent} px-4 py-2 flex items-center justify-between`}>
+                      <span className="text-xs font-semibold text-white">{icon} {m.label}</span>
+                      <span className="text-sm font-bold text-white">{m.score}%</span>
+                    </div>
+                    <div className="px-4 py-3">
+                      <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+                        <div className={`h-full rounded-full transition-all ${barColor}`} style={{ width: `${m.score}%` }} />
+                      </div>
+                      <p className="text-[11px] text-gray-400 mt-1.5">{m.verdict ?? (m.score >= 75 ? "Good" : m.score >= 50 ? "Acceptable" : "Poor")}</p>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
