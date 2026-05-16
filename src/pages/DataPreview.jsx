@@ -174,14 +174,25 @@ const [exportFormat, setExportFormat] = useState("csv");
   useEffect(() => {
     if (!datasetId) { setLocation("/downloads"); return; }
     sessionStorage.removeItem("preview_params");
+    const cacheKey = `preview_cache_${datasetId}`;
     fetch(`${PYTHON_API}/api/preview/${datasetId}?limit=200`)
       .then((r) => {
-        if (r.status === 404) throw new Error("expired");
-        if (!r.ok) throw new Error("unavailable");
+        if (!r.ok) throw new Error(r.status === 404 ? "missing" : "unavailable");
         return r.json();
       })
-      .then((d) => { setData(d); setLoading(false); })
-      .catch((e) => { setError(e.message); setLoading(false); });
+      .then((d) => {
+        setData(d);
+        setLoading(false);
+        try { sessionStorage.setItem(cacheKey, JSON.stringify(d)); } catch {}
+      })
+      .catch(() => {
+        const cached = sessionStorage.getItem(cacheKey);
+        if (cached) {
+          try { setData(JSON.parse(cached)); setLoading(false); return; } catch {}
+        }
+        setError("unavailable");
+        setLoading(false);
+      });
   }, [datasetId, retryCount]);
 
   useEffect(() => {
@@ -231,7 +242,6 @@ const [exportFormat, setExportFormat] = useState("csv");
   );
 
   if (error) {
-    const isFileMissing = error === "expired";
     return (
       <div className="flex flex-col items-center justify-center py-20 text-center space-y-4">
         <div className="w-14 h-14 rounded-full bg-amber-50 flex items-center justify-center">
@@ -240,29 +250,21 @@ const [exportFormat, setExportFormat] = useState("csv");
         <div>
           <p className="text-sm font-semibold text-gray-800 mb-1">Preview not available</p>
           <p className="text-xs text-gray-500 max-w-xs">
-            {isFileMissing
-              ? "The dataset file was cleared during a server restart. Please regenerate your dataset — your schema is still saved."
-              : "The generation service is temporarily unavailable. Please try again in a moment."}
+            The generation service is temporarily unavailable. Please try again in a moment.
           </p>
         </div>
         <div className="flex items-center gap-3">
           <button
-            onClick={() => setLocation("/schema-builder")}
-            className="px-4 py-2 bg-purple-600 text-white text-xs font-medium rounded-lg hover:bg-purple-700 transition-colors"
-          >
-            Regenerate in Schema Builder
-          </button>
-          <button
             onClick={() => { setError(""); setLoading(true); setRetryCount(c => c + 1); }}
-            className="px-4 py-2 border border-gray-200 text-gray-600 text-xs font-medium rounded-lg hover:bg-gray-50 transition-colors"
+            className="px-4 py-2 bg-purple-600 text-white text-xs font-medium rounded-lg hover:bg-purple-700 transition-colors"
           >
             Retry
           </button>
           <button
-            onClick={() => setLocation("/dashboard")}
+            onClick={() => setLocation("/schema-builder")}
             className="px-4 py-2 border border-gray-200 text-gray-600 text-xs font-medium rounded-lg hover:bg-gray-50 transition-colors"
           >
-            Back to Dashboard
+            Regenerate
           </button>
         </div>
       </div>
