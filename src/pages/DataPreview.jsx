@@ -76,6 +76,7 @@ export default function DataPreview() {
   const [data, setData]           = useState(null);
   const [loading, setLoading]     = useState(true);
   const [error, setError]         = useState("");
+  const [retryCount, setRetryCount] = useState(0);
   const [validation, setValidation]   = useState(null);
   const [validating, setValidating]   = useState(false);
 const [exportFormat, setExportFormat] = useState("csv");
@@ -174,10 +175,14 @@ const [exportFormat, setExportFormat] = useState("csv");
     if (!datasetId) { setLocation("/downloads"); return; }
     sessionStorage.removeItem("preview_params");
     fetch(`${PYTHON_API}/api/preview/${datasetId}?limit=200`)
-      .then((r) => { if (!r.ok) throw new Error("Preview unavailable"); return r.json(); })
+      .then((r) => {
+        if (r.status === 404) throw new Error("expired");
+        if (!r.ok) throw new Error("unavailable");
+        return r.json();
+      })
       .then((d) => { setData(d); setLoading(false); })
       .catch((e) => { setError(e.message); setLoading(false); });
-  }, [datasetId]);
+  }, [datasetId, retryCount]);
 
   useEffect(() => {
     if (!datasetId) return;
@@ -225,11 +230,48 @@ const [exportFormat, setExportFormat] = useState("csv");
     </div>
   );
 
-  if (error) return (
-    <div className="bg-red-50 border border-red-200 rounded-xl p-6 text-sm text-red-600">
-      {error} — Make sure the Python service is running on port 8000.
-    </div>
-  );
+  if (error) {
+    const isExpired = error === "expired";
+    return (
+      <div className="flex flex-col items-center justify-center py-20 text-center space-y-4">
+        <div className="w-14 h-14 rounded-full bg-red-50 flex items-center justify-center">
+          <span className="text-2xl">{isExpired ? "⏳" : "⚠️"}</span>
+        </div>
+        <div>
+          <p className="text-sm font-semibold text-gray-800 mb-1">
+            {isExpired ? "Dataset has expired" : "Preview unavailable"}
+          </p>
+          <p className="text-xs text-gray-500 max-w-xs">
+            {isExpired
+              ? "This dataset was cleared from the server. Please regenerate it from Schema Builder."
+              : "The generation service is temporarily unavailable. Please try again in a moment."}
+          </p>
+        </div>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => setLocation("/schema-builder")}
+            className="px-4 py-2 bg-purple-600 text-white text-xs font-medium rounded-lg hover:bg-purple-700 transition-colors"
+          >
+            Go to Schema Builder
+          </button>
+          {!isExpired && (
+            <button
+              onClick={() => { setError(""); setLoading(true); setRetryCount(c => c + 1); }}
+              className="px-4 py-2 border border-gray-200 text-gray-600 text-xs font-medium rounded-lg hover:bg-gray-50 transition-colors"
+            >
+              Retry
+            </button>
+          )}
+          <button
+            onClick={() => setLocation("/dashboard")}
+            className="px-4 py-2 border border-gray-200 text-gray-600 text-xs font-medium rounded-lg hover:bg-gray-50 transition-colors"
+          >
+            Back to Dashboard
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   const { columns, rows, total_rows } = data;
   const totalPages  = Math.ceil(rows.length / ROWS_PER_PAGE);
