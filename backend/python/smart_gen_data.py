@@ -578,6 +578,26 @@ _POOLS: dict[str, list[str]] = {
     "environment": ["Development","Staging","Production","Testing","QA","Pre-production","Sandbox"],
     "http_method": ["GET","POST","PUT","DELETE","PATCH","HEAD","OPTIONS"],
     "error_code":  ["200","201","400","401","403","404","422","500","502","503"],
+    "vulnerability":["SQL Injection","Cross-Site Scripting (XSS)","Cross-Site Request Forgery (CSRF)","Buffer Overflow","Remote Code Execution","Privilege Escalation","Directory Traversal","XML Injection","Command Injection","Insecure Deserialization","Broken Authentication","Sensitive Data Exposure","Security Misconfiguration","Zero-Day Exploit","Unpatched Software","Weak Password Policy","Man-in-the-Middle","Insecure API","Outdated Dependencies","Insufficient Logging"],
+    "vulnerability_type":["SQL Injection","Cross-Site Scripting (XSS)","Buffer Overflow","Remote Code Execution","Privilege Escalation","Directory Traversal","Command Injection","Insecure Deserialization","Broken Authentication","Zero-Day Exploit","Security Misconfiguration","Weak Password Policy","Insecure API","CSRF","Outdated Dependencies"],
+    "security_vulnerability":["SQL Injection","XSS","CSRF","Buffer Overflow","Remote Code Execution","Privilege Escalation","Directory Traversal","Command Injection","Insecure Deserialization","Broken Authentication","Zero-Day Exploit","Security Misconfiguration","Weak Password","Insecure Direct Object Reference","Unvalidated Redirects"],
+    "defense":     ["Firewall","Intrusion Detection System (IDS)","Intrusion Prevention System (IPS)","Multi-Factor Authentication","Encryption","Patch Management","Security Awareness Training","Web Application Firewall (WAF)","VPN","Endpoint Protection","Zero Trust Architecture","Network Segmentation","Security Information and Event Management (SIEM)","Honeypot","Regular Backup"],
+    "defense_mechanism":["Firewall","IDS/IPS","Multi-Factor Authentication","Encryption","WAF","Patch Management","Security Training","VPN","Endpoint Protection","Zero Trust","Network Segmentation","SIEM","Data Loss Prevention","Honeypot","Access Control"],
+    "mechanism":   ["Firewall","IDS/IPS","Multi-Factor Authentication","Encryption","WAF","Patch Management","VPN","Endpoint Protection","SIEM","Data Loss Prevention","Access Control","Network Segmentation","Zero Trust Architecture"],
+    "incident":    ["Data Breach","Ransomware Attack","Phishing Campaign","DDoS Attack","Insider Threat","Malware Infection","Unauthorized Access","Service Disruption","Data Exfiltration","Account Compromise","System Outage","SQL Injection Attack","Credential Theft","Advanced Persistent Threat","Social Engineering"],
+    "incident_type":["Data Breach","Ransomware Attack","Phishing","DDoS","Insider Threat","Malware","Unauthorized Access","Service Disruption","Data Exfiltration","Account Compromise","SQL Injection","Credential Theft","APT","Social Engineering","Physical Security Breach"],
+    "attack_type": ["SQL Injection","Cross-Site Scripting","DDoS","Phishing","Brute Force","Man-in-the-Middle","Ransomware","Zero-Day","Port Scan","Credential Stuffing","Social Engineering","Drive-by Download","DNS Spoofing","ARP Poisoning","Watering Hole"],
+    "resolution":  ["Resolved","Escalated","Pending Review","Under Investigation","Closed — No Action","Mitigated","Patched","User Notified","System Restored","False Positive","Monitoring Continued","Referred to Vendor","Quarantined","Blocked at Firewall","Workaround Applied"],
+    "resolution_status":["Resolved","Escalated","Pending","Under Investigation","Closed","Mitigated","Patched","False Positive","Monitoring","Quarantined","Blocked","Workaround Applied"],
+    "detection_method":["SIEM Alert","IDS/IPS Alert","User Report","Log Analysis","Antivirus Detection","Honeypot Trigger","Threat Intelligence Feed","Manual Audit","Automated Scan","Anomaly Detection","Firewall Log","Endpoint Alert","Network Traffic Analysis","Email Filter","Third-party Report"],
+    "impact":      ["Minimal","Low","Moderate","High","Critical","Catastrophic","No Impact","Data Loss","Financial Loss","Reputational Damage","Service Disruption","Regulatory Penalty"],
+    "attack_source":["External Threat Actor","Insider Threat","Nation-State","Hacktivist","Criminal Organization","Script Kiddie","Competitor","Automated Bot","Phishing Campaign","Supply Chain Attack","Unknown"],
+    "affected":    ["Web Application","Database Server","Email Server","File Server","Workstation","Mobile Device","Network Infrastructure","Cloud Service","API Gateway","IoT Device","Virtual Machine","Container","User Account","Third-party Service","Payment System"],
+    "target":      ["Web Application","Database","Email System","File Server","Workstation","Network Device","Cloud Infrastructure","API","IoT Device","Payment System","User Credentials","Source Code","Intellectual Property","Customer Data","Financial Records"],
+    "target_industry":["Finance","Healthcare","Government","Education","Retail","Technology","Manufacturing","Energy","Telecommunications","Transportation","Media","Legal","Insurance","Real Estate","Agriculture"],
+    "industry":    ["Finance","Healthcare","Government","Education","Retail","Technology","Manufacturing","Energy","Telecommunications","Transportation","Media","Legal","Insurance","Real Estate","Agriculture"],
+    "sector":      ["Public","Private","Non-profit","Government","Financial","Healthcare","Technology","Education","Energy","Retail","Manufacturing","Telecommunications","Media","Legal","Defense"],
+    "mitigation":  ["Apply Security Patch","Update Firewall Rules","Reset Credentials","Block Malicious IP","Isolate Affected System","Enable MFA","Security Awareness Training","Restore from Backup","Engage Incident Response","Notify Stakeholders","Conduct Forensic Analysis","Implement Monitoring","Review Access Controls","Vulnerability Scan","Penetration Testing"],
 }
 
 _NUMERIC_SMART: dict[str, tuple[float, float, str]] = {
@@ -773,11 +793,34 @@ def _extract_enum_from_description(description: str) -> list[str] | None:
         if result and 2 <= len(result) <= 12:
             return result
 
+    # "(A, B, C)" or "(A, B, C, etc.)" — parenthesized value list anywhere in description
+    for m in re.finditer(r'\(([^)]{4,})\)', desc):
+        inner = re.sub(r'\betc\.?\b', '', m.group(1), flags=re.IGNORECASE).strip().rstrip(',').strip()
+        result = _split_list(inner)
+        if result and 2 <= len(result) <= 20:
+            return result
+
     return None
 
 
 def _keyword_pool(field_name: str, description: str) -> list | None:
     hint = (field_name + " " + description).lower().replace("_", " ")
+
+    # Philippine geographic context: must run before standard pass so
+    # "philippines region" doesn't fall through to the generic "region" pool
+    _is_ph = any(k in hint for k in _PH_KEYWORDS)
+    if _is_ph:
+        if any(w in hint for w in ("region", "luzon", "visayas", "mindanao", "ncr")):
+            return _POOLS["ph_region"]
+        if "province" in hint:
+            return _POOLS["ph_province"]
+        if any(w in hint for w in ("city", "municipality", "ciudad", "lungsod")):
+            return PH_CITIES
+        if any(w in hint for w in ("barangay", "brgy", "village", "sitio")):
+            # Use Olongapo barangays by default for Philippines context
+            city = next((c for c in hint.split() if c.title() in _PH_GEO), "Olongapo City")
+            _, brgys = _PH_GEO.get(city.title(), _PH_GEO["Olongapo City"])
+            return brgys
 
     # Domain pre-pass: for product/item name fields, check domain context first
     # so "grocery product name" returns grocery products, not electronics
@@ -814,23 +857,43 @@ def gen_col(ftype: str, n: int, c: Any, field_name: str = "", description: str =
         min_val = getattr(c, "min_val", None)
         max_val = getattr(c, "max_val", None)
         if min_val is None and max_val is None:
-            for kw, (s_lo, s_hi, s_dist) in _NUMERIC_SMART.items():
-                if kw in fname:
-                    # Create a simple namespace so attribute access works below
+            _ph_override = False
+            # Philippine lat/lon bounds override global defaults
+            if _is_ph_locale(field_name, description):
+                if any(k in fname for k in ("lat", "latitude")):
                     class _C:
                         pass
                     _cc = _C()
-                    _cc.min_val      = s_lo
-                    _cc.max_val      = s_hi
-                    _cc.distribution = s_dist
-                    _cc.null_rate    = getattr(c, "null_rate", 0)
-                    _cc.enum_values  = []
-                    _cc.cardinality  = None
-                    _cc.date_from    = None
-                    _cc.date_to      = None
-                    _cc.true_ratio   = 0.5
-                    c = _cc
-                    break
+                    _cc.min_val = 5.0; _cc.max_val = 21.0; _cc.distribution = "uniform"
+                    _cc.null_rate = getattr(c, "null_rate", 0); _cc.enum_values = []
+                    _cc.cardinality = None; _cc.date_from = None; _cc.date_to = None; _cc.true_ratio = 0.5
+                    c = _cc; _ph_override = True
+                elif any(k in fname for k in ("lon", "lng", "longitude")):
+                    class _C:
+                        pass
+                    _cc = _C()
+                    _cc.min_val = 116.0; _cc.max_val = 127.0; _cc.distribution = "uniform"
+                    _cc.null_rate = getattr(c, "null_rate", 0); _cc.enum_values = []
+                    _cc.cardinality = None; _cc.date_from = None; _cc.date_to = None; _cc.true_ratio = 0.5
+                    c = _cc; _ph_override = True
+            if not _ph_override:
+                for kw, (s_lo, s_hi, s_dist) in _NUMERIC_SMART.items():
+                    if kw in fname:
+                        # Create a simple namespace so attribute access works below
+                        class _C:
+                            pass
+                        _cc = _C()
+                        _cc.min_val      = s_lo
+                        _cc.max_val      = s_hi
+                        _cc.distribution = s_dist
+                        _cc.null_rate    = getattr(c, "null_rate", 0)
+                        _cc.enum_values  = []
+                        _cc.cardinality  = None
+                        _cc.date_from    = None
+                        _cc.date_to      = None
+                        _cc.true_ratio   = 0.5
+                        c = _cc
+                        break
 
     dist         = getattr(c, "distribution", "uniform") or "uniform"
     enum_values  = getattr(c, "enum_values",  []) or []
@@ -953,11 +1016,14 @@ def gen_col(ftype: str, n: int, c: Any, field_name: str = "", description: str =
                         dtype=object,
                     )
                 elif has_tech:
-                    # Technical identifier name — random alphanumeric
+                    # Technical identifier name — short readable slugs
+                    entity = (
+                        fname.replace("_name", "").replace("name_", "").strip("_").title()
+                        or "Item"
+                    )
                     k = max(1, cardinality or 50)
-                    pool = ["".join(random.choices(string.ascii_lowercase, k=random.randint(4, 10)))
-                            for _ in range(min(k, 5_000))]
-                    data = np.random.choice(pool, n).astype(object)
+                    labels = [f"{entity}_{str(j + 1).zfill(3)}" for j in range(min(k, 5_000))]
+                    data = np.random.choice(labels, n).astype(object)
                 else:
                     # Non-person entity with no pool (e.g. generic "name" in a products
                     # table, or a novel entity type) — use a labelled generic fallback
@@ -976,10 +1042,16 @@ def gen_col(ftype: str, n: int, c: Any, field_name: str = "", description: str =
             if smart_pool:
                 data = np.random.choice(smart_pool, n).astype(object)
             else:
+                entity = (
+                    fname.replace("_name", "").replace("_value", "").replace("_type", "")
+                         .replace("_code", "").strip("_").replace("_", " ").title()
+                    or "Value"
+                )
                 k = max(1, cardinality or 50)
-                pool = ["".join(random.choices(string.ascii_lowercase, k=random.randint(4, 10)))
-                        for _ in range(min(k, 5_000))]
-                data = np.random.choice(pool, n).astype(object)
+                labels = [f"{entity} {str(j + 1).zfill(2)}" for j in range(min(k, n))]
+                arr = np.array(labels * (n // len(labels) + 1), dtype=object)[:n]
+                np.random.shuffle(arr)
+                data = arr
 
     elif ftype == "boolean":
         r = max(0.0, min(1.0, true_ratio))
@@ -1071,10 +1143,16 @@ def gen_col(ftype: str, n: int, c: Any, field_name: str = "", description: str =
         ], dtype=object)
 
     else:
-        data = np.array([
-            "".join(random.choices(string.ascii_lowercase, k=random.randint(4, 10)))
-            for _ in range(n)
-        ], dtype=object)
+        entity = (
+            fname.replace("_name", "").replace("_value", "").replace("_type", "")
+                 .replace("_code", "").strip("_").replace("_", " ").title()
+            or "Item"
+        )
+        k = max(1, cardinality or 30)
+        labels = [f"{entity} {str(j + 1).zfill(2)}" for j in range(min(k, n))]
+        arr = np.array(labels * (n // len(labels) + 1), dtype=object)[:n]
+        np.random.shuffle(arr)
+        data = arr
 
     data[null_mask] = None
     return data
