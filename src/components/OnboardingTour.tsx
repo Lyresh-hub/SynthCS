@@ -82,9 +82,10 @@ function tooltipPos(rect: DOMRect, placement: "right" | "bottom"): React.CSSProp
 
 interface Props {
   onDone: () => void;
+  onFinish: () => void; // called specifically on "Get Started" — navigate to Schema Builder
 }
 
-export default function OnboardingTour({ onDone }: Props) {
+export default function OnboardingTour({ onDone, onFinish }: Props) {
   const [step, setStep] = useState(0);
   const [rect, setRect] = useState<DOMRect | null>(null);
 
@@ -97,13 +98,12 @@ export default function OnboardingTour({ onDone }: Props) {
     const r = findVisible(current.target);
     setRect(r);
     if (r) {
-      // Scroll element into view smoothly if needed
       const el = document.querySelector(current.target);
       el?.scrollIntoView({ block: "nearest", behavior: "smooth" });
     }
   }, [step, current.target]);
 
-  function next() { step < STEPS.length - 1 ? setStep((s) => s + 1) : onDone(); }
+  function next() { step < STEPS.length - 1 ? setStep((s) => s + 1) : onFinish(); }
   function prev() { if (step > 0) setStep((s) => s - 1); }
 
   const hasSpotlight = !!current.target && !!rect;

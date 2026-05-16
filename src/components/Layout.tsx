@@ -63,8 +63,9 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   const userId = localStorage.getItem("user_id") ?? "";
   const tourKey = `synthcs_tour_done_${userId}`;
   const [showTour, setShowTour] = useState(() => localStorage.getItem(tourKey) !== "true");
-  function startTour() { setShowTour(true); }
-  function endTour()   { localStorage.setItem(tourKey, "true"); setShowTour(false); }
+  function startTour()  { setShowTour(true); }
+  function endTour()    { localStorage.setItem(tourKey, "true"); setShowTour(false); }
+  function finishTour() { localStorage.setItem(tourKey, "true"); setShowTour(false); setLocation("/schema-builder"); }
 
   // ── Mobile sidebar ─────────────────────────────────────────────────────────
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -329,7 +330,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
         </main>
       </div>
 
-      {showTour && <OnboardingTour onDone={endTour} />}
+      {showTour && <OnboardingTour onDone={endTour} onFinish={finishTour} />}
     </div>
   );
 }
