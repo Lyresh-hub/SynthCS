@@ -1,5 +1,6 @@
 import { useState, useEffect, Fragment } from "react";
 import { useLocation } from "wouter";
+import { pushNotification } from "../lib/notifications";
 import {
   Plus, Trash2, GripVertical, Layers, X,
   Search, Download, RefreshCw, AlertCircle, Save, ChevronDown, ChevronRight, Sparkles, Upload,
@@ -827,6 +828,7 @@ export default function SchemaBuilder() {
         rows:          data.total_rows,
         entity_tables: (data.table_names as string[]).filter((n) => n !== data.primary_table),
       }));
+      pushNotification({ title: data.primary_table, message: `${data.total_rows.toLocaleString()} rows · ${data.table_names.length} tables`, dataset_id: data.dataset_id });
       setLocation("/preview");
     } catch (e: any) {
       setErrorMsg(e.message ?? "Multi-table generation failed.");
@@ -1502,6 +1504,7 @@ export default function SchemaBuilder() {
         rows: rowCount, ref: "",
         entity_tables: entityTables,
       }));
+      pushNotification({ title: getActiveTable()?.name ?? "dataset", message: `${rowCount.toLocaleString()} rows · LLM + CTGAN`, dataset_id: data.dataset_id });
       setLocation("/preview");
     } catch (e: any) {
       setErrorMsg(e.message ?? "CTGAN expansion failed."); setPhase("error");
@@ -1564,6 +1567,7 @@ export default function SchemaBuilder() {
         }).catch(() => {});
       }
 
+      pushNotification({ title: at.name, message: `${rowCount.toLocaleString()} rows · LLM + CTGAN`, dataset_id: expandData.dataset_id });
       sessionStorage.setItem("preview_params", JSON.stringify({
         id:            expandData.dataset_id,
         name:          at.name,
@@ -1641,6 +1645,7 @@ export default function SchemaBuilder() {
         }).catch(() => {});
       }
       sessionStorage.setItem("preview_params", JSON.stringify({ id: datasetId, name: getActiveTable()?.name ?? "dataset", rows: rowCount, ref: kaggleRef }));
+      pushNotification({ title: getActiveTable()?.name ?? "dataset", message: `${rowCount.toLocaleString()} rows · ${selectedDataSource}`, dataset_id: datasetId });
       setLocation("/preview");
     } catch (e: any) {
       setErrorMsg(e.message ?? "Generation failed. Check the Python service logs."); setPhase("error");
