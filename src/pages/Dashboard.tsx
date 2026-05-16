@@ -3,7 +3,7 @@ import { useLocation } from "wouter";
 import {
   Database, TrendingUp, BookMarked, Download,
   Plus, Sparkles, ChevronDown, FileSpreadsheet,
-  FileJson, FileCode, RefreshCw,
+  FileJson, FileCode,
 } from "lucide-react";
 import { cn } from "../lib/utils";
 
@@ -113,10 +113,81 @@ export default function Dashboard() {
     { label: "Downloads",          value: loading ? "—" : datasets.length.toLocaleString(),  icon: Download },
   ];
 
+  if (loading) return (
+    <div className="space-y-5 animate-pulse">
+      {/* Stat cards skeleton */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+        {[...Array(4)].map((_, i) => (
+          <div key={i} className="bg-white border border-gray-100 rounded-xl p-4 shadow-sm">
+            <div className="w-8 h-8 rounded-lg bg-gray-100 mb-3" />
+            <div className="h-7 w-16 bg-gray-200 rounded-md mb-1.5" />
+            <div className="h-3 w-24 bg-gray-100 rounded" />
+          </div>
+        ))}
+      </div>
+      {/* Middle row skeleton */}
+      <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+        <div className="md:col-span-3 bg-white border border-gray-100 rounded-xl p-5 shadow-sm space-y-4">
+          <div className="flex items-center gap-2">
+            <div className="w-7 h-7 rounded-lg bg-gray-100" />
+            <div className="h-4 w-28 bg-gray-200 rounded" />
+          </div>
+          <div className="h-9 bg-gray-100 rounded-md" />
+          <div className="space-y-2">
+            <div className="h-3 w-12 bg-gray-100 rounded" />
+            <div className="h-2 bg-gray-100 rounded-full" />
+          </div>
+          <div className="grid grid-cols-4 gap-2">
+            {[...Array(4)].map((_, i) => <div key={i} className="h-12 bg-gray-100 rounded-md" />)}
+          </div>
+          <div className="h-10 bg-gray-200 rounded-md" />
+        </div>
+        <div className="md:col-span-2 bg-white border border-gray-100 rounded-xl p-5 shadow-sm">
+          <div className="flex items-center gap-2 mb-4">
+            <div className="w-7 h-7 rounded-lg bg-gray-100" />
+            <div className="h-4 w-28 bg-gray-200 rounded" />
+          </div>
+          <div className="space-y-2">
+            {[...Array(4)].map((_, i) => (
+              <div key={i} className="flex items-center gap-3 px-3 py-2.5">
+                <div className="w-7 h-7 rounded-md bg-gray-100 flex-shrink-0" />
+                <div className="flex-1 space-y-1.5">
+                  <div className="h-3 w-3/4 bg-gray-200 rounded" />
+                  <div className="h-2.5 w-1/2 bg-gray-100 rounded" />
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="h-9 mt-3 bg-gray-100 rounded-lg border border-dashed border-gray-200" />
+        </div>
+      </div>
+      {/* Recent datasets skeleton */}
+      <div className="bg-white border border-gray-100 rounded-xl p-5 shadow-sm">
+        <div className="flex items-center justify-between mb-4">
+          <div className="h-4 w-32 bg-gray-200 rounded" />
+          <div className="h-3 w-12 bg-gray-100 rounded" />
+        </div>
+        <div className="space-y-1">
+          {[...Array(5)].map((_, i) => (
+            <div key={i} className="flex items-center gap-3 px-3 py-2.5">
+              <div className="w-8 h-8 rounded-lg bg-gray-100 flex-shrink-0" />
+              <div className="flex-1 space-y-1.5">
+                <div className="h-3 w-2/5 bg-gray-200 rounded" />
+                <div className="h-2.5 w-1/4 bg-gray-100 rounded" />
+              </div>
+              <div className="h-5 w-10 bg-gray-100 rounded-full" />
+              <div className="h-3 w-12 bg-gray-100 rounded" />
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+
   return (
     <div className="space-y-5">
       {/* Stats cards sa tuktok — nagpapakita ng overview ng activity ng user */}
-      <div className="grid grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
         {statsCards.map((stat) => {
           const Icon = stat.icon;
           return (
@@ -125,7 +196,6 @@ export default function Dashboard() {
                 <div className="w-8 h-8 rounded-lg bg-purple-50 flex items-center justify-center">
                   <Icon className="w-4 h-4 text-purple-600" />
                 </div>
-                {loading && <RefreshCw className="w-3.5 h-3.5 text-gray-300 animate-spin" />}
               </div>
               <div className="text-2xl font-bold text-gray-900">{stat.value}</div>
               <div className="text-xs text-gray-400 mt-0.5">{stat.label}</div>
@@ -134,7 +204,7 @@ export default function Dashboard() {
         })}
       </div>
 
-      <div className="grid grid-cols-5 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
         {/* Quick Generate card — dito pwede agad mag-generate ng dataset */}
         <div className="col-span-3 bg-white border border-gray-100 rounded-xl p-5 shadow-sm">
           <div className="flex items-center gap-2 mb-4">
@@ -266,12 +336,7 @@ export default function Dashboard() {
             </button>
           </div>
 
-          {/* Loading spinner, empty state, o lista ng schemas */}
-          {loading ? (
-            <div className="flex justify-center py-6">
-              <RefreshCw className="w-4 h-4 text-purple-400 animate-spin" />
-            </div>
-          ) : recentSchemas.length === 0 ? (
+          {recentSchemas.length === 0 ? (
             <p className="text-xs text-gray-400 text-center py-6">No schemas yet.</p>
           ) : (
             <div className="space-y-1">
@@ -314,12 +379,7 @@ export default function Dashboard() {
           </button>
         </div>
 
-        {/* Nagpapakita ng spinner habang naglo-load, empty state, o lista ng datasets */}
-        {loading ? (
-          <div className="flex justify-center py-6">
-            <RefreshCw className="w-4 h-4 text-purple-400 animate-spin" />
-          </div>
-        ) : recentDatasets.length === 0 ? (
+        {recentDatasets.length === 0 ? (
           <div className="py-8 text-center text-sm text-gray-400">
             No datasets yet —{" "}
             <button onClick={() => setLocation("/schema-builder")} className="text-purple-600 hover:underline">
