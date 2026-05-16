@@ -1,11 +1,11 @@
-/* Ini-import ang mga built-in styles ng Tailwind — base, components, at utilities */
+/* Ini-import mga built-in styles ng Tailwind — base, components, at utilities */
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-/* Base styles — mga default na estilo na applicable sa buong app */
+/* Base styles — mga default na style na applicable sa buong app */
 @layer base {
-  /* Tinitiyak na kasama ang padding at border sa lahat ng element width */
+  /* minamake sure na kasama ang padding at border sa lahat ng element width */
   * {
     box-sizing: border-box;
   }
@@ -17,6 +17,21 @@
     margin: 0;
     padding: 0;
   }
+}
+
+/* Onboarding tour card entrance */
+@keyframes tour-card-enter {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.tour-card-enter {
+  animation: tour-card-enter 0.18s ease-out both;
+}
+
+/* Indeterminate progress bar animation used in GeneratingLoader */
+@keyframes synthgen-slide {
+  0%   { background-position: 100% 0; }
+  100% { background-position: -100% 0; }
 }
 
 /* Custom utility classes — mga pwedeng gamitin kahit saan sa app */

@@ -99,6 +99,7 @@ export default function Login() {
       localStorage.setItem("user_id",   json.id);
       localStorage.setItem("user_name", json.full_name);
       localStorage.setItem("is_admin",  json.is_admin ? "true" : "false");
+      sessionStorage.removeItem("schema_builder_draft");
       setLocation("/dashboard");
     } catch {
       setServerError("Could not reach the server. Make sure the backend is running.");

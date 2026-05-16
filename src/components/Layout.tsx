@@ -2,20 +2,21 @@ import { useState, useEffect, useRef } from "react";
 import { useLocation, Link, useRoute } from "wouter";
 import {
   LayoutDashboard, Layers, Download,
-  Bell, Plus, FileJson, Settings, CheckCheck, Trash2, Database, Menu, X,
+  Bell, Plus, FileJson, Settings, CheckCheck, Trash2, Database, Menu, X, HelpCircle,
 } from "lucide-react";
 import { cn } from "../lib/utils";
 import {
   getNotifications, markRead, markAllRead, clearNotifications,
   subscribeNotifications, type AppNotification,
 } from "../lib/notifications";
+import OnboardingTour from "./OnboardingTour";
 
 // Mga link na lalabas sa sidebar para sa regular na users
 const navItems = [
-  { label: "Dashboard",     icon: LayoutDashboard, href: "/dashboard" },
-  { label: "Schema Builder", icon: Layers,         href: "/schema-builder" },
-  { label: "Saved Schemas",  icon: FileJson,       href: "/saved-schemas", indent: true }, // naka-indent dahil sub-item ito
-  { label: "Downloads",     icon: Download,        href: "/downloads" },
+  { label: "Dashboard",     icon: LayoutDashboard, href: "/dashboard",      tourKey: "nav-dashboard" },
+  { label: "Schema Builder", icon: Layers,         href: "/schema-builder", tourKey: "nav-schema" },
+  { label: "Saved Schemas",  icon: FileJson,       href: "/saved-schemas",  tourKey: "nav-saved",    indent: true },
+  { label: "Downloads",     icon: Download,        href: "/downloads",      tourKey: "nav-downloads" },
 ];
 
 // Ginagawa natin yung dalawang initials galing sa buong pangalan — hal. "Juan dela Cruz" = "JD"
@@ -57,6 +58,13 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   }
 
   const userInitials = getInitials(userName);
+
+  // ── Onboarding tour — keyed per user so each new account sees it once ───────
+  const userId = localStorage.getItem("user_id") ?? "";
+  const tourKey = `synthcs_tour_done_${userId}`;
+  const [showTour, setShowTour] = useState(() => localStorage.getItem(tourKey) !== "true");
+  function startTour() { setShowTour(true); }
+  function endTour()   { localStorage.setItem(tourKey, "true"); setShowTour(false); }
 
   // ── Mobile sidebar ─────────────────────────────────────────────────────────
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -124,6 +132,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           return (
             <Link key={item.href} href={item.href}>
               <div
+                data-tour={item.tourKey}
                 onClick={() => setSidebarOpen(false)}
                 className={cn(
                   "flex items-center gap-2.5 px-3 py-2 rounded-md text-sm font-medium cursor-pointer transition-colors",
@@ -139,7 +148,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
         })}
       </nav>
 
-      <div className="p-3 border-t border-gray-100">
+      <div className="p-3 border-t border-gray-100 space-y-1">
         <Link href="/user-accounts">
           <div
             onClick={() => setSidebarOpen(false)}
@@ -162,6 +171,13 @@ export default function Layout({ children }: { children: React.ReactNode }) {
             <Settings className={cn("w-3 h-3 flex-shrink-0", isAccountPage ? "text-purple-500" : "text-gray-400")} />
           </div>
         </Link>
+        <button
+          onClick={() => { setSidebarOpen(false); startTour(); }}
+          className="w-full flex items-center gap-2 px-3 py-1.5 rounded-md text-xs text-gray-400 hover:text-purple-600 hover:bg-purple-50 transition-colors"
+        >
+          <HelpCircle className="w-3.5 h-3.5 flex-shrink-0" />
+          Take a Tour
+        </button>
       </div>
     </>
   );
@@ -238,6 +254,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
               {/* Notification bell */}
               <div className="relative" ref={bellRef}>
                 <button
+                  data-tour="notif-bell"
                   onClick={() => { setBellOpen((o) => !o); if (!bellOpen) markAllRead(); }}
                   className="relative w-8 h-8 flex items-center justify-center rounded-md hover:bg-gray-100 transition-colors"
                 >
@@ -296,6 +313,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
 
               {/* New Dataset → Schema Builder */}
               <button
+                data-tour="new-dataset-btn"
                 onClick={() => setLocation("/schema-builder")}
                 className="flex items-center gap-1.5 px-2.5 py-1.5 bg-purple-600 text-white text-xs font-medium rounded-md hover:bg-purple-700 transition-colors"
               >
@@ -310,6 +328,8 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           {children}
         </main>
       </div>
+
+      {showTour && <OnboardingTour onDone={endTour} />}
     </div>
   );
 }

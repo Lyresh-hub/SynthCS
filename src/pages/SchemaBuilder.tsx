@@ -5,6 +5,7 @@ import {
   Plus, Trash2, GripVertical, Layers, X,
   Search, Download, RefreshCw, AlertCircle, Save, ChevronDown, ChevronRight, Sparkles, Upload,
 } from "lucide-react";
+import GeneratingLoader from "../components/GeneratingLoader";
 
 import { NODE_API, PYTHON_API } from "../lib/config";
 
@@ -476,9 +477,12 @@ function detectPromptExtras(prompt: string): string[] {
 
 // ── Draft persistence helpers ─────────────────────────────────────────────────
 
-// Reads the autosaved draft from sessionStorage. Returns null if a
-// load_schema_id is pending (that flow takes priority) or if no draft exists.
+// Reads the autosaved draft — only on a true page reload (F5 / Ctrl+R),
+// never when navigating to the page from within the app.
 function readDraft(): { tables: Table[]; activeTableId: string; rowCount: number; mode: Mode } | null {
+  const navEntry = performance.getEntriesByType?.("navigation")?.[0] as PerformanceNavigationTiming | undefined;
+  const isReload = navEntry ? navEntry.type === "reload" : performance.navigation?.type === 1;
+  if (!isReload) return null;
   if (sessionStorage.getItem("load_schema_id")) return null;
   const raw = sessionStorage.getItem("schema_builder_draft");
   if (!raw) return null;
@@ -1931,19 +1935,11 @@ export default function SchemaBuilder() {
 
       {/* ── Smart search results panel ── */}
       {phase === "smart_searching" && (
-        <div className="bg-white border border-gray-100 rounded-xl p-10 shadow-sm flex flex-col items-center gap-3">
-          <RefreshCw className="w-6 h-6 text-purple-600 animate-spin" />
-          <p className="text-sm font-medium text-gray-700">Searching all dataset sources…</p>
-          <p className="text-xs text-gray-400">Checking Kaggle, Hugging Face, UCI, OpenML, Data.gov.ph & PSA simultaneously</p>
-        </div>
+        <GeneratingLoader phase="searching" />
       )}
 
       {phase === "smart_augmenting" && (
-        <div className="bg-white border border-gray-100 rounded-xl p-10 shadow-sm flex flex-col items-center gap-3">
-          <RefreshCw className="w-6 h-6 text-purple-600 animate-spin" />
-          <p className="text-sm font-medium text-gray-700">{loadingMsg}</p>
-          <p className="text-xs text-gray-400">Downloading real data and detecting missing fields from your description…</p>
-        </div>
+        <GeneratingLoader phase="augmenting" message={loadingMsg || undefined} />
       )}
 
       {phase === "smart_results" && (
@@ -2329,11 +2325,10 @@ export default function SchemaBuilder() {
 
       {/* ── Loading / Generating ── */}
       {(phase === "loading" || phase === "generating") && (
-        <div className="bg-white border border-gray-100 rounded-xl p-10 shadow-sm flex flex-col items-center gap-3">
-          <RefreshCw className="w-6 h-6 text-purple-600 animate-spin" />
-          <p className="text-sm font-medium text-gray-700">{loadingMsg}</p>
-          {phase === "generating" && <p className="text-xs text-gray-400">This may take a few minutes.</p>}
-        </div>
+        <GeneratingLoader
+          phase={phase === "generating" ? "generating" : "loading"}
+          message={loadingMsg || undefined}
+        />
       )}
 
       {/* ── Search results ── */}
@@ -2867,9 +2862,19 @@ export default function SchemaBuilder() {
                               return <span className="text-xs font-medium px-2.5 py-1 rounded-full bg-purple-100 text-purple-700">AI Generated Schema</span>;
               return <div className="flex items-center gap-1.5">{tags}</div>;
             })()}
-            <button onClick={() => { setPhase("idle"); setSearchQuery(""); setSearchResults([]); setSaveStatus("idle"); }}
-              className="text-xs text-gray-400 hover:text-gray-600 transition-colors">
-              ← New search
+            <button
+              onClick={() => {
+                sessionStorage.removeItem("schema_builder_draft");
+                setTables([]);
+                setActiveTableId("");
+                setPhase("idle");
+                setSearchQuery("");
+                setSearchResults([]);
+                setSaveStatus("idle");
+              }}
+              className="text-xs text-gray-400 hover:text-red-500 transition-colors"
+            >
+              ← Start Over
             </button>
           </div>
 

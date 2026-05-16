@@ -218,6 +218,7 @@ export default function UserAccounts() {
     localStorage.removeItem("user_name");
     localStorage.removeItem("is_admin");
     localStorage.removeItem("last_path");
+    sessionStorage.removeItem("schema_builder_draft");
     setLocation("/");
   }
 
