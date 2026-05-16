@@ -347,7 +347,7 @@ function Toggle({ value, onChange }: ToggleProps) {
 }
 
 const styles: Record<string, CSSProperties> = {
-  root: { fontFamily: "'Segoe UI', sans-serif", color: "#1a1a2e", maxWidth: 900 },
+  root: { fontFamily: "'Segoe UI', sans-serif", color: "#1a1a2e", maxWidth: 900, margin: "0 auto" },
   pageHeader: { display: "flex", alignItems: "center", gap: 16, marginBottom: 28 },
   avatarLarge: { width: 52, height: 52, borderRadius: 14, background: "linear-gradient(135deg, #6c63ff, #a78bfa)", color: "#fff", fontSize: 18, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center" },
   pageTitle: { margin: 0, fontSize: 22, fontWeight: 700, color: "#1a1a2e" },
