@@ -1,11 +1,9 @@
 import { useState, useEffect } from "react";
-import { Sparkles, Search, Download, Cpu } from "lucide-react";
 
 type LoaderPhase = "generating" | "loading" | "searching" | "augmenting";
 
-const PHASE_CONFIG: Record<LoaderPhase, { icon: React.ReactNode; messages: string[] }> = {
+const PHASE_CONFIG: Record<LoaderPhase, { messages: string[] }> = {
   generating: {
-    icon: <Sparkles className="w-5 h-5 text-white" />,
     messages: [
       "Teaching the model your schema…",
       "Synthesizing realistic patterns…",
@@ -15,7 +13,6 @@ const PHASE_CONFIG: Record<LoaderPhase, { icon: React.ReactNode; messages: strin
     ],
   },
   loading: {
-    icon: <Download className="w-5 h-5 text-white" />,
     messages: [
       "Fetching your data…",
       "Processing columns…",
@@ -24,7 +21,6 @@ const PHASE_CONFIG: Record<LoaderPhase, { icon: React.ReactNode; messages: strin
     ],
   },
   searching: {
-    icon: <Search className="w-5 h-5 text-white" />,
     messages: [
       "Scanning Kaggle…",
       "Checking Hugging Face…",
@@ -34,7 +30,6 @@ const PHASE_CONFIG: Record<LoaderPhase, { icon: React.ReactNode; messages: strin
     ],
   },
   augmenting: {
-    icon: <Cpu className="w-5 h-5 text-white" />,
     messages: [
       "Downloading real data…",
       "Detecting missing fields…",
@@ -60,17 +55,16 @@ interface Props {
 }
 
 export default function GeneratingLoader({ phase = "generating", message }: Props) {
-  const cfg = PHASE_CONFIG[phase];
+  const messages = PHASE_CONFIG[phase].messages;
   const [msgIdx, setMsgIdx] = useState(0);
 
-  // Cycle through phase messages every 2.2 s
   useEffect(() => {
     setMsgIdx(0);
-    const id = setInterval(() => setMsgIdx((i) => (i + 1) % cfg.messages.length), 2200);
+    const id = setInterval(() => setMsgIdx((i) => (i + 1) % messages.length), 2200);
     return () => clearInterval(id);
-  }, [phase, cfg.messages.length]);
+  }, [phase, messages.length]);
 
-  const displayMsg = message || cfg.messages[msgIdx];
+  const displayMsg = message || messages[msgIdx];
 
   return (
     <div className="bg-white border border-gray-100 rounded-2xl px-8 py-14 shadow-sm flex flex-col items-center gap-7">
@@ -104,10 +98,10 @@ export default function GeneratingLoader({ phase = "generating", message }: Prop
         <span className="absolute inset-4 rounded-full bg-purple-200 animate-ping" style={{ animationDuration: "2.4s", animationDelay: "0.6s", opacity: 0.35 }} />
         <span className="absolute inset-7 rounded-full bg-violet-300 animate-ping" style={{ animationDuration: "2.4s", animationDelay: "1.2s", opacity: 0.25 }} />
 
-        {/* Center orb */}
-        <span className="relative z-10 flex items-center justify-center w-12 h-12 rounded-full shadow-lg shadow-purple-400/40"
-          style={{ background: "linear-gradient(135deg, #a855f7, #7c3aed, #c026d3)" }}>
-          {cfg.icon}
+        {/* Center orb — SynthCS logo */}
+        <span className="relative z-10 flex items-center justify-center w-14 h-14 rounded-2xl shadow-xl shadow-purple-400/50 overflow-hidden ring-2 ring-white/60"
+          style={{ background: "linear-gradient(135deg, #a855f7, #7c3aed)" }}>
+          <img src="/synthcs-logo.png" alt="SynthCS" className="w-10 h-10 object-contain rounded-xl" />
         </span>
       </div>
 
