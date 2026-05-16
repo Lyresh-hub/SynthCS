@@ -175,7 +175,7 @@ export default function AdminPanel() {
         ))}
       </div>
       {/* Chart + mode row */}
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className="col-span-2 bg-white border border-gray-100 rounded-xl p-5 shadow-sm">
           <div className="h-4 w-32 bg-gray-200 rounded mb-4" />
           <div className="h-48 bg-gray-100 rounded-lg" />
@@ -186,7 +186,7 @@ export default function AdminPanel() {
         </div>
       </div>
       {/* Bottom row */}
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {[...Array(2)].map((_,i) => (
           <div key={i} className="bg-white border border-gray-100 rounded-xl p-5 shadow-sm">
             <div className="h-4 w-28 bg-gray-200 rounded mb-4" />
@@ -268,7 +268,8 @@ export default function AdminPanel() {
             <Activity className="w-4 h-4 text-purple-500" />
             <h3 className="text-sm font-semibold text-gray-800">Top 5 Most Active Users</h3>
           </div>
-          <table className="w-full text-sm">
+          <div className="overflow-x-auto">
+          <table className="w-full min-w-[360px] text-sm">
             <thead>
               <tr className="border-b border-gray-50">
                 <th className="text-left text-xs text-gray-400 font-semibold px-5 py-2">User</th>
@@ -300,6 +301,7 @@ export default function AdminPanel() {
               )}
             </tbody>
           </table>
+          </div>
         </div>
 
         {/* Recent Activity feed — mga bagong signup at bagong schema na ginawa */}

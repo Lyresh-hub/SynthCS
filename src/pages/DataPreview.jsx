@@ -205,7 +205,7 @@ const [exportFormat, setExportFormat] = useState("csv");
   }, [datasetId]);
 
   if (loading) return (
-    <div className="flex gap-4 animate-pulse">
+    <div className="flex flex-col lg:flex-row gap-4 animate-pulse">
       {/* Main card skeleton */}
       <div className="flex-1 min-w-0 bg-white border border-gray-100 rounded-xl shadow-sm overflow-hidden">
         <div className="px-4 py-3 border-b border-gray-100 bg-gray-50 flex items-center justify-between">
@@ -228,7 +228,7 @@ const [exportFormat, setExportFormat] = useState("csv");
         </div>
       </div>
       {/* Sidebar skeleton */}
-      <div className="w-52 flex-shrink-0 space-y-3">
+      <div className="w-full lg:w-52 flex-shrink-0 space-y-3">
         {[["h-32","Quality Checks"],["h-40","Summary"],["h-24","Download"]].map(([h],i) => (
           <div key={i} className={`bg-white border border-gray-100 rounded-xl ${h} shadow-sm p-4 space-y-2`}>
             <div className="h-3 w-24 bg-gray-200 rounded" />
@@ -413,7 +413,7 @@ const [exportFormat, setExportFormat] = useState("csv");
   return (
     <div className="space-y-4">
       {/* ── Top row: main card + sidebar ── */}
-      <div className="flex gap-4">
+      <div className="flex flex-col lg:flex-row gap-4">
 
       {/* ── Main card ── */}
       <div className="flex-1 bg-white border border-gray-100 rounded-xl overflow-hidden shadow-sm flex flex-col min-h-0">
@@ -446,9 +446,9 @@ const [exportFormat, setExportFormat] = useState("csv");
           </button>
         </div>
 
-        {/* Tabs + export controls in one row */}
-        <div className="flex items-center justify-between border-b border-gray-100 px-4 gap-2">
-          <div className="flex items-center flex-shrink-0">
+        {/* Tabs + export controls */}
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between border-b border-gray-100 px-4 gap-0">
+          <div className="flex items-center overflow-x-auto scrollbar-hide">
             {TABS.map((t) => (
               <button
                 key={t}
@@ -462,8 +462,8 @@ const [exportFormat, setExportFormat] = useState("csv");
               </button>
             ))}
           </div>
-          <div className="flex items-center gap-2 flex-shrink-0 py-1.5">
-            <div className="flex items-center border border-gray-200 rounded-md overflow-hidden text-xs">
+          <div className="flex items-center gap-2 flex-shrink-0 py-2 sm:py-1.5 overflow-x-auto scrollbar-hide">
+            <div className="flex items-center border border-gray-200 rounded-md overflow-hidden text-xs flex-shrink-0">
               {exportFormats.map((f) => (
                 <button
                   key={f.id}
@@ -477,7 +477,7 @@ const [exportFormat, setExportFormat] = useState("csv");
             <button
               onClick={handleExport}
               disabled={exporting}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-purple-600 text-white rounded-md text-xs font-medium hover:bg-purple-700 transition-colors disabled:opacity-60 whitespace-nowrap"
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-purple-600 text-white rounded-md text-xs font-medium hover:bg-purple-700 transition-colors disabled:opacity-60 whitespace-nowrap flex-shrink-0"
             >
               {exporting ? "⏳" : "↓"}{" "}
               {entityTables.length > 0 ? "Download All" : `Export ${exportFormat.toUpperCase()}`}
@@ -494,7 +494,7 @@ const [exportFormat, setExportFormat] = useState("csv");
       </div>
 
       {/* ── Sidebar ── */}
-      <div className="w-52 flex flex-col gap-3 flex-shrink-0">
+      <div className="w-full lg:w-52 flex flex-col gap-3 lg:flex-shrink-0">
 
         {/* Quality checks */}
         <div className="bg-white border border-gray-100 rounded-xl p-4 shadow-sm">

@@ -127,7 +127,7 @@ export default function AdminUsers() {
       />
 
       {/* Summary bar */}
-      <div className="flex items-center gap-4">
+      <div className="flex items-center flex-wrap gap-3">
         <div className="bg-white rounded-xl border border-gray-100 shadow-sm px-4 py-3 flex items-center gap-3">
           <span className="text-2xl font-bold text-gray-900">{users.length}</span>
           <span className="text-xs text-gray-500">Total Users</span>
@@ -157,7 +157,7 @@ export default function AdminUsers() {
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="Search by name or email…"
-                className="pl-8 pr-3 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 w-56"
+                className="pl-8 pr-3 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 w-36 sm:w-56"
               />
             </div>
             <button onClick={load} title="Refresh" className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors">

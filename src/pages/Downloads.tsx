@@ -100,11 +100,9 @@ export default function Downloads() {
       />
 
       {/* Header — may refresh button at search bar */}
-      <div className="flex items-center justify-between">
-        <div>
-          <p className="text-xs text-gray-400">Generated datasets · available for 30 days</p>
-        </div>
-        <div className="flex items-center gap-2">
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <p className="text-xs text-gray-400 hidden sm:block">Generated datasets · available for 30 days</p>
+        <div className="flex items-center gap-2 ml-auto">
           <button onClick={fetchDatasets} className="p-1.5 text-gray-400 hover:text-gray-600 transition-colors">
             <RefreshCw className="w-4 h-4" />
           </button>
@@ -114,7 +112,7 @@ export default function Downloads() {
               onChange={(e) => setSearch(e.target.value)}
               type="search"
               placeholder="Search downloads…"
-              className="text-sm bg-white border border-gray-200 rounded-md pl-8 pr-3 py-1.5 w-48 focus:outline-none focus:ring-2 focus:ring-purple-500 placeholder:text-gray-400"
+              className="text-sm bg-white border border-gray-200 rounded-md pl-8 pr-3 py-1.5 w-36 sm:w-48 focus:outline-none focus:ring-2 focus:ring-purple-500 placeholder:text-gray-400"
             />
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
           </div>
@@ -170,7 +168,8 @@ export default function Downloads() {
                 : "No results match your search."}
             </div>
           ) : (
-            <table className="w-full text-sm">
+            <div className="overflow-x-auto">
+            <table className="w-full min-w-[520px] text-sm">
               <thead>
                 <tr className="border-b border-gray-100 bg-gray-50">
                   <th className="text-left py-3 px-4 text-xs font-medium text-gray-400">Dataset</th>
@@ -246,6 +245,7 @@ export default function Downloads() {
                 ))}
               </tbody>
             </table>
+            </div>
           )}
         </div>
       )}
