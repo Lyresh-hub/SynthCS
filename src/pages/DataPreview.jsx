@@ -231,19 +231,17 @@ const [exportFormat, setExportFormat] = useState("csv");
   );
 
   if (error) {
-    const isExpired = error === "expired";
+    const isFileMissing = error === "expired";
     return (
       <div className="flex flex-col items-center justify-center py-20 text-center space-y-4">
-        <div className="w-14 h-14 rounded-full bg-red-50 flex items-center justify-center">
-          <span className="text-2xl">{isExpired ? "⏳" : "⚠️"}</span>
+        <div className="w-14 h-14 rounded-full bg-amber-50 flex items-center justify-center">
+          <span className="text-2xl">⚠️</span>
         </div>
         <div>
-          <p className="text-sm font-semibold text-gray-800 mb-1">
-            {isExpired ? "Dataset has expired" : "Preview unavailable"}
-          </p>
+          <p className="text-sm font-semibold text-gray-800 mb-1">Preview not available</p>
           <p className="text-xs text-gray-500 max-w-xs">
-            {isExpired
-              ? "This dataset was cleared from the server. Please regenerate it from Schema Builder."
+            {isFileMissing
+              ? "The dataset file was cleared during a server restart. Please regenerate your dataset — your schema is still saved."
               : "The generation service is temporarily unavailable. Please try again in a moment."}
           </p>
         </div>
@@ -252,16 +250,14 @@ const [exportFormat, setExportFormat] = useState("csv");
             onClick={() => setLocation("/schema-builder")}
             className="px-4 py-2 bg-purple-600 text-white text-xs font-medium rounded-lg hover:bg-purple-700 transition-colors"
           >
-            Go to Schema Builder
+            Regenerate in Schema Builder
           </button>
-          {!isExpired && (
-            <button
-              onClick={() => { setError(""); setLoading(true); setRetryCount(c => c + 1); }}
-              className="px-4 py-2 border border-gray-200 text-gray-600 text-xs font-medium rounded-lg hover:bg-gray-50 transition-colors"
-            >
-              Retry
-            </button>
-          )}
+          <button
+            onClick={() => { setError(""); setLoading(true); setRetryCount(c => c + 1); }}
+            className="px-4 py-2 border border-gray-200 text-gray-600 text-xs font-medium rounded-lg hover:bg-gray-50 transition-colors"
+          >
+            Retry
+          </button>
           <button
             onClick={() => setLocation("/dashboard")}
             className="px-4 py-2 border border-gray-200 text-gray-600 text-xs font-medium rounded-lg hover:bg-gray-50 transition-colors"
