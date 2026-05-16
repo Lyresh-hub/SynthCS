@@ -189,8 +189,39 @@ const [exportFormat, setExportFormat] = useState("csv");
   }, [datasetId]);
 
   if (loading) return (
-    <div className="flex items-center justify-center h-64">
-      <div className="w-6 h-6 border-2 border-purple-600 border-t-transparent rounded-full animate-spin" />
+    <div className="flex gap-4 animate-pulse">
+      {/* Main card skeleton */}
+      <div className="flex-1 min-w-0 bg-white border border-gray-100 rounded-xl shadow-sm overflow-hidden">
+        <div className="px-4 py-3 border-b border-gray-100 bg-gray-50 flex items-center justify-between">
+          <div className="space-y-1.5">
+            <div className="h-4 w-40 bg-gray-200 rounded" />
+            <div className="h-3 w-24 bg-gray-100 rounded" />
+          </div>
+          <div className="h-8 w-28 bg-gray-200 rounded-lg" />
+        </div>
+        <div className="flex gap-3 px-4 pt-3 border-b border-gray-100">
+          {[...Array(3)].map((_,i) => <div key={i} className="h-8 w-24 bg-gray-100 rounded-t-md" />)}
+        </div>
+        <div className="p-4 space-y-2">
+          <div className="h-8 bg-gray-100 rounded" />
+          {[...Array(8)].map((_,i) => (
+            <div key={i} className="grid grid-cols-4 gap-3">
+              {[...Array(4)].map((_,j) => <div key={j} className={`h-7 ${j===0?"bg-gray-200":"bg-gray-100"} rounded`} />)}
+            </div>
+          ))}
+        </div>
+      </div>
+      {/* Sidebar skeleton */}
+      <div className="w-52 flex-shrink-0 space-y-3">
+        {[["h-32","Quality Checks"],["h-40","Summary"],["h-24","Download"]].map(([h],i) => (
+          <div key={i} className={`bg-white border border-gray-100 rounded-xl ${h} shadow-sm p-4 space-y-2`}>
+            <div className="h-3 w-24 bg-gray-200 rounded" />
+            <div className="h-2.5 w-full bg-gray-100 rounded" />
+            <div className="h-2.5 w-3/4 bg-gray-100 rounded" />
+            <div className="h-2.5 w-1/2 bg-gray-100 rounded" />
+          </div>
+        ))}
+      </div>
     </div>
   );
 

@@ -163,8 +163,46 @@ export default function AdminPanel() {
 
   // Spinning loader habang naglo-load ang data
   if (loading) return (
-    <div className="flex items-center justify-center h-64">
-      <div className="w-7 h-7 border-2 border-purple-600 border-t-transparent rounded-full animate-spin" />
+    <div className="space-y-5 animate-pulse">
+      {/* 5 KPI stat cards */}
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+        {[...Array(5)].map((_,i) => (
+          <div key={i} className="bg-white border border-gray-100 rounded-xl p-4 shadow-sm">
+            <div className="w-8 h-8 rounded-lg bg-gray-100 mb-3" />
+            <div className="h-6 w-16 bg-gray-200 rounded mb-1.5" />
+            <div className="h-3 w-20 bg-gray-100 rounded" />
+          </div>
+        ))}
+      </div>
+      {/* Chart + mode row */}
+      <div className="grid grid-cols-3 gap-4">
+        <div className="col-span-2 bg-white border border-gray-100 rounded-xl p-5 shadow-sm">
+          <div className="h-4 w-32 bg-gray-200 rounded mb-4" />
+          <div className="h-48 bg-gray-100 rounded-lg" />
+        </div>
+        <div className="bg-white border border-gray-100 rounded-xl p-5 shadow-sm space-y-3">
+          <div className="h-4 w-28 bg-gray-200 rounded" />
+          {[...Array(4)].map((_,i) => <div key={i} className="h-10 bg-gray-100 rounded-lg" />)}
+        </div>
+      </div>
+      {/* Bottom row */}
+      <div className="grid grid-cols-2 gap-4">
+        {[...Array(2)].map((_,i) => (
+          <div key={i} className="bg-white border border-gray-100 rounded-xl p-5 shadow-sm">
+            <div className="h-4 w-28 bg-gray-200 rounded mb-4" />
+            {[...Array(5)].map((_,j) => (
+              <div key={j} className="flex items-center gap-3 py-2.5 border-b border-gray-50">
+                <div className="w-7 h-7 rounded-full bg-gray-100 flex-shrink-0" />
+                <div className="flex-1 space-y-1.5">
+                  <div className="h-3 w-3/4 bg-gray-200 rounded" />
+                  <div className="h-2.5 w-1/2 bg-gray-100 rounded" />
+                </div>
+                <div className="h-3 w-10 bg-gray-100 rounded" />
+              </div>
+            ))}
+          </div>
+        ))}
+      </div>
     </div>
   );
 

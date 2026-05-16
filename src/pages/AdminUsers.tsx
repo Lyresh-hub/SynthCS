@@ -77,8 +77,39 @@ export default function AdminUsers() {
   );
 
   if (loading) return (
-    <div className="flex items-center justify-center h-64">
-      <div className="w-7 h-7 border-2 border-purple-600 border-t-transparent rounded-full animate-spin" />
+    <div className="space-y-5 animate-pulse">
+      {/* 4 stat cards */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+        {[...Array(4)].map((_,i) => (
+          <div key={i} className="bg-white border border-gray-100 rounded-xl p-4 shadow-sm">
+            <div className="w-8 h-8 rounded-lg bg-gray-100 mb-3" />
+            <div className="h-6 w-14 bg-gray-200 rounded mb-1.5" />
+            <div className="h-3 w-20 bg-gray-100 rounded" />
+          </div>
+        ))}
+      </div>
+      {/* Users table */}
+      <div className="bg-white border border-gray-100 rounded-xl overflow-hidden shadow-sm">
+        <div className="border-b border-gray-100 bg-gray-50 px-4 py-3 grid grid-cols-6 gap-4">
+          {["w-20","w-28","w-14","w-12","w-16","w-14"].map((w,i) => <div key={i} className={`h-3 ${w} bg-gray-200 rounded`} />)}
+        </div>
+        {[...Array(8)].map((_,i) => (
+          <div key={i} className="px-4 py-3 border-b border-gray-50 grid grid-cols-6 gap-4 items-center">
+            <div className="flex items-center gap-2">
+              <div className="w-7 h-7 rounded-full bg-gray-100 flex-shrink-0" />
+              <div className="h-3 w-20 bg-gray-200 rounded" />
+            </div>
+            <div className="h-3 w-32 bg-gray-100 rounded" />
+            <div className="h-5 w-16 bg-gray-100 rounded-full" />
+            <div className="h-5 w-12 bg-gray-100 rounded-full" />
+            <div className="h-3 w-10 bg-gray-100 rounded" />
+            <div className="flex justify-end gap-2">
+              <div className="h-7 w-16 bg-gray-100 rounded-md" />
+              <div className="h-7 w-7 bg-gray-100 rounded-md" />
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 
