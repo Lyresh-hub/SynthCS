@@ -419,32 +419,50 @@ const [exportFormat, setExportFormat] = useState("csv");
       <div className="flex-1 bg-white border border-gray-100 rounded-xl overflow-hidden shadow-sm flex flex-col min-h-0">
 
         {/* Card header */}
-        <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-lg bg-purple-600 flex items-center justify-center text-white text-sm">
+        <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100 gap-3">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-8 h-8 rounded-lg bg-purple-600 flex items-center justify-center text-white text-sm flex-shrink-0">
               👁
             </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <span className="font-semibold text-sm text-gray-900">{datasetName}</span>
-                <span className="bg-green-100 text-green-700 text-[11px] px-2 py-0.5 rounded-full font-medium">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="font-semibold text-sm text-gray-900 truncate max-w-[220px]">{datasetName}</span>
+                <span className="bg-green-100 text-green-700 text-[11px] px-2 py-0.5 rounded-full font-medium flex-shrink-0">
                   ● Generated
                 </span>
               </div>
-              <p className="text-[11px] text-gray-400 mt-0.5">
+              <p className="text-[11px] text-gray-400 mt-0.5 truncate">
                 {columns.length} columns · {total_rows.toLocaleString()} rows
                 {entityTables.length > 0 && ` · ${entityTables.length + 1} tables`}
                 {kaggleRef && ` · source: ${kaggleRef}`}
               </p>
             </div>
           </div>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => setLocation("/downloads")}
-              className="px-3 py-1.5 border border-gray-200 rounded-md text-xs text-gray-600 hover:bg-gray-50 transition-colors"
-            >
-              ← Back
-            </button>
+          <button
+            onClick={() => setLocation("/downloads")}
+            className="flex-shrink-0 px-3 py-1.5 border border-gray-200 rounded-md text-xs text-gray-600 hover:bg-gray-50 transition-colors"
+          >
+            ← Back
+          </button>
+        </div>
+
+        {/* Tabs + export controls in one row */}
+        <div className="flex items-center justify-between border-b border-gray-100 px-4 gap-2">
+          <div className="flex items-center flex-shrink-0">
+            {TABS.map((t) => (
+              <button
+                key={t}
+                onClick={() => { setTab(t); setPage(1); }}
+                className={`px-4 py-2.5 text-sm transition-colors border-b-2 -mb-px whitespace-nowrap
+                  ${tab === t
+                    ? "border-purple-600 text-purple-700 font-medium"
+                    : "border-transparent text-gray-500 hover:text-gray-700"}`}
+              >
+                {t}
+              </button>
+            ))}
+          </div>
+          <div className="flex items-center gap-2 flex-shrink-0 py-1.5">
             <div className="flex items-center border border-gray-200 rounded-md overflow-hidden text-xs">
               {exportFormats.map((f) => (
                 <button
@@ -459,30 +477,12 @@ const [exportFormat, setExportFormat] = useState("csv");
             <button
               onClick={handleExport}
               disabled={exporting}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-purple-600 text-white rounded-md text-xs font-medium hover:bg-purple-700 transition-colors disabled:opacity-60"
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-purple-600 text-white rounded-md text-xs font-medium hover:bg-purple-700 transition-colors disabled:opacity-60 whitespace-nowrap"
             >
               {exporting ? "⏳" : "↓"}{" "}
-              {entityTables.length > 0
-                ? `Download All Tables`
-                : `Export ${exportFormat.toUpperCase()}`}
+              {entityTables.length > 0 ? "Download All" : `Export ${exportFormat.toUpperCase()}`}
             </button>
           </div>
-        </div>
-
-        {/* Tabs */}
-        <div className="flex items-center border-b border-gray-100 px-4">
-          {TABS.map((t) => (
-            <button
-              key={t}
-              onClick={() => { setTab(t); setPage(1); }}
-              className={`px-4 py-2.5 text-sm transition-colors border-b-2 -mb-px
-                ${tab === t
-                  ? "border-purple-600 text-purple-700 font-medium"
-                  : "border-transparent text-gray-500 hover:text-gray-700"}`}
-            >
-              {t}
-            </button>
-          ))}
         </div>
 
         {/* Tab content */}
