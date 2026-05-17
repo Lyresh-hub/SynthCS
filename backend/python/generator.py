@@ -160,8 +160,14 @@ def generate_synthetic_data(dataset_path: str, changes: list[dict], row_count: i
     Synthesise row_count rows from the downloaded Kaggle CSV using a Gaussian
     copula, then apply any user-specified column renames / type casts.
     """
-    csv_files = glob.glob(os.path.join(dataset_path, "**", "*.csv"), recursive=True)
-    csv_files += glob.glob(os.path.join(dataset_path, "*.csv"))
+    _exclude = {"template.csv", "test_set.csv", "synthetic_output.csv"}
+    all_csv = glob.glob(os.path.join(dataset_path, "**", "*.csv"), recursive=True)
+    all_csv += glob.glob(os.path.join(dataset_path, "*.csv"))
+    csv_files = list(dict.fromkeys(
+        f for f in all_csv
+        if os.path.basename(f) not in _exclude
+        and not os.path.basename(f).endswith("_master.csv")
+    ))
     if not csv_files:
         raise FileNotFoundError("No CSV file found in dataset path")
 

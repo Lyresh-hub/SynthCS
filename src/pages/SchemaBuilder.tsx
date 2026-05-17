@@ -545,6 +545,7 @@ export default function SchemaBuilder() {
 
   const [datasetId, setDatasetId]           = useState("");
   const [kaggleRef, setKaggleRef]           = useState("");
+  const [downloadSourceId, setDownloadSourceId] = useState("kaggle");
   const [originalSchema, setOriginalSchema] = useState<OriginalField[]>([]);
   const [tables, setTables]                 = useState<Table[]>(() => readDraft()?.tables ?? []);
   const [activeTableId, setActiveTableId]   = useState<string>(() => readDraft()?.activeTableId ?? "");
@@ -1392,6 +1393,7 @@ export default function SchemaBuilder() {
     const sourceLabel = ds.sourceLabel ?? DATA_SOURCES.find((s) => s.id === sourceId)?.label ?? sourceId;
     setSelectedDataSource(sourceLabel);
     setKaggleRef(ds.ref);
+    setDownloadSourceId(sourceId);
     setLoadingMsg(`Downloading "${ds.title}" from ${sourceLabel}…`);
     setPhase("loading");
     try {
@@ -1417,6 +1419,24 @@ export default function SchemaBuilder() {
       setMode("kaggle"); setPhase("schema");
     } catch (e: any) {
       setErrorMsg(e.message ?? "Download failed."); setPhase("error");
+    }
+  };
+
+  const handleRedownload = async () => {
+    if (!kaggleRef) return;
+    setLoadingMsg("Re-downloading dataset…");
+    setPhase("loading");
+    try {
+      const res = await fetch(DOWNLOAD_ENDPOINTS[downloadSourceId] ?? DOWNLOAD_ENDPOINTS["kaggle"], {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ dataset_ref: kaggleRef }),
+      });
+      if (!res.ok) throw new Error(await parsePythonError(res));
+      const data = await res.json();
+      setDatasetId(data.dataset_id);
+      setPhase("schema");
+    } catch (e: any) {
+      setErrorMsg(e.message ?? "Re-download failed."); setPhase("error");
     }
   };
 
@@ -1666,7 +1686,14 @@ export default function SchemaBuilder() {
       pushNotification({ title: getActiveTable()?.name ?? "dataset", message: `${rowCount.toLocaleString()} rows · ${selectedDataSource}`, dataset_id: datasetId });
       setLocation("/preview");
     } catch (e: any) {
-      setErrorMsg(e.message ?? "Generation failed. Check the Python service logs."); setPhase("error");
+      const msg = e.message ?? "Generation failed. Check the Python service logs.";
+      if (msg.toLowerCase().includes("dataset not found") || msg.toLowerCase().includes("please download")) {
+        setDatasetId("");
+        setErrorMsg("Your dataset session expired — the generation server was restarted. Click \"Re-download Dataset\" to continue.");
+      } else {
+        setErrorMsg(msg);
+      }
+      setPhase("error");
     }
   };
 
@@ -2539,8 +2566,8 @@ export default function SchemaBuilder() {
           <div>
             <p className="text-sm text-red-700 font-medium">Something went wrong</p>
             <p className="text-xs text-red-500 mt-0.5">{errorMsg}</p>
-            <button onClick={() => { setPhase("idle"); setErrorMsg(""); }} className="mt-2 text-xs text-red-500 underline">
-              Try again
+            <button onClick={() => { setErrorMsg(""); setPhase(tables.length > 0 ? "schema" : "idle"); }} className="mt-2 text-xs text-red-500 underline">
+              {tables.length > 0 ? "Back to Schema" : "Try again"}
             </button>
           </div>
         </div>
@@ -3306,6 +3333,11 @@ export default function SchemaBuilder() {
                   <button onClick={handleLlmGenerateAndPreview}
                     className="flex-1 flex items-center justify-center gap-1.5 px-4 py-2 bg-purple-600 text-white rounded-lg text-sm font-medium hover:bg-purple-700 transition-colors">
                     <Sparkles className="w-4 h-4" /> Generate → Preview
+                  </button>
+                ) : !datasetId ? (
+                  <button onClick={handleRedownload}
+                    className="flex-1 flex items-center justify-center gap-1.5 px-4 py-2 bg-amber-500 text-white rounded-lg text-sm font-medium hover:bg-amber-600 transition-colors">
+                    Re-download Dataset
                   </button>
                 ) : (
                   <button onClick={handleGenerate}
