@@ -2906,7 +2906,8 @@ export default function SchemaBuilder() {
               </div>
             </div>
 
-            <table className="w-full text-sm">
+            <div className="overflow-x-auto">
+            <table className="w-full min-w-[520px] text-sm">
               <thead>
                 <tr className="border-b border-gray-100 bg-gray-50/50">
                   <th className="w-8 py-2 px-3" />
@@ -3016,6 +3017,7 @@ export default function SchemaBuilder() {
                 })}
               </tbody>
             </table>
+            </div>
 
             <div className="px-4 py-2 border-t border-gray-50">
               <button onClick={() => addField(table.id)}
