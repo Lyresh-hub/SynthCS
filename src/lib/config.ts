@@ -8,7 +8,7 @@ export const NODE_API   = import.meta.env.DEV
   : "https://nodejs-production-7171.up.railway.app";
 
 // Ito naman yung base URL ng Python backend (yung gumagawa ng synthetic data gamit ang CTGAN)
-// Locally, port 8000. Sa production, yung Railway Python service.
+// Locally, port 8000. Sa production, yung Hugging Face Spaces service.
 export const PYTHON_API = import.meta.env.DEV
   ? "http://localhost:8000"
-  : "https://python-service-production-e8a4.up.railway.app";
+  : "https://whysoserious1012-synthcs.hf.space";
