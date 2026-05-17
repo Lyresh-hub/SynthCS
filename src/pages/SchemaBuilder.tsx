@@ -1605,7 +1605,7 @@ export default function SchemaBuilder() {
     setPhase("generating");
 
     const ctrl = new AbortController();
-    const genTimeout = setTimeout(() => ctrl.abort(), 8 * 60 * 1000); // 8 min
+    const genTimeout = setTimeout(() => ctrl.abort(), 15 * 60 * 1000); // 15 min
     try {
       // Step 1: generate 200-row template
       const templateRes = await fetchPython(`${PYTHON_API}/api/generate-from-schema`, {
@@ -1728,7 +1728,7 @@ export default function SchemaBuilder() {
       }
 
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 8 * 60 * 1000); // 8 min (includes retry wait)
+      const timeout = setTimeout(() => controller.abort(), 15 * 60 * 1000); // 15 min (includes wake-up retry wait + CTGAN training)
       const res = await fetchPython(endpoint, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
