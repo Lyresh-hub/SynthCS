@@ -124,7 +124,7 @@ export default function OnboardingTour({ onDone, onFinish }: Props) {
 
   const tipStyle: React.CSSProperties = hasSpotlight
     ? { position: "fixed", zIndex: 10000, ...tooltipPos(rect!, placement) }
-    : { position: "fixed", zIndex: 10000, top: "50%", left: "50%", transform: "translate(-50%,-50%)", width: 380 };
+    : { position: "fixed", zIndex: 10000, top: "50%", left: "50%", transform: "translate(-50%,-50%)", width: "min(380px, calc(100vw - 2rem))" };
 
   return (
     <>

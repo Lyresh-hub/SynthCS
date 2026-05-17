@@ -2095,7 +2095,7 @@ export default function SchemaBuilder() {
                   </span>
                 ))}
             </div>
-            <div className="flex items-center gap-2 ml-auto">
+            <div className="flex items-center gap-2 ml-auto flex-shrink-0">
               <select
                 value={sortBy}
                 onChange={(e) => setSortBy(e.target.value as typeof sortBy)}

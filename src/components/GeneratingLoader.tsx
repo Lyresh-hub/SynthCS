@@ -135,7 +135,7 @@ export default function GeneratingLoader({ phase = "generating", message }: Prop
       </div>
 
       {/* Shimmer progress bar */}
-      <div className="w-52 h-1.5 bg-purple-100 rounded-full overflow-hidden">
+      <div className="w-full max-w-[13rem] h-1.5 bg-purple-100 rounded-full overflow-hidden">
         <div
           className="h-full rounded-full"
           style={{

@@ -186,9 +186,9 @@ export default function AdminUsers() {
                       <div className="w-8 h-8 rounded-full bg-purple-100 text-purple-600 flex items-center justify-center text-xs font-bold flex-shrink-0">
                         {user.full_name.split(" ").map((w) => w[0]).join("").slice(0, 2).toUpperCase()}
                       </div>
-                      <div>
-                        <div className="font-medium text-gray-800 text-sm">{user.full_name}</div>
-                        {user.username && <div className="text-[11px] text-gray-400">@{user.username}</div>}
+                      <div className="min-w-0">
+                        <div className="font-medium text-gray-800 text-sm truncate">{user.full_name}</div>
+                        {user.username && <div className="text-[11px] text-gray-400 truncate">@{user.username}</div>}
                       </div>
                     </div>
                   </td>

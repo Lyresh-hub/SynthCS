@@ -160,7 +160,7 @@ export default function SavedSchemas() {
                       <td className="py-3 px-4">
                         <div className="flex items-center gap-2">
                           <FileJson className="w-4 h-4 text-gray-400 flex-shrink-0" />
-                          <span className="font-medium text-gray-800 text-xs">{schema.name}</span>
+                          <span className="font-medium text-gray-800 text-xs truncate max-w-[220px] block">{schema.name}</span>
                         </div>
                       </td>
                       <td className="py-3 px-4 text-xs text-gray-500">{fieldCount} fields</td>

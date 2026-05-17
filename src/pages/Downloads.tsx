@@ -134,11 +134,12 @@ export default function Downloads() {
       {/* Skeleton loader */}
       {loading && (
         <div className="bg-white border border-gray-100 rounded-xl overflow-hidden shadow-sm animate-pulse">
-          <div className="border-b border-gray-100 bg-gray-50 px-4 py-3 grid grid-cols-5 gap-4">
+          <div className="overflow-x-auto">
+          <div className="border-b border-gray-100 bg-gray-50 px-4 py-3 grid grid-cols-5 gap-4 min-w-[520px]">
             {["w-24","w-12","w-16","w-16","w-14"].map((w,i) => <div key={i} className={`h-3 ${w} bg-gray-200 rounded`} />)}
           </div>
           {[...Array(5)].map((_,i) => (
-            <div key={i} className="px-4 py-3 border-b border-gray-50 grid grid-cols-5 gap-4 items-center">
+            <div key={i} className="px-4 py-3 border-b border-gray-50 grid grid-cols-5 gap-4 items-center min-w-[520px]">
               <div className="flex items-center gap-2">
                 <div className="w-8 h-8 rounded-lg bg-gray-100 flex-shrink-0" />
                 <div className="space-y-1.5">
@@ -155,6 +156,7 @@ export default function Downloads() {
               </div>
             </div>
           ))}
+          </div>
         </div>
       )}
 
@@ -188,7 +190,7 @@ export default function Downloads() {
                       <div className="flex items-center gap-2">
                         <FileSpreadsheet className="w-4 h-4 text-gray-400 flex-shrink-0" />
                         <div>
-                          <p className="font-medium text-gray-800 text-xs">{ds.name}</p>
+                          <p className="font-medium text-gray-800 text-xs truncate max-w-[180px]">{ds.name}</p>
                           {ds.kaggle_ref && (
                             <p className="text-[10px] text-gray-400 mt-0.5">{ds.kaggle_ref}</p>
                           )}

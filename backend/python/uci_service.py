@@ -2,57 +2,45 @@ import os
 import requests
 import pandas as pd
 
-UCI_API = "https://archive.ics.uci.edu/api/datasets"
+UCI_LIST_URL = "https://archive.ics.uci.edu/api/datasets/list"
 
 
 def search_datasets(query: str) -> list:
-    """
-    Search UCI ML Repository. Tries the full query first, then individual keywords
-    so multi-word queries like 'student academic performance' still find results.
-    """
+    """Search UCI ML Repository using the correct /api/datasets/list endpoint."""
     STOP = {"with", "from", "that", "this", "have", "data", "dataset",
             "using", "based", "about", "into", "over", "some"}
     words = [w for w in query.lower().split() if len(w) > 3 and w not in STOP]
-    queries_to_try = [query] + words[:2]  # full query, then top 2 keywords
+    queries_to_try = [query] + words[:2]
 
     seen_ids: set[str] = set()
     results:  list[dict] = []
 
     for q in queries_to_try:
         try:
-            resp = requests.get(UCI_API, params={"search": q, "num_results": 10}, timeout=12)
+            resp = requests.get(
+                UCI_LIST_URL,
+                params={"filter": "python", "search": q},
+                timeout=12,
+            )
             if not resp.ok:
                 continue
             data = resp.json()
-
-            # Handle both response shapes the UCI API has used over time
-            raw = (
-                data.get("data", {}).get("datasets")
-                or data.get("data")
-                or data.get("datasets")
-                or []
-            )
+            raw = data.get("data") or []
             if not isinstance(raw, list):
-                raw = []
+                continue
 
             for ds in raw:
-                did = str(ds.get("id", ds.get("ID", "")))
+                did = str(ds.get("id", ""))
                 if not did or did in seen_ids:
                     continue
                 seen_ids.add(did)
-                n_inst = ds.get("num_instances") or ds.get("NumInstances") or "?"
-                # Extract date — API returns "date_donated" (YYYY-MM-DD) or "year_donated" (int)
-                date_raw = (ds.get("date_donated") or ds.get("DateDonated") or
-                            ds.get("donationDate") or ds.get("donation_date") or "")
-                year_raw = str(ds.get("year_donated") or ds.get("YearDonated") or ds.get("year") or "")
-                last_updated = str(date_raw)[:10] if date_raw else year_raw
                 results.append({
                     "ref":           did,
-                    "title":         ds.get("name") or ds.get("Name") or "Unknown",
-                    "size":          f"{n_inst} rows",
-                    "lastUpdated":   last_updated,
-                    "downloadCount": int(ds.get("num_hits") or ds.get("NumHits") or 0),
-                    "description":   (ds.get("abstract") or ds.get("Abstract") or "")[:200],
+                    "title":         ds.get("name") or "UCI Dataset",
+                    "size":          "unknown",
+                    "lastUpdated":   "",
+                    "downloadCount": 0,
+                    "description":   "",
                 })
                 if len(results) >= 10:
                     break
@@ -61,7 +49,7 @@ def search_datasets(query: str) -> list:
             continue
 
         if len(results) >= 3:
-            break  # Found enough, stop trying more keywords
+            break
 
     return results[:10]
 

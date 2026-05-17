@@ -6,8 +6,8 @@ from scipy import stats
 from sklearn.model_selection import train_test_split
 
 
-_MAX_TRAINING_ROWS = 10_000
-_CTGAN_EPOCHS      = 75
+_MAX_TRAINING_ROWS = 5_000
+_CTGAN_EPOCHS      = 50
 _CTGAN_BATCH_SIZE  = 500
 
 
@@ -131,7 +131,28 @@ def _gaussian_copula_sample(df: pd.DataFrame, n: int) -> pd.DataFrame:
 # ── public API ────────────────────────────────────────────────────────────────
 
 def expand_template_with_ctgan(dataset_path: str, row_count: int) -> str:
-    """Scale up a 200-row faker template to row_count rows."""
+    """
+    Scale up a 200-row Faker template to row_count rows using Gaussian Copula.
+
+    NOTE — Why Gaussian Copula and not CTGAN here:
+    This function is called on the Pure LLM fallback path, where no real dataset
+    was found and the 200-row template was generated entirely by Faker from schema
+    constraints. CTGAN is a deep learning model that requires real, statistically
+    meaningful data to learn from. Training CTGAN on a procedurally-generated
+    Faker template would cause it to learn noise rather than real-world patterns,
+    producing worse output than a classical statistical method. Gaussian Copula
+    preserves the correlation structure and marginal distributions of whatever data
+    it receives — which is the correct behavior for scaling up a schema-defined
+    seed dataset.
+
+    CTGAN is used on the External Dataset path and the AI Augmented path, where a
+    real downloaded dataset is available as training data. See generate_synthetic_data().
+
+    Thesis context: The thesis title "CTGAN and LLM Augmented Tabular Dataset
+    Generator" refers to the primary pipeline. The pure LLM fallback is a
+    robustness mechanism — CTGAN is not bypassed by preference, it is inapplicable
+    when no real training data exists.
+    """
     template_path = os.path.join(dataset_path, "template.csv")
     if not os.path.exists(template_path):
         raise FileNotFoundError("template.csv not found. Generate a template first.")
@@ -157,8 +178,17 @@ def expand_template_with_ctgan(dataset_path: str, row_count: int) -> str:
 
 def generate_synthetic_data(dataset_path: str, changes: list[dict], row_count: int) -> str:
     """
-    Synthesise row_count rows from the downloaded Kaggle CSV using a Gaussian
-    copula, then apply any user-specified column renames / type casts.
+    Synthesise row_count rows from a real downloaded dataset using CTGAN (primary
+    method), with Gaussian Copula as a fallback if CTGAN fails.
+
+    This is the main generation function used on both the External Dataset path
+    (Kaggle, HuggingFace, UCI, OpenML) and the AI Augmented LLM path (when a real
+    dataset was found by smart search). CTGAN trains on 80% of the real data and
+    generates statistically similar rows. The remaining 20% is saved as test_set.csv
+    for the validation metrics endpoint.
+
+    Gaussian Copula fallback triggers if CTGAN raises any exception — e.g. too few
+    rows, memory limit on the container, or a PyTorch runtime error.
     """
     _exclude = {"template.csv", "test_set.csv", "synthetic_output.csv"}
     all_csv = glob.glob(os.path.join(dataset_path, "**", "*.csv"), recursive=True)
