@@ -908,11 +908,14 @@ export default function SchemaBuilder() {
     setLlmLoading(true);
     setLlmError("");
     const userId = localStorage.getItem("user_id") ?? undefined;
+    const llmCtrl = new AbortController();
+    const llmTimeout = setTimeout(() => llmCtrl.abort(), 120_000); // 2 min
     try {
       const res  = await fetch(`${NODE_API}/api/llm/generate-schema`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ prompt: llmPrompt, user_id: userId }),
+        signal: llmCtrl.signal,
       });
       const data = await res.json();
       if (!res.ok) {
@@ -938,8 +941,11 @@ export default function SchemaBuilder() {
       setTables(splitSchemaIntoTables(data.table_name, fields));
       setDatasetId(""); setKaggleRef(""); setMode("llm"); setPhase("schema");
     } catch (e: any) {
+      clearTimeout(llmTimeout);
       const msg: string = e?.message ?? "";
-      if (msg === "Failed to fetch" || msg.includes("NetworkError") || msg.includes("ECONNREFUSED")) {
+      if (e?.name === "AbortError" || msg.toLowerCase().includes("aborted")) {
+        setLlmError("Schema generation timed out. The AI is taking too long — please try again.");
+      } else if (msg === "Failed to fetch" || msg.includes("NetworkError") || msg.includes("ECONNREFUSED")) {
         setLlmError("Cannot reach the backend. Make sure the Node server is running on port 5000.");
       } else if (msg.includes("401") || msg.toLowerCase().includes("authentication") || msg.toLowerCase().includes("invalid x-api-key")) {
         setLlmError("Anthropic API key is invalid or expired.");
@@ -950,6 +956,7 @@ export default function SchemaBuilder() {
       }
       setPhase("idle");
     } finally {
+      clearTimeout(llmTimeout);
       setLlmLoading(false);
     }
   };
@@ -1554,6 +1561,8 @@ export default function SchemaBuilder() {
     setLoadingMsg("Generating AI template…");
     setPhase("generating");
 
+    const ctrl = new AbortController();
+    const genTimeout = setTimeout(() => ctrl.abort(), 8 * 60 * 1000); // 8 min
     try {
       // Step 1: generate 200-row template
       const templateRes = await fetch(`${PYTHON_API}/api/generate-from-schema`, {
@@ -1574,6 +1583,7 @@ export default function SchemaBuilder() {
             },
           })),
         }),
+        signal: ctrl.signal,
       });
       if (!templateRes.ok) throw new Error(await parsePythonError(templateRes));
       const templateData = await templateRes.json();
@@ -1590,6 +1600,7 @@ export default function SchemaBuilder() {
           rules: relRules.map(({ id: _id, ...r }) => r),
           anomaly,
         }),
+        signal: ctrl.signal,
       });
       if (!expandRes.ok) throw new Error(await parsePythonError(expandRes));
       const expandData = await expandRes.json();
@@ -1612,7 +1623,14 @@ export default function SchemaBuilder() {
       }));
       setLocation("/preview");
     } catch (e: any) {
-      setErrorMsg(e.message ?? "Generation failed."); setPhase("error");
+      clearTimeout(genTimeout);
+      const isAbort = e?.name === "AbortError" || (e?.message ?? "").toLowerCase().includes("aborted");
+      setErrorMsg(isAbort
+        ? "Generation timed out — the server is taking too long. Please wait 30 seconds and try again."
+        : (e.message ?? "Generation failed."));
+      setPhase("error");
+    } finally {
+      clearTimeout(genTimeout);
     }
   };
 
@@ -1687,7 +1705,9 @@ export default function SchemaBuilder() {
       setLocation("/preview");
     } catch (e: any) {
       const msg = e.message ?? "Generation failed. Check the Python service logs.";
-      if (msg.toLowerCase().includes("dataset not found") || msg.toLowerCase().includes("please download")) {
+      if (e?.name === "AbortError" || msg.toLowerCase().includes("aborted")) {
+        setErrorMsg("Generation timed out — the server is taking too long. Please wait 30 seconds and try again.");
+      } else if (msg.toLowerCase().includes("dataset not found") || msg.toLowerCase().includes("please download")) {
         setDatasetId("");
         setErrorMsg("Your dataset session expired — the generation server was restarted. Click \"Re-download Dataset\" to continue.");
       } else {
