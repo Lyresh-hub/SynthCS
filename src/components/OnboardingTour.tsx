@@ -4,48 +4,42 @@ import { X, ChevronRight, ChevronLeft } from "lucide-react";
 interface TourStep {
   title: string;
   description: string;
-  target: string | null; // CSS selector; null = centred modal
+  target: string | null;
   placement?: "right" | "bottom";
-  emoji: string;
 }
 
 const STEPS: TourStep[] = [
   {
-    emoji: "👋",
     title: "Welcome to SynthCS!",
     description: "Generate realistic synthetic datasets in minutes. Here's a quick look at what you can do.",
     target: null,
   },
   {
-    emoji: "🏗️",
+    title: "Dashboard",
+    description: "Your home base. See all your generated datasets, recent activity, and quick stats at a glance.",
+    target: null,
+  },
+  {
     title: "Start here — Schema Builder",
     description: "Describe your dataset, search real data sources, or let AI build the schema for you. Then hit Generate.",
-    target: "[data-tour='nav-schema']",
-    placement: "right",
+    target: null,
   },
   {
-    emoji: "📥",
     title: "Your Downloads",
     description: "Every dataset you generate lands here. Preview it, download as CSV, or delete when done.",
-    target: "[data-tour='nav-downloads']",
-    placement: "right",
+    target: null,
   },
   {
-    emoji: "💾",
     title: "Saved Schemas",
     description: "Schemas you save appear here. Reload them anytime to generate fresh data without rebuilding.",
-    target: "[data-tour='nav-saved']",
-    placement: "right",
+    target: null,
   },
   {
-    emoji: "🔔",
     title: "Get notified",
     description: "Generation runs in the background. The bell lets you know the moment your dataset is ready.",
-    target: "[data-tour='notif-bell']",
-    placement: "bottom",
+    target: null,
   },
   {
-    emoji: "🚀",
     title: "Ready? Let's go!",
     description: "Head to Schema Builder and generate your first dataset. You can replay this tour from the sidebar anytime.",
     target: null,
@@ -167,14 +161,11 @@ export default function OnboardingTour({ onDone, onFinish }: Props) {
 
           {/* Body */}
           <div className="px-6 pt-5 pb-4">
-            <div className="flex items-start gap-3 mb-3">
-              <span className="text-3xl leading-none flex-shrink-0">{current.emoji}</span>
-              <div>
-                <p className="text-[10px] font-semibold text-purple-400 uppercase tracking-widest mb-0.5">
-                  Step {step + 1} of {STEPS.length}
-                </p>
-                <h3 className="text-sm font-bold text-gray-900">{current.title}</h3>
-              </div>
+            <div className="mb-3">
+              <p className="text-[10px] font-semibold text-purple-400 uppercase tracking-widest mb-0.5">
+                Step {step + 1} of {STEPS.length}
+              </p>
+              <h3 className="text-sm font-bold text-gray-900">{current.title}</h3>
             </div>
             <p className="text-xs text-gray-500 leading-relaxed">{current.description}</p>
           </div>

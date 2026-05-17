@@ -64,7 +64,14 @@ export default function DataPreview() {
 
   // Read dataset info from sessionStorage ONCE (lazy useState) — if we read on every render,
   // the values disappear after removeItem fires and the component redirects incorrectly.
-  const [previewParams] = useState(() => JSON.parse(sessionStorage.getItem("preview_params") || "{}"));
+  const [previewParams] = useState(() => {
+    const fresh = JSON.parse(sessionStorage.getItem("preview_params") || "{}");
+    if (fresh.id) {
+      sessionStorage.setItem("last_preview_params", JSON.stringify(fresh));
+      return fresh;
+    }
+    return JSON.parse(sessionStorage.getItem("last_preview_params") || "{}");
+  });
   const datasetId     = previewParams.id            || "";
   const datasetName   = previewParams.name          || "Dataset";
   const totalRowsMeta = Number(previewParams.rows)  || 0;

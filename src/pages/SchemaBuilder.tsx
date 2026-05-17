@@ -1635,10 +1635,13 @@ export default function SchemaBuilder() {
         }));
       }
 
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 5 * 60 * 1000); // 5 min
       const res = await fetch(endpoint, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
-      });
+        signal: controller.signal,
+      }).finally(() => clearTimeout(timeout));
       if (!res.ok) throw new Error(await res.text());
 
       const userId = localStorage.getItem("user_id");

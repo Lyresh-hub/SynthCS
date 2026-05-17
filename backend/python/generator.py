@@ -6,8 +6,8 @@ from scipy import stats
 from sklearn.model_selection import train_test_split
 
 
-_MAX_TRAINING_ROWS = 20_000
-_CTGAN_EPOCHS      = 150
+_MAX_TRAINING_ROWS = 10_000
+_CTGAN_EPOCHS      = 75
 _CTGAN_BATCH_SIZE  = 500
 
 

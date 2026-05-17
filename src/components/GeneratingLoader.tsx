@@ -67,7 +67,7 @@ export default function GeneratingLoader({ phase = "generating", message }: Prop
   const displayMsg = message || messages[msgIdx];
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center backdrop-blur-sm bg-black/20">
+    <div className="flex items-center justify-center py-16">
     <div className="bg-white border border-gray-100 rounded-2xl px-8 py-14 shadow-2xl flex flex-col items-center gap-7 mx-4">
 
       {/* Orb + floating sparkles */}
@@ -149,3 +149,4 @@ export default function GeneratingLoader({ phase = "generating", message }: Prop
     </div>
   );
 }
+
