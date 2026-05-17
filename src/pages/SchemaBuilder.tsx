@@ -14,6 +14,36 @@ import { NODE_API, PYTHON_API } from "../lib/config";
  *  and return a friendly message instead of dumping raw HTML to the user. */
 const _SERVER_UNAVAIL = "The generation server is temporarily unavailable. It may be starting up — please wait 30 seconds and try again.";
 
+function _isHfWakeupResponse(res: Response): boolean {
+  const ct = res.headers.get("content-type") ?? "";
+  return ct.includes("text/html") || res.status === 502 || res.status === 503 || res.status === 504;
+}
+
+/** Fetch a Python API endpoint, auto-retrying once if the HF Space is waking up. */
+async function fetchPython(
+  url: string,
+  init: RequestInit,
+  onWakeup?: (msg: string) => void,
+): Promise<Response> {
+  const MAX_ATTEMPTS = 3;
+  const SLEEP_MS = 30_000;
+  let lastRes: Response | undefined;
+  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+    const res = await fetch(url, init);
+    if (!_isHfWakeupResponse(res)) return res;
+    lastRes = res;
+    if (attempt < MAX_ATTEMPTS - 1) {
+      onWakeup?.(`Server is waking up… retrying in 30 s (attempt ${attempt + 1}/${MAX_ATTEMPTS - 1})`);
+      await new Promise<void>((resolve, reject) => {
+        const id = setTimeout(resolve, SLEEP_MS);
+        const signal = (init as any).signal as AbortSignal | undefined;
+        signal?.addEventListener("abort", () => { clearTimeout(id); reject(new DOMException("Aborted", "AbortError")); });
+      });
+    }
+  }
+  return lastRes!;
+}
+
 async function parsePythonError(res: Response): Promise<string> {
   const contentType = res.headers.get("content-type") ?? "";
   if (contentType.includes("text/html") || res.status === 502 || res.status === 503 || res.status === 504) {
@@ -986,15 +1016,15 @@ export default function SchemaBuilder() {
 
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 30_000);
+      const timeoutId = setTimeout(() => controller.abort(), 120_000); // 2 min to allow wake-up retry
       let searchRes: Response;
       try {
-        searchRes = await fetch(`${PYTHON_API}/api/smart-search`, {
+        searchRes = await fetchPython(`${PYTHON_API}/api/smart-search`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ prompt: llmPrompt }),
           signal: controller.signal,
-        });
+        }, (msg) => setLoadingMsg(msg));
       } finally {
         clearTimeout(timeoutId);
       }
@@ -1033,10 +1063,10 @@ export default function SchemaBuilder() {
 
     try {
       // 1. Download the real dataset
-      const dlRes = await fetch(dlEndpoint, {
+      const dlRes = await fetchPython(dlEndpoint, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ dataset_ref: ds.ref }),
-      });
+      }, (msg) => setLoadingMsg(msg));
       if (!dlRes.ok) throw new Error(await parsePythonError(dlRes));
       const dlData = await dlRes.json();
 
@@ -1417,10 +1447,10 @@ export default function SchemaBuilder() {
     setLoadingMsg(`Downloading "${ds.title}" from ${sourceLabel}…`);
     setPhase("loading");
     try {
-      const res = await fetch(DOWNLOAD_ENDPOINTS[sourceId] ?? DOWNLOAD_ENDPOINTS["kaggle"], {
+      const res = await fetchPython(DOWNLOAD_ENDPOINTS[sourceId] ?? DOWNLOAD_ENDPOINTS["kaggle"], {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ dataset_ref: ds.ref }),
-      });
+      }, (msg) => setLoadingMsg(msg));
       if (!res.ok) throw new Error(await parsePythonError(res));
       const data = await res.json();
       setDatasetId(data.dataset_id);
@@ -1447,10 +1477,10 @@ export default function SchemaBuilder() {
     setLoadingMsg("Re-downloading dataset…");
     setPhase("loading");
     try {
-      const res = await fetch(DOWNLOAD_ENDPOINTS[downloadSourceId] ?? DOWNLOAD_ENDPOINTS["kaggle"], {
+      const res = await fetchPython(DOWNLOAD_ENDPOINTS[downloadSourceId] ?? DOWNLOAD_ENDPOINTS["kaggle"], {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ dataset_ref: kaggleRef }),
-      });
+      }, (msg) => setLoadingMsg(msg));
       if (!res.ok) throw new Error(await parsePythonError(res));
       const data = await res.json();
       setDatasetId(data.dataset_id);
@@ -1578,7 +1608,7 @@ export default function SchemaBuilder() {
     const genTimeout = setTimeout(() => ctrl.abort(), 8 * 60 * 1000); // 8 min
     try {
       // Step 1: generate 200-row template
-      const templateRes = await fetch(`${PYTHON_API}/api/generate-from-schema`, {
+      const templateRes = await fetchPython(`${PYTHON_API}/api/generate-from-schema`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           table_name: at.name,
@@ -1597,14 +1627,14 @@ export default function SchemaBuilder() {
           })),
         }),
         signal: ctrl.signal,
-      });
+      }, (msg) => setLoadingMsg(msg));
       if (!templateRes.ok) throw new Error(await parsePythonError(templateRes));
       const templateData = await templateRes.json();
 
       setLoadingMsg(`Expanding to ${rowCount.toLocaleString()} rows with CTGAN…`);
 
       // Step 2: expand with CTGAN
-      const expandRes = await fetch(`${PYTHON_API}/api/expand-with-ctgan`, {
+      const expandRes = await fetchPython(`${PYTHON_API}/api/expand-with-ctgan`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           dataset_id: templateData.dataset_id,
@@ -1614,7 +1644,7 @@ export default function SchemaBuilder() {
           anomaly,
         }),
         signal: ctrl.signal,
-      });
+      }, (msg) => setLoadingMsg(msg));
       if (!expandRes.ok) throw new Error(await parsePythonError(expandRes));
       const expandData = await expandRes.json();
 
@@ -1698,12 +1728,12 @@ export default function SchemaBuilder() {
       }
 
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 5 * 60 * 1000); // 5 min
-      const res = await fetch(endpoint, {
+      const timeout = setTimeout(() => controller.abort(), 8 * 60 * 1000); // 8 min (includes retry wait)
+      const res = await fetchPython(endpoint, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
         signal: controller.signal,
-      }).finally(() => clearTimeout(timeout));
+      }, (msg) => setLoadingMsg(msg)).finally(() => clearTimeout(timeout));
       if (!res.ok) throw new Error(await parsePythonError(res));
 
       const userId = localStorage.getItem("user_id");
