@@ -4,9 +4,12 @@ import pandas as pd
 import numpy as np
 from scipy import stats
 from sklearn.model_selection import train_test_split
+from ctgan import CTGAN
 
 
 _MAX_TRAINING_ROWS = 20_000
+_CTGAN_EPOCHS      = 150    # balanced: good quality, ~1-2 min on CPU for small datasets
+_CTGAN_BATCH_SIZE  = 500
 
 
 # ── helpers ──────────────────────────────────────────────────────────────────
@@ -185,7 +188,17 @@ def generate_synthetic_data(dataset_path: str, changes: list[dict], row_count: i
         os.path.join(dataset_path, "test_set.csv"), index=False
     )
 
-    synthetic = _gaussian_copula_sample(train_df, row_count)
+    # Detect discrete (categorical) columns for CTGAN
+    discrete_columns = [col for col in train_df.columns if train_df[col].dtype == object]
+
+    try:
+        model = CTGAN(epochs=_CTGAN_EPOCHS, batch_size=_CTGAN_BATCH_SIZE, verbose=False)
+        model.fit(train_df, discrete_columns=discrete_columns)
+        synthetic = model.sample(row_count)
+    except Exception:
+        # Fallback to Gaussian Copula if CTGAN fails (e.g. too few rows, memory limit)
+        synthetic = _gaussian_copula_sample(train_df, row_count)
+
     synthetic = _decode_dates(synthetic, date_cols)
 
     # ── apply user-specified changes ─────────────────────────────────────────
