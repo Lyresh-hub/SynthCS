@@ -2624,17 +2624,17 @@ export default function SchemaBuilder() {
                     <div className="flex items-center justify-between mb-2">
                       <div className="flex items-center gap-2">
                         <span className="text-xs font-semibold text-gray-700 capitalize">{et.name}_master</span>
-                        <span className="text-[10px] text-gray-400">{et.rows} records · {et.columns.length} columns</span>
+                        <span className="text-[10px] text-gray-400">{et.rows} records · {(et.columns ?? []).length} columns</span>
                       </div>
                       <span className="text-[10px] px-2 py-0.5 bg-blue-50 text-blue-600 rounded-full font-medium border border-blue-100">
-                        {et.columns.join(", ")}
+                        {(et.columns ?? []).join(", ")}
                       </span>
                     </div>
                     <div className="overflow-x-auto rounded border border-gray-100">
                       <table className="w-full text-xs">
                         <thead>
                           <tr className="bg-gray-50 border-b border-gray-100">
-                            {et.columns.map((c) => (
+                            {(et.columns ?? []).map((c) => (
                               <th key={c} className="px-3 py-1.5 text-left text-[10px] font-semibold text-gray-500 uppercase whitespace-nowrap">{c}</th>
                             ))}
                           </tr>
