@@ -548,7 +548,7 @@ const [exportFormat, setExportFormat] = useState("csv");
                 <div key={et.name} className="flex items-center justify-between py-2">
                   <div>
                     <p className="text-xs font-semibold text-gray-700 capitalize">{et.name}_master.csv</p>
-                    <p className="text-[11px] text-gray-400">{et.rows} records · {et.columns.join(", ")}</p>
+                    <p className="text-[11px] text-gray-400">{et.rows} records · {(et.columns ?? []).join(", ")}</p>
                   </div>
                   <a
                     href={`${PYTHON_API}/api/download-entity/${datasetId}/${et.name}`}
