@@ -17,27 +17,32 @@ const STEPS: TourStep[] = [
   {
     title: "Dashboard",
     description: "Your home base. See all your generated datasets, recent activity, and quick stats at a glance.",
-    target: null,
+    target: "[data-tour='nav-dashboard']",
+    placement: "right",
   },
   {
     title: "Start here — Schema Builder",
     description: "Describe your dataset, search real data sources, or let AI build the schema for you. Then hit Generate.",
-    target: null,
+    target: "[data-tour='nav-schema']",
+    placement: "right",
   },
   {
     title: "Your Downloads",
     description: "Every dataset you generate lands here. Preview it, download as CSV, or delete when done.",
-    target: null,
+    target: "[data-tour='nav-downloads']",
+    placement: "right",
   },
   {
     title: "Saved Schemas",
     description: "Schemas you save appear here. Reload them anytime to generate fresh data without rebuilding.",
-    target: null,
+    target: "[data-tour='nav-saved']",
+    placement: "right",
   },
   {
     title: "Get notified",
     description: "Generation runs in the background. The bell lets you know the moment your dataset is ready.",
-    target: null,
+    target: "[data-tour='notif-bell']",
+    placement: "bottom",
   },
   {
     title: "Ready? Let's go!",
