@@ -9,6 +9,17 @@ import GeneratingLoader from "../components/GeneratingLoader";
 
 import { NODE_API, PYTHON_API } from "../lib/config";
 
+/** Parse an error response from the Python backend.
+ *  HF Spaces returns an HTML 500 page when the container crashes — detect that
+ *  and return a friendly message instead of dumping raw HTML to the user. */
+async function parsePythonError(res: Response): Promise<string> {
+  const text = await res.text();
+  if (text.trimStart().startsWith("<") || res.status === 502 || res.status === 503) {
+    return "The generation server is temporarily unavailable. It may be starting up — please wait 30 seconds and try again.";
+  }
+  try { return JSON.parse(text)?.detail ?? text; } catch { return text; }
+}
+
 const FIELD_TYPES = [
   "string", "integer", "float", "boolean",
   "date", "email", "uuid", "phone", "address", "name", "ip",
@@ -824,7 +835,7 @@ export default function SchemaBuilder() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
-      if (!res.ok) throw new Error(await res.text());
+      if (!res.ok) throw new Error(await parsePythonError(res));
       const data = await res.json();
       sessionStorage.setItem("preview_params", JSON.stringify({
         id:            data.dataset_id,
@@ -862,7 +873,7 @@ export default function SchemaBuilder() {
         method: "POST",
         body: form,
       });
-      if (!res.ok) throw new Error(await res.text());
+      if (!res.ok) throw new Error(await parsePythonError(res));
       const data = await res.json();
 
       const realSchema: OriginalField[] = data.schema.map((f: any) => ({
@@ -1005,7 +1016,7 @@ export default function SchemaBuilder() {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ dataset_ref: ds.ref }),
       });
-      if (!dlRes.ok) throw new Error(await dlRes.text());
+      if (!dlRes.ok) throw new Error(await parsePythonError(dlRes));
       const dlData = await dlRes.json();
 
       setDatasetId(dlData.dataset_id);
@@ -1283,7 +1294,7 @@ export default function SchemaBuilder() {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ prompt: searchQuery, expanded_terms: expandedTerms }),
       });
-      if (!res.ok) throw new Error(await res.text());
+      if (!res.ok) throw new Error(await parsePythonError(res));
       setSearchResults((await res.json()).datasets ?? []);
       setPhase("results");
     } catch (e: any) {
@@ -1388,7 +1399,7 @@ export default function SchemaBuilder() {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ dataset_ref: ds.ref }),
       });
-      if (!res.ok) throw new Error(await res.text());
+      if (!res.ok) throw new Error(await parsePythonError(res));
       const data = await res.json();
       setDatasetId(data.dataset_id);
 
@@ -1464,7 +1475,7 @@ export default function SchemaBuilder() {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
-      if (!res.ok) throw new Error(await res.text());
+      if (!res.ok) throw new Error(await parsePythonError(res));
       const data = await res.json();
       setTemplateDatasetId(data.dataset_id);
       setTemplateColumns(data.columns);
@@ -1493,7 +1504,7 @@ export default function SchemaBuilder() {
           anomaly,
         }),
       });
-      if (!res.ok) throw new Error(await res.text());
+      if (!res.ok) throw new Error(await parsePythonError(res));
       const data = await res.json();
 
       const userId = localStorage.getItem("user_id");
@@ -1544,7 +1555,7 @@ export default function SchemaBuilder() {
           })),
         }),
       });
-      if (!templateRes.ok) throw new Error(await templateRes.text());
+      if (!templateRes.ok) throw new Error(await parsePythonError(templateRes));
       const templateData = await templateRes.json();
 
       setLoadingMsg(`Expanding to ${rowCount.toLocaleString()} rows with CTGAN…`);
@@ -1560,7 +1571,7 @@ export default function SchemaBuilder() {
           anomaly,
         }),
       });
-      if (!expandRes.ok) throw new Error(await expandRes.text());
+      if (!expandRes.ok) throw new Error(await parsePythonError(expandRes));
       const expandData = await expandRes.json();
 
       const userId = localStorage.getItem("user_id");
@@ -1642,7 +1653,7 @@ export default function SchemaBuilder() {
         body: JSON.stringify(body),
         signal: controller.signal,
       }).finally(() => clearTimeout(timeout));
-      if (!res.ok) throw new Error(await res.text());
+      if (!res.ok) throw new Error(await parsePythonError(res));
 
       const userId = localStorage.getItem("user_id");
       if (userId) {
