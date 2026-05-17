@@ -2642,7 +2642,7 @@ export default function SchemaBuilder() {
                         <tbody>
                           {et.preview.map((row, i) => (
                             <tr key={i} className="border-b border-gray-50 last:border-0">
-                              {et.columns.map((c) => (
+                              {(et.columns ?? []).map((c) => (
                                 <td key={c} className="px-3 py-1.5 text-gray-700 whitespace-nowrap max-w-[200px] truncate">
                                   {row[c] == null ? <span className="text-gray-300 italic">null</span> : String(row[c])}
                                 </td>
@@ -2732,7 +2732,7 @@ export default function SchemaBuilder() {
                     <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-purple-600" />
                   )}
                   {t.name}
-                  <span className="ml-1.5 text-[10px] text-gray-400">{t.columns.length} cols</span>
+                  <span className="ml-1.5 text-[10px] text-gray-400">{(t.columns ?? []).length} cols</span>
                 </button>
               ))}
             </div>
