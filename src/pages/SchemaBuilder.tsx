@@ -592,7 +592,7 @@ export default function SchemaBuilder() {
   const [originalSchema, setOriginalSchema] = useState<OriginalField[]>([]);
   const [tables, setTables]                 = useState<Table[]>(() => readDraft()?.tables ?? []);
   const [activeTableId, setActiveTableId]   = useState<string>(() => readDraft()?.activeTableId ?? "");
-  const [rowCount, setRowCount]             = useState<number>(() => readDraft()?.rowCount ?? 10_000);
+  const [rowCount, setRowCount]             = useState<number>(() => readDraft()?.rowCount ?? 1_000);
 
   const [saveStatus, setSaveStatus] = useState<"idle"|"saving"|"saved"|"error">("idle");
   const [aiFieldLoading, setAiFieldLoading] = useState<string | null>(null);
