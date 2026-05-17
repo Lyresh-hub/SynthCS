@@ -4,11 +4,10 @@ import pandas as pd
 import numpy as np
 from scipy import stats
 from sklearn.model_selection import train_test_split
-from ctgan import CTGAN
 
 
 _MAX_TRAINING_ROWS = 20_000
-_CTGAN_EPOCHS      = 150    # balanced: good quality, ~1-2 min on CPU for small datasets
+_CTGAN_EPOCHS      = 150
 _CTGAN_BATCH_SIZE  = 500
 
 
@@ -192,6 +191,7 @@ def generate_synthetic_data(dataset_path: str, changes: list[dict], row_count: i
     discrete_columns = [col for col in train_df.columns if train_df[col].dtype == object]
 
     try:
+        from ctgan import CTGAN  # lazy import — avoids loading PyTorch at server startup
         model = CTGAN(epochs=_CTGAN_EPOCHS, batch_size=_CTGAN_BATCH_SIZE, verbose=False)
         model.fit(train_df, discrete_columns=discrete_columns)
         synthetic = model.sample(row_count)

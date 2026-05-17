@@ -1,3 +1,5 @@
+//WALA NA TO DI NA GAGAMITINNNN
+
 import { useState } from "react";
 import { Copy, RefreshCw, Eye, EyeOff, Key, Zap } from "lucide-react";
 
@@ -21,7 +23,7 @@ export default function APIAccess() {
   const handleCopy = () => {
     navigator.clipboard.writeText(API_KEY);
     setCopied(true);
-    setTimeout(() => setCopied(false), 1500); // mawawala ang "Copied!" pagkatapos ng 1.5 segundo
+    setTimeout(() => setCopied(false), 1500); // mawawala ang "Copied!" pagkatapos ng 1.5 seconds
   };
 
   return (
@@ -87,7 +89,7 @@ export default function APIAccess() {
       {/* Sample curl command para makita ng user kung paano gamitin ang API */}
       <div className="bg-white border border-gray-100 rounded-xl p-5 shadow-sm">
         <h3 className="text-sm font-semibold text-gray-900 mb-3">Quick Example</h3>
-        {/* Palitan lang ang YOUR_API_KEY ng actual key mo para gumana ito */}
+        {/* Palitan lang yung YOUR_API_KEY ng actual key mo para gumana ito */}
         <pre className="text-xs bg-gray-900 text-green-400 rounded-lg p-4 overflow-auto font-mono leading-relaxed">
 {`curl -X GET "https://api.synthgen.io/v1/generate" \\
   -H "Authorization: Bearer YOUR_API_KEY" \\

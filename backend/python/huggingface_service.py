@@ -27,9 +27,18 @@ def search_datasets(query: str) -> list:
 
 
 def download_dataset(dataset_ref: str, dest: str) -> str | None:
-    from datasets import load_dataset
+    from datasets import load_dataset, get_dataset_split_names
     try:
-        ds = load_dataset(dataset_ref, split="train", trust_remote_code=True)
+        # Try common split names in order
+        split = "train"
+        try:
+            splits = get_dataset_split_names(dataset_ref)
+            if splits:
+                split = splits[0]
+        except Exception:
+            pass
+
+        ds = load_dataset(dataset_ref, split=split)
         df: pd.DataFrame = ds.to_pandas()
 
         # Drop columns that are entirely bytes / objects that can't be serialised
