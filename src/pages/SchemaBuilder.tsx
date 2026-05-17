@@ -12,12 +12,25 @@ import { NODE_API, PYTHON_API } from "../lib/config";
 /** Parse an error response from the Python backend.
  *  HF Spaces returns an HTML 500 page when the container crashes — detect that
  *  and return a friendly message instead of dumping raw HTML to the user. */
+const _SERVER_UNAVAIL = "The generation server is temporarily unavailable. It may be starting up — please wait 30 seconds and try again.";
+
 async function parsePythonError(res: Response): Promise<string> {
+  const contentType = res.headers.get("content-type") ?? "";
+  if (contentType.includes("text/html") || res.status === 502 || res.status === 503 || res.status === 504) {
+    return _SERVER_UNAVAIL;
+  }
   const text = await res.text();
-  if (text.trimStart().startsWith("<") || res.status === 502 || res.status === 503) {
-    return "The generation server is temporarily unavailable. It may be starting up — please wait 30 seconds and try again.";
+  if (text.trimStart().startsWith("<") || text.includes("<!DOCTYPE") || text.includes("<html")) {
+    return _SERVER_UNAVAIL;
   }
   try { return JSON.parse(text)?.detail ?? text; } catch { return text; }
+}
+
+function sanitizeErrorMsg(msg: string): string {
+  if (msg.trimStart().startsWith("<") || msg.includes("<!DOCTYPE") || msg.includes("<html")) {
+    return _SERVER_UNAVAIL;
+  }
+  return msg;
 }
 
 const FIELD_TYPES = [
@@ -1965,7 +1978,7 @@ export default function SchemaBuilder() {
           {llmError && (
             <div className="mx-4 mb-3 flex items-start gap-2.5 bg-red-50 border border-red-200 rounded-lg px-3 py-2.5">
               <AlertCircle className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5" />
-              <p className="text-xs text-red-700 leading-relaxed">{llmError}</p>
+              <p className="text-xs text-red-700 leading-relaxed">{sanitizeErrorMsg(llmError)}</p>
             </div>
           )}
           {strikeWarning && !strikeWarning.banned && (
@@ -2585,7 +2598,7 @@ export default function SchemaBuilder() {
           <AlertCircle className="w-4 h-4 text-red-500 mt-0.5 flex-shrink-0" />
           <div>
             <p className="text-sm text-red-700 font-medium">Something went wrong</p>
-            <p className="text-xs text-red-500 mt-0.5">{errorMsg}</p>
+            <p className="text-xs text-red-500 mt-0.5">{sanitizeErrorMsg(errorMsg)}</p>
             <button onClick={() => { setErrorMsg(""); setPhase(tables.length > 0 ? "schema" : "idle"); }} className="mt-2 text-xs text-red-500 underline">
               {tables.length > 0 ? "Back to Schema" : "Try again"}
             </button>
