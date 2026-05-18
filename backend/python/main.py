@@ -473,9 +473,15 @@ class MultiTableRequest(BaseModel):
     format:  str = "csv"   # "csv" | "json" | "xlsx"
 
 
+class ExpandFieldDef(BaseModel):
+    name:      str
+    null_rate: float = 0.0
+
+
 class ExpandRequest(BaseModel):
     dataset_id: str
     row_count:  int
+    fields:     list[ExpandFieldDef]   = []
     temporal:   TemporalConfig         = TemporalConfig()
     rules:      list[RelationshipRule] = []
     anomaly:    AnomalyConfig          = AnomalyConfig()
@@ -538,7 +544,10 @@ def generate_from_schema(req: SchemaGenerateRequest):
             ef.description = f"{ef.description} [{table_ctx}]".strip(" []") if ef.description else f"[{table_ctx}]"
         enriched_fields.append(ef)
 
-    df, entity_tables = generate_relational_dataset(enriched_fields, _TEMPLATE_ROWS, save_dir=dest)
+    try:
+        df, entity_tables = generate_relational_dataset(enriched_fields, _TEMPLATE_ROWS, save_dir=dest)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Template generation failed: {e}")
 
     template_path = os.path.join(dest, "template.csv")
     df.to_csv(template_path, index=False)
@@ -1349,9 +1358,15 @@ def expand_with_ctgan(req: ExpandRequest):
 
     try:
         import pandas as pd
+        import numpy as _np
         output_path = os.path.join(dataset_path, "synthetic_output.csv")
         if os.path.exists(output_path):
             df = pd.read_csv(output_path)
+            for fld in req.fields:
+                nr = float(fld.null_rate or 0)
+                if nr > 0 and fld.name in df.columns:
+                    mask = _np.random.random(len(df)) < min(nr, 50.0) / 100.0
+                    df.loc[mask, fld.name] = None
             df = apply_temporal(df, req.temporal.model_dump())
             df = apply_rules(df, [r.model_dump() for r in req.rules])
             df = inject_anomalies(df, req.anomaly.model_dump())

@@ -1382,11 +1382,13 @@ export default function SchemaBuilder() {
     setLoadingMsg(`Training CTGAN on 200-row template, scaling to ${rowCount.toLocaleString()} rows…`);
     setPhase("generating");
     try {
+      const at2 = getActiveTable();
       const res = await fetch(`${PYTHON_API}/api/expand-with-ctgan`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           dataset_id: templateDatasetId,
           row_count:  rowCount,
+          fields: (at2?.fields ?? []).map((f) => ({ name: f.name, null_rate: f.null_rate })),
         }),
       });
       if (!res.ok) throw new Error(await parsePythonError(res));
@@ -1448,12 +1450,13 @@ export default function SchemaBuilder() {
 
       setLoadingMsg(`Expanding to ${rowCount.toLocaleString()} rows with CTGAN…`);
 
-      // Step 2: expand with CTGAN
+      // Step 2: expand with CTGAN — include fields so null_rate is applied after expansion
       const expandRes = await fetchPython(`${PYTHON_API}/api/expand-with-ctgan`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           dataset_id: templateData.dataset_id,
           row_count:  rowCount,
+          fields: at.fields.map((f) => ({ name: f.name, null_rate: f.null_rate })),
         }),
         signal: ctrl.signal,
       }, (msg) => setLoadingMsg(msg));
