@@ -154,6 +154,59 @@ async function sendPasswordResetEmail(to, code) {
   }
 }
 
+async function sendDeletionWarningEmail(to, fullName, deletionDate, reason) {
+  const sender = process.env.GMAIL_SENDER || "christianboluntate5@gmail.com";
+  const dateStr = new Date(deletionDate).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
+
+  const htmlBody = `
+    <div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:32px 24px">
+      <h2 style="color:#dc2626;margin-bottom:8px">Account Deletion Notice</h2>
+      <p style="color:#374151;font-size:15px;line-height:1.6">
+        Hi <strong>${fullName}</strong>,
+      </p>
+      <p style="color:#374151;font-size:15px;line-height:1.6">
+        Your <strong>SynthCS</strong> account has been scheduled for permanent deletion on
+        <strong>${dateStr}</strong>.
+      </p>
+      ${reason ? `<p style="color:#374151;font-size:14px;background:#fef2f2;border-left:4px solid #dc2626;padding:12px 16px;border-radius:4px;margin:16px 0"><strong>Reason:</strong> ${reason}</p>` : ""}
+      <p style="color:#374151;font-size:15px;line-height:1.6">
+        You have until <strong>${dateStr}</strong> to log in and download or save any schemas
+        and datasets you wish to keep. After this date, all your data will be permanently removed
+        and cannot be recovered.
+      </p>
+      <p style="color:#6b7280;font-size:13px;margin-top:24px">
+        If you believe this is a mistake, please contact the administrator immediately.
+      </p>
+    </div>`;
+
+  const rawEmail = [
+    `From: SynthCS <${sender}>`,
+    `To: ${to}`,
+    `Subject: Important: Your SynthCS account is scheduled for deletion`,
+    `MIME-Version: 1.0`,
+    `Content-Type: text/html; charset=UTF-8`,
+    ``,
+    htmlBody,
+  ].join("\r\n");
+
+  const encoded = Buffer.from(rawEmail)
+    .toString("base64")
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
+
+  const accessToken = await getGmailAccessToken();
+  const res = await fetch("https://gmail.googleapis.com/gmail/v1/users/me/messages/send", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ raw: encoded }),
+  });
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`Gmail API error ${res.status}: ${body}`);
+  }
+}
+
 const app = express();
 app.use(cors({
   origin: (origin, cb) => cb(null, isAllowedOrigin(origin)),
@@ -208,6 +261,25 @@ async function initDB() {
     await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS strike_count  INT DEFAULT 0`).catch(() => {});
     await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS is_banned     BOOLEAN DEFAULT FALSE`).catch(() => {});
     await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS ban_reason    TEXT`).catch(() => {});
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS pending_deletion       BOOLEAN DEFAULT FALSE`).catch(() => {});
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS deletion_scheduled_at TIMESTAMPTZ`).catch(() => {});
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS deletion_reason       TEXT`).catch(() => {});
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS user_archive (
+        id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        user_id               UUID NOT NULL,
+        full_name             VARCHAR(255),
+        email                 VARCHAR(255),
+        username              VARCHAR(255),
+        schema_count          INT DEFAULT 0,
+        archive_reason        TEXT,
+        archived_at           TIMESTAMPTZ DEFAULT NOW(),
+        deletion_scheduled_at TIMESTAMPTZ,
+        notified_at           TIMESTAMPTZ,
+        is_banned             BOOLEAN DEFAULT FALSE
+      )
+    `).catch(() => {});
     // Migrate existing full_name data into first_name / last_name
     await pool.query(`
       UPDATE users
@@ -799,6 +871,8 @@ app.get("/api/admin/users", requireAdmin, async (req, res) => {
       SELECT u.id, u.first_name, u.last_name, COALESCE(u.first_name || ' ' || u.last_name, u.full_name) AS full_name,
              u.email, u.username, u.email_verified, u.is_admin, u.created_at,
              COALESCE(u.strike_count, 0) AS strike_count, COALESCE(u.is_banned, FALSE) AS is_banned, u.ban_reason,
+             COALESCE(u.pending_deletion, FALSE) AS pending_deletion,
+             u.deletion_scheduled_at, u.deletion_reason,
              COUNT(s.id)::int AS schema_count
       FROM users u
       LEFT JOIN schemas s ON s.user_id = u.id
@@ -812,12 +886,98 @@ app.get("/api/admin/users", requireAdmin, async (req, res) => {
   }
 });
 
+// Schedule deletion — moves user to pending state and sends warning email
+app.patch("/api/admin/users/:id/schedule-deletion", requireAdmin, async (req, res) => {
+  try {
+    const { reason = "Admin-issued deletion", grace_days = 7 } = req.body;
+    const deletionDate = new Date(Date.now() + grace_days * 24 * 60 * 60 * 1000);
+
+    const userRes = await pool.query(
+      `SELECT COALESCE(first_name || ' ' || last_name, full_name) AS full_name, email,
+              username, COALESCE(is_banned, FALSE) AS is_banned
+       FROM users WHERE id = $1`,
+      [req.params.id]
+    );
+    if (userRes.rows.length === 0) return res.status(404).json({ error: "User not found" });
+    const user = userRes.rows[0];
+
+    const schemaRes = await pool.query("SELECT COUNT(*)::int AS cnt FROM schemas WHERE user_id = $1", [req.params.id]);
+    const schemaCount = schemaRes.rows[0].cnt;
+
+    // Archive record snapshot
+    await pool.query(
+      `INSERT INTO user_archive (user_id, full_name, email, username, schema_count, archive_reason, deletion_scheduled_at, is_banned)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       ON CONFLICT DO NOTHING`,
+      [req.params.id, user.full_name, user.email, user.username, schemaCount, reason, deletionDate, user.is_banned]
+    );
+
+    await pool.query(
+      `UPDATE users SET pending_deletion = TRUE, deletion_scheduled_at = $1, deletion_reason = $2 WHERE id = $3`,
+      [deletionDate, reason, req.params.id]
+    );
+
+    // Send email — non-fatal if email is not configured
+    let notified = false;
+    if (user.email && EMAIL_READY) {
+      try {
+        await sendDeletionWarningEmail(user.email, user.full_name, deletionDate, reason);
+        await pool.query("UPDATE user_archive SET notified_at = NOW() WHERE user_id = $1", [req.params.id]);
+        notified = true;
+      } catch (e) {
+        console.error("Deletion warning email failed:", e.message);
+      }
+    }
+
+    res.json({ success: true, deletion_scheduled_at: deletionDate, notified });
+  } catch (err) {
+    console.error("Admin schedule deletion error:", err.message);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+// Cancel pending deletion — restores user to normal
+app.patch("/api/admin/users/:id/cancel-deletion", requireAdmin, async (req, res) => {
+  try {
+    await pool.query(
+      "UPDATE users SET pending_deletion = FALSE, deletion_scheduled_at = NULL, deletion_reason = NULL WHERE id = $1",
+      [req.params.id]
+    );
+    await pool.query("DELETE FROM user_archive WHERE user_id = $1", [req.params.id]);
+    res.json({ success: true });
+  } catch (err) {
+    console.error("Admin cancel deletion error:", err.message);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+// Permanently delete a user (hard delete — irreversible)
 app.delete("/api/admin/users/:id", requireAdmin, async (req, res) => {
   try {
+    await pool.query("DELETE FROM user_archive WHERE user_id = $1", [req.params.id]);
     await pool.query("DELETE FROM users WHERE id = $1", [req.params.id]);
     res.json({ success: true });
   } catch (err) {
     console.error("Admin delete user error:", err.message);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+// List archived (pending-deletion) users
+app.get("/api/admin/archive", requireAdmin, async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT a.id AS archive_id, a.user_id, a.full_name, a.email, a.username,
+             a.schema_count, a.archive_reason, a.archived_at, a.deletion_scheduled_at,
+             a.notified_at, a.is_banned,
+             u.pending_deletion
+      FROM user_archive a
+      LEFT JOIN users u ON u.id = a.user_id
+      ORDER BY a.deletion_scheduled_at ASC
+    `);
+    res.json(result.rows);
+  } catch (err) {
+    console.error("Admin archive list error:", err.message);
     res.status(500).json({ error: "Server error" });
   }
 });
