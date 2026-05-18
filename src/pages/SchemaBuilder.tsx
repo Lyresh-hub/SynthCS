@@ -1460,7 +1460,7 @@ export default function SchemaBuilder() {
           })),
         }),
         signal: ctrl.signal,
-      }, (msg) => setLoadingMsg(msg));
+      });
       if (!templateRes.ok) throw new Error(await parsePythonError(templateRes));
       const templateData = await templateRes.json();
 
@@ -1475,7 +1475,7 @@ export default function SchemaBuilder() {
           fields: at.fields.map((f) => ({ name: f.name, null_rate: f.null_rate })),
         }),
         signal: ctrl.signal,
-      }, (msg) => setLoadingMsg(msg));
+      });
       if (!expandRes.ok) throw new Error(await parsePythonError(expandRes));
       const expandData = await expandRes.json();
 
@@ -1557,7 +1557,7 @@ export default function SchemaBuilder() {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
         signal: controller.signal,
-      }, (msg) => setLoadingMsg(msg)).finally(() => clearTimeout(timeout));
+      }).finally(() => clearTimeout(timeout));
       if (!res.ok) throw new Error(await parsePythonError(res));
 
       const userId = localStorage.getItem("user_id");

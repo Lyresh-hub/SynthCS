@@ -525,55 +525,56 @@ def generate_from_schema(req: SchemaGenerateRequest):
     email derived from the same entity's name, inventory state tracked.
     Returns dataset_id, JSON preview, and metadata for any entity master tables.
     """
-    import pandas as pd
-    import uuid as uuid_module
-    from relational_gen import generate_relational_dataset
-
-    dataset_id = str(uuid_module.uuid4())
-    dest = os.path.join(DATASETS_DIR, dataset_id)
-    os.makedirs(dest, exist_ok=True)
-
-    # Inject table name into each field description so domain-aware pool
-    # selection in gen_col can detect context (e.g. "grocery store" → grocery products)
-    table_ctx = req.table_name.lower().replace("_", " ").strip()
-    enriched_fields = []
-    for f in req.fields:
-        ef = f.model_copy()
-        existing = (ef.description or "").lower()
-        if table_ctx and table_ctx not in existing:
-            ef.description = f"{ef.description} [{table_ctx}]".strip(" []") if ef.description else f"[{table_ctx}]"
-        enriched_fields.append(ef)
-
     try:
+        import pandas as pd
+        import uuid as uuid_module
+        from relational_gen import generate_relational_dataset
+
+        dataset_id = str(uuid_module.uuid4())
+        dest = os.path.join(DATASETS_DIR, dataset_id)
+        os.makedirs(dest, exist_ok=True)
+
+        # Inject table name into each field description so domain-aware pool
+        # selection in gen_col can detect context (e.g. "grocery store" → grocery products)
+        table_ctx = req.table_name.lower().replace("_", " ").strip()
+        enriched_fields = []
+        for f in req.fields:
+            ef = f.model_copy()
+            existing = (ef.description or "").lower()
+            if table_ctx and table_ctx not in existing:
+                ef.description = f"{ef.description} [{table_ctx}]".strip(" []") if ef.description else f"[{table_ctx}]"
+            enriched_fields.append(ef)
+
         df, entity_tables = generate_relational_dataset(enriched_fields, _TEMPLATE_ROWS, save_dir=dest)
+
+        template_path = os.path.join(dest, "template.csv")
+        df.to_csv(template_path, index=False)
+
+        preview_df   = df.head(20)
+        preview_rows = preview_df.where(preview_df.notna(), None).to_dict(orient="records")
+
+        entity_meta = [
+            {
+                "name":    name,
+                "file":    f"{name}_master.csv",
+                "rows":    len(tbl),
+                "columns": tbl.columns.tolist(),
+                "preview": tbl.head(5).where(tbl.head(5).notna(), None).to_dict(orient="records"),
+            }
+            for name, tbl in entity_tables.items()
+        ]
+
+        return {
+            "dataset_id":    dataset_id,
+            "template_rows": _TEMPLATE_ROWS,
+            "columns":       df.columns.tolist(),
+            "preview":       preview_rows,
+            "entity_tables": entity_meta,
+        }
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Template generation failed: {e}")
-
-    template_path = os.path.join(dest, "template.csv")
-    df.to_csv(template_path, index=False)
-
-    preview_df   = df.head(20)
-    preview_rows = preview_df.where(preview_df.notna(), None).to_dict(orient="records")
-
-    # Summarise entity master tables for the frontend
-    entity_meta = [
-        {
-            "name":    name,
-            "file":    f"{name}_master.csv",
-            "rows":    len(tbl),
-            "columns": tbl.columns.tolist(),
-            "preview": tbl.head(5).where(tbl.head(5).notna(), None).to_dict(orient="records"),
-        }
-        for name, tbl in entity_tables.items()
-    ]
-
-    return {
-        "dataset_id":    dataset_id,
-        "template_rows": _TEMPLATE_ROWS,
-        "columns":       df.columns.tolist(),
-        "preview":       preview_rows,
-        "entity_tables": entity_meta,
-    }
 
     # ── Dead code below — left here intentionally ──────────────────────────────
     # This was the original inline gen_col() implementation. It was extracted
