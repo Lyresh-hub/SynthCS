@@ -1568,8 +1568,22 @@ def smart_search(req: SmartSearchRequest) -> dict[str, Any]:
                     except Exception:
                         pass
 
-    results.sort(key=lambda x: x.get("downloadCount", 0), reverse=True)
-    return {"datasets": results[:24]}
+    # Sort within each source by download count, then interleave sources so
+    # every source that found results gets representation in the final list.
+    # Without this, Kaggle/HuggingFace (high download counts) fill all 24
+    # slots and UCI/OpenML (downloadCount always 0) never appear.
+    from collections import defaultdict as _dd
+    by_source: dict = _dd(list)
+    for r in results:
+        by_source[r["source"]].append(r)
+    for src in by_source:
+        by_source[src].sort(key=lambda x: x.get("downloadCount", 0), reverse=True)
+
+    diverse: list[dict] = []
+    for src in ["kaggle", "huggingface", "uci", "openml", "datagov_ph", "psa"]:
+        diverse.extend(by_source[src][:4])
+
+    return {"datasets": diverse[:24]}
 
 
 # ── Hybrid generate (CTGAN real fields + schema-based LLM fields) ─────────────
