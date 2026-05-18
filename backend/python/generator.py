@@ -331,6 +331,11 @@ def generate_synthetic_data(dataset_path: str, changes: list[dict], row_count: i
     if rename_map:
         synthetic = synthetic.rename(columns=rename_map)
 
+    # Drop columns the user deleted from the schema.
+    # changes[] only contains fields the user kept — anything else is unwanted.
+    wanted = {change["new_name"] for change in changes}
+    synthetic = synthetic[[c for c in synthetic.columns if c in wanted]]
+
     # Step 8: save
     output_path = os.path.join(dataset_path, "synthetic_output.csv")
     synthetic.to_csv(output_path, index=False)
