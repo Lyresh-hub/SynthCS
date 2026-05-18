@@ -268,7 +268,7 @@ async function initDB() {
     await pool.query(`
       CREATE TABLE IF NOT EXISTS user_archive (
         id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        user_id               UUID NOT NULL,
+        user_id               UUID NOT NULL UNIQUE,
         full_name             VARCHAR(255),
         email                 VARCHAR(255),
         username              VARCHAR(255),
@@ -280,6 +280,8 @@ async function initDB() {
         is_banned             BOOLEAN DEFAULT FALSE
       )
     `).catch(() => {});
+    await pool.query(`ALTER TABLE user_archive ADD COLUMN IF NOT EXISTS user_id UUID`).catch(() => {});
+    await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS user_archive_user_id_idx ON user_archive (user_id)`).catch(() => {});
     // Migrate existing full_name data into first_name / last_name
     await pool.query(`
       UPDATE users
