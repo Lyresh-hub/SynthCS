@@ -596,8 +596,8 @@ export default function SchemaBuilder() {
   const [sizeFilter, setSizeFilter] = useState<"any" | "small" | "medium" | "large">("any");
 
   const [datasetId, setDatasetId]           = useState("");
-  const [kaggleRef, setKaggleRef]           = useState("");
-  const [downloadSourceId, setDownloadSourceId] = useState("kaggle");
+  const [kaggleRef, setKaggleRef]           = useState(() => sessionStorage.getItem("sb_kaggle_ref") ?? "");
+  const [downloadSourceId, setDownloadSourceId] = useState(() => sessionStorage.getItem("sb_source_id") ?? "kaggle");
   const [originalSchema, setOriginalSchema] = useState<OriginalField[]>([]);
   const [tables, setTables]                 = useState<Table[]>(() => readDraft()?.tables ?? []);
   const [activeTableId, setActiveTableId]   = useState<string>(() => readDraft()?.activeTableId ?? "");
@@ -1453,6 +1453,8 @@ export default function SchemaBuilder() {
     setSelectedDataSource(sourceLabel);
     setKaggleRef(ds.ref);
     setDownloadSourceId(sourceId);
+    sessionStorage.setItem("sb_kaggle_ref", ds.ref);
+    sessionStorage.setItem("sb_source_id", sourceId);
     setLoadingMsg(`Downloading "${ds.title}" from ${sourceLabel}…`);
     setPhase("loading");
     try {
@@ -3468,17 +3470,17 @@ export default function SchemaBuilder() {
                     className="flex-1 flex items-center justify-center gap-1.5 px-4 py-2 bg-purple-600 text-white rounded-lg text-sm font-medium hover:bg-purple-700 transition-colors">
                     <Sparkles className="w-4 h-4" /> Generate → Preview
                   </button>
-                ) : !datasetId ? (
-                  <button onClick={handleRedownload}
-                    className="flex-1 flex items-center justify-center gap-1.5 px-4 py-2 bg-purple-600 text-white rounded-lg text-sm font-medium hover:bg-purple-700 transition-colors">
-                    Regenerate Dataset
-                  </button>
-                ) : (
+                ) : datasetId ? (
                   <button onClick={() => handleGenerate()}
                     className="flex-1 flex items-center justify-center gap-1.5 px-4 py-2 bg-purple-600 text-white rounded-lg text-sm font-medium hover:bg-purple-700 transition-colors">
                     Generate with CTGAN
                   </button>
-                )}
+                ) : kaggleRef ? (
+                  <button onClick={handleRedownload}
+                    className="flex-1 flex items-center justify-center gap-1.5 px-4 py-2 bg-purple-600 text-white rounded-lg text-sm font-medium hover:bg-purple-700 transition-colors">
+                    Regenerate Dataset
+                  </button>
+                ) : null}
               </div>
             )}
 
