@@ -1657,14 +1657,17 @@ def generate_hybrid(req: HybridGenerateRequest):
         raise HTTPException(status_code=500, detail=f"CTGAN generation failed: {e}")
 
     if req.extra_fields:
-        df = pd.read_csv(output_path)
-        n  = len(df)
-        for extra in req.extra_fields:
-            df[extra.name] = gen_col(
-                extra.field_type, n, extra.constraints,
-                extra.name, extra.description,
-            )
-        df.to_csv(output_path, index=False)
+        try:
+            df = pd.read_csv(output_path)
+            n  = len(df)
+            for extra in req.extra_fields:
+                df[extra.name] = gen_col(
+                    extra.field_type, n, extra.constraints,
+                    extra.name, extra.description,
+                )
+            df.to_csv(output_path, index=False)
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Extra field generation failed: {e}")
 
     try:
         import numpy as _np2

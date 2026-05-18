@@ -19,6 +19,20 @@ function _isHfWakeupResponse(res: Response): boolean {
   return ct.includes("text/html") || res.status === 502 || res.status === 503 || res.status === 504;
 }
 
+async function _isServiceCrash(res: Response): Promise<boolean> {
+  // Railway/HF can return a plain 500 when the container OOM-crashes and restarts.
+  // Distinguish this from a real application 500 (which has a specific detail message)
+  // by checking if the body is exactly FastAPI's unhandled-exception payload.
+  if (res.status !== 500) return false;
+  try {
+    const text = await res.clone().text();
+    const detail = JSON.parse(text)?.detail ?? "";
+    return detail === "Internal Server Error";
+  } catch {
+    return true; // unparseable 500 → treat as crash
+  }
+}
+
 /** Fetch a Python API endpoint, auto-retrying once if the HF Space is waking up. */
 async function fetchPython(
   url: string,
@@ -30,10 +44,12 @@ async function fetchPython(
   let lastRes: Response | undefined;
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
     const res = await fetch(url, init);
-    if (!_isHfWakeupResponse(res)) return res;
+    const isWakeup = _isHfWakeupResponse(res);
+    const isCrash  = !isWakeup && await _isServiceCrash(res);
+    if (!isWakeup && !isCrash) return res;
     lastRes = res;
     if (attempt < MAX_ATTEMPTS - 1) {
-      onWakeup?.(`Server is waking up… retrying in 30 s (attempt ${attempt + 1}/${MAX_ATTEMPTS - 1})`);
+      onWakeup?.(`Server is starting up… retrying in 30 s (attempt ${attempt + 1}/${MAX_ATTEMPTS - 1})`);
       await new Promise<void>((resolve, reject) => {
         const id = setTimeout(resolve, SLEEP_MS);
         const signal = (init as any).signal as AbortSignal | undefined;
