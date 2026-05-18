@@ -1170,7 +1170,14 @@ def generate_multi_table(req: MultiTableRequest):
                     and ref_field in generated[ref_table].columns):
                 pool = generated[ref_table][ref_field].dropna().tolist()
                 if pool:
+                    import numpy as _np
                     df[fname] = [random.choice(pool) for _ in range(n_rows)]
+                    # FK sampling bypasses gen_col so null_rate would be ignored.
+                    # Apply it here so dirty-data simulation works on FK fields too.
+                    _nr = float(getattr(orig_f.constraints, "null_rate", 0) or 0)
+                    if _nr > 0:
+                        _mask = _np.random.random(n_rows) < min(_nr, 50.0) / 100.0
+                        df.loc[_mask, fname] = None
                     continue
             # Fallback: generate independently
             df[fname] = gen_col(
