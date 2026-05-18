@@ -115,7 +115,7 @@ export default function ValidationReport({ inlineData } = {}) {
   const pScore = metrics.privacy?.score ?? 100;
 
   const recommendations = [];
-  if (wScore < 75) recommendations.push({ grad: "from-amber-500 to-orange-600", icon: "≋", label: "Distribution", title: "Improve Distribution Similarity", text: "Generate more rows — larger counts let the Gaussian Copula better approximate marginal distributions. Try 5,000+ rows." });
+  if (wScore < 75) recommendations.push({ grad: "from-amber-500 to-orange-600", icon: "≋", label: "Distribution", title: "Improve Distribution Similarity", text: "Generate more rows — larger counts let CTGAN better approximate marginal distributions. Try 5,000+ rows." });
   if (cScore < 75) recommendations.push({ grad: "from-blue-500 to-indigo-600", icon: "⊡", label: "Correlation", title: "Correlation Gap Detected", text: "Some inter-column relationships are partially lost. For tighter correlation, use a real-world Kaggle dataset as the base." });
   if (uScore < 50) recommendations.push({ grad: "from-purple-500 to-violet-600", icon: "⚙", label: "ML Utility", title: "Low ML Utility is Normal", text: "General-purpose synthetic datasets often score low on TSTR. A real-world base dataset significantly improves this metric." });
   if (pScore < 90) recommendations.push({ grad: "from-red-500 to-rose-600", icon: "🛡", label: "Privacy", title: "Some Rows Match Real Records", text: "A fraction of synthetic rows are exact matches of real records. Add more unique fields or increase value diversity." });
