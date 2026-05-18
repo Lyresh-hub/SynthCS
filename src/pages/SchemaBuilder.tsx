@@ -1081,6 +1081,7 @@ export default function SchemaBuilder() {
 
       setDatasetId(dlData.dataset_id);
       setKaggleRef(ds.ref);
+      sessionStorage.setItem("sb_kaggle_ref", ds.ref);
 
       const realSchema: OriginalField[] = dlData.schema.map((f: any) => ({
         name: f.name, type: f.type, nullable: f.nullable, sample_values: f.sample_values ?? [],
@@ -1156,6 +1157,7 @@ export default function SchemaBuilder() {
       const [primary, ...others] = successful;
       setDatasetId(primary.data.dataset_id);
       setKaggleRef(primary.ds.ref);
+      sessionStorage.setItem("sb_kaggle_ref", primary.ds.ref);
 
       const primarySchema: OriginalField[] = primary.data.schema.map((f: any) => ({
         name: f.name, type: f.type, nullable: f.nullable, sample_values: f.sample_values ?? [],
@@ -1418,6 +1420,7 @@ export default function SchemaBuilder() {
       const [primary, ...others] = successful;
       setDatasetId(primary.data.dataset_id);
       setKaggleRef(primary.ds.ref);
+      sessionStorage.setItem("sb_kaggle_ref", primary.ds.ref);
       const primarySchema: OriginalField[] = primary.data.schema.map((f: any) => ({
         name: f.name, type: f.type, nullable: f.nullable, sample_values: f.sample_values ?? [],
       }));
@@ -3293,7 +3296,12 @@ export default function SchemaBuilder() {
                     className="flex-1 flex items-center justify-center gap-1.5 px-4 py-2 bg-purple-600 text-white rounded-lg text-sm font-medium hover:bg-purple-700 transition-colors">
                     Regenerate Dataset
                   </button>
-                ) : null}
+                ) : (
+                  <button onClick={handleRedownload} disabled
+                    className="flex-1 flex items-center justify-center gap-1.5 px-4 py-2 bg-gray-200 text-gray-400 rounded-lg text-sm font-medium cursor-not-allowed">
+                    Regenerate Dataset
+                  </button>
+                )}
               </div>
             )}
 
