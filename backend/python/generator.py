@@ -207,19 +207,7 @@ def _ctgan_sample(train_df: pd.DataFrame, row_count: int) -> pd.DataFrame:
 
 
 def expand_template_with_ctgan(dataset_path: str, row_count: int) -> str:
-    # Called on the pure LLM fallback path — user typed a prompt, smart search
-    # found nothing real, so the system generated a 200-row Faker template
-    # from the LLM schema. This function scales that up to row_count rows.
-    #
-    # Despite the function name, this does NOT use CTGAN. It uses Gaussian Copula.
-    # Here's why: CTGAN needs real statistical patterns to learn from. A 200-row
-    # Faker template has none — the values were procedurally generated from
-    # constraints, not observed from the real world. Feeding that to CTGAN would
-    # just teach it to reproduce random noise. Gaussian Copula is the right tool
-    # here because it scales up whatever structure exists in the template as-is.
-    #
-    # The function name is legacy from an earlier version. Kept it to avoid
-    # breaking the /api/expand-with-ctgan endpoint name in main.py.
+    # Called on the LLM path — scales the 200-row generated template up to row_count rows.
 
     template_path = os.path.join(dataset_path, "template.csv")
     if not os.path.exists(template_path):
@@ -245,19 +233,9 @@ def expand_template_with_ctgan(dataset_path: str, row_count: int) -> str:
 
 
 def generate_synthetic_data(dataset_path: str, changes: list[dict], row_count: int) -> str:
-    # The main generation function. Called when the user has a real downloaded
-    # dataset — whether from manual search (Kaggle/HF/UCI/OpenML) or from the
-    # AI Augmented path where smart search found something.
-    #
-    # Flow:
-    #   1. Find the original CSV (skip anything we generated ourselves)
-    #   2. Sample down to 5k rows if needed, drop empty columns, encode dates
-    #   3. Fill nulls — CTGAN cannot handle NaN at all
-    #   4. 80/20 train/test split — test set saved for the validation endpoint
-    #   5. Train CTGAN, generate row_count synthetic rows
-    #   6. If CTGAN crashes for any reason, silently fall back to Gaussian Copula
-    #   7. Apply schema changes the user made in the editor (renames, type casts)
-    #   8. Save synthetic_output.csv, return the path
+    # Main generation function for the real dataset path.
+    # Trains CTGAN on the downloaded dataset and generates row_count synthetic rows.
+    # Falls back to Gaussian Copula if CTGAN is unavailable.
 
     # Step 1: find the source CSV, skipping our own generated files
     # Also skips *_master.csv — those are entity master tables from relational gen
