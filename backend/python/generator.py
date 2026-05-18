@@ -340,16 +340,18 @@ def generate_synthetic_data(dataset_path: str, changes: list[dict], row_count: i
     # CTGAN uses a different internal representation for text vs numbers
     discrete_columns = [col for col in train_df.columns if train_df[col].dtype == object]
 
-    # Step 6: train and sample.
-    # USE_CTGAN=true in HF Space Secrets → real CTGAN via SDV (needs GPU).
-    # Default → Gaussian Copula (CPU-safe, works on free HF tier).
-    if _should_use_ctgan():
-        try:
-            synthetic = _ctgan_sample(train_df, row_count)
-        except Exception:
-            # CTGAN failed (missing library, OOM, no GPU) — fall back silently
-            synthetic = _gaussian_copula_sample(train_df, row_count)
-    else:
+    # Step 6: Train CTGAN and generate synthetic rows.
+    # CTGAN is the primary synthesis engine — it trains a Generator and
+    # Discriminator network on the real dataset and samples new rows that
+    # match the original statistical distribution.
+    # Falls back to Gaussian Copula if CTGAN is unavailable (e.g. no GPU tier).
+    try:
+        from ctgan import CTGAN
+        model = CTGAN(epochs=_CTGAN_EPOCHS, batch_size=_CTGAN_BATCH_SIZE, verbose=False)
+        model.fit(train_df, discrete_columns=discrete_columns)
+        synthetic = model.sample(row_count)
+    except Exception:
+        # GPU not available or ctgan not installed — Gaussian Copula fallback
         synthetic = _gaussian_copula_sample(train_df, row_count)
 
     synthetic = _decode_dates(synthetic, date_cols)
