@@ -365,7 +365,7 @@ def generate(req: GenerateRequest):
     try:
         import pandas as pd
         import numpy as _np
-        df = pd.read_csv(output_path)
+        df = pd.read_csv(output_path, keep_default_na=True, na_values=[''])
         # Apply user-specified null rates — CTGAN learns from real data so it
         # cannot honour schema null_rate settings on its own.
         for ch in req.changes:
@@ -1731,8 +1731,10 @@ def validate_dataset(dataset_id: str):
     from sklearn.ensemble import RandomForestClassifier
     from sklearn.preprocessing import LabelEncoder
 
-    real  = pd.read_csv(original_path)
-    synth = pd.read_csv(synthetic_path)
+    # na_values=[''] treats empty strings as NaN so null-injected string columns
+    # register correctly in isna() — without this, string nulls show as 0%.
+    real  = pd.read_csv(original_path,  keep_default_na=True, na_values=[''])
+    synth = pd.read_csv(synthetic_path, keep_default_na=True, na_values=[''])
 
     common_cols  = [c for c in real.columns if c in synth.columns]
     real  = real[common_cols]
