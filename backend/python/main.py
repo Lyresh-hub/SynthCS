@@ -87,6 +87,7 @@ class FieldChange(BaseModel):
     original_type: str
     new_type: str
     nullable: bool
+    null_rate: float = 0.0
 
 
 class TemporalConfig(BaseModel):
@@ -363,7 +364,16 @@ def generate(req: GenerateRequest):
 
     try:
         import pandas as pd
+        import numpy as _np
         df = pd.read_csv(output_path)
+        # Apply user-specified null rates — CTGAN learns from real data so it
+        # cannot honour schema null_rate settings on its own.
+        for ch in req.changes:
+            col = ch.new_name
+            nr  = float(ch.null_rate or 0)
+            if nr > 0 and col in df.columns:
+                mask = _np.random.random(len(df)) < min(nr, 50.0) / 100.0
+                df.loc[mask, col] = None
         df = apply_temporal(df, req.temporal.model_dump())
         df = apply_rules(df, [r.model_dump() for r in req.rules])
         df = inject_anomalies(df, req.anomaly.model_dump())
@@ -1642,7 +1652,14 @@ def generate_hybrid(req: HybridGenerateRequest):
         df.to_csv(output_path, index=False)
 
     try:
+        import numpy as _np2
         df = pd.read_csv(output_path)
+        for ch in req.changes:
+            col = ch.new_name
+            nr  = float(ch.null_rate or 0)
+            if nr > 0 and col in df.columns:
+                mask = _np2.random.random(len(df)) < min(nr, 50.0) / 100.0
+                df.loc[mask, col] = None
         df = apply_temporal(df, req.temporal.model_dump())
         df = apply_rules(df, [r.model_dump() for r in req.rules])
         df = inject_anomalies(df, req.anomaly.model_dump())

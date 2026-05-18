@@ -1705,6 +1705,7 @@ export default function SchemaBuilder() {
       original_type: f.originalType || f.type,
       new_type:      f.type,
       nullable:      f.null_rate > 0,
+      null_rate:     f.null_rate,
     }));
 
     try {
