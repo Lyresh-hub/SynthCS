@@ -76,7 +76,7 @@ export default function Dashboard() {
   const [loading, setLoading]   = useState(true);
 
   // Para sa Quick Generate section — yung rows slider, selected schema, at output format
-  const [rows, setRows]                 = useState(10000);
+  const [rows, setRows]                 = useState(1000);
   const [selectedSchemaId, setSelectedSchemaId] = useState<string>("");
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [selectedFormat, setSelectedFormat] = useState("csv");
@@ -268,12 +268,12 @@ export default function Dashboard() {
                 <span className="text-xs font-semibold text-gray-800">{rows.toLocaleString()}</span>
               </div>
               <input
-                type="range" min={10000} max={100000} step={1000} value={rows}
+                type="range" min={1000} max={100000} step={1000} value={rows}
                 onChange={(e) => setRows(Number(e.target.value))}
                 className="w-full h-1.5 rounded-full accent-purple-600 bg-gray-100 cursor-pointer"
               />
               <div className="flex justify-between text-[10px] text-gray-400 mt-1">
-                <span>10K</span><span>100K</span>
+                <span>1K</span><span>100K</span>
               </div>
             </div>
 

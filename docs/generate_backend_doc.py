@@ -1246,6 +1246,86 @@ section(doc,
     "(3) Napanatili ang privacy — walang tunay na PII ng aplikante ang ginamit o na-expose."
 )
 
+add_divider(doc)
+
+# ── Section 12: Import & Export Format Design Decision ───────────────────────
+add_heading(doc, "12. Import & Export Format Design Decision", 1)
+
+add_heading(doc, "12.1 Why SynthCS Only Accepts CSV for Import", 2)
+section(doc,
+    "EN: SynthCS supports only CSV file upload for dataset import. "
+    "This is an intentional design decision, not a technical limitation. "
+    "The synthesis models — CTGAN and Gaussian Copula — both require flat, tabular data: "
+    "a simple rows-and-columns structure. "
+    "Formats such as JSON or SQL can be hierarchical or multi-table, which would require "
+    "additional preprocessing and schema-flattening logic before synthesis could begin. "
+    "CSV is also the universal export format across spreadsheets (Excel, Google Sheets), "
+    "databases (MySQL Workbench, pgAdmin), and data science tools (pandas, R). "
+    "This means users can convert from virtually any source in one step. "
+    "The decision prioritized getting the synthesis pipeline right over supporting multiple import formats.",
+    "TL: Ang SynthCS ay tumatanggap lamang ng CSV file para sa pag-upload ng dataset. "
+    "Ito ay isang sadyang desisyon sa disenyo, hindi isang teknikal na limitasyon. "
+    "Ang mga synthesis models — CTGAN at Gaussian Copula — ay parehong nangangailangan ng flat, tabular data: "
+    "isang simpleng rows-at-columns na istruktura. "
+    "Ang mga format tulad ng JSON o SQL ay maaaring hierarchical o multi-table, "
+    "na mangangailangan ng karagdagang preprocessing at schema-flattening bago magsimula ang synthesis. "
+    "Ang CSV ay din ang universal na export format sa mga spreadsheets (Excel, Google Sheets), "
+    "databases (MySQL Workbench, pgAdmin), at data science tools (pandas, R). "
+    "Ibig sabihin, ang mga user ay madaling makakapag-convert mula sa halos anumang source sa iisang hakbang. "
+    "Inuna ng desisyon ang wastong pagtatayo ng synthesis pipeline kaysa sa pagsuporta sa maraming import format."
+)
+
+add_heading(doc, "12.2 Export Formats (5 Formats Supported)", 2)
+section(doc,
+    "EN: While import is restricted to CSV, SynthCS supports five export formats for the generated synthetic dataset. "
+    "This asymmetry exists because export is simple serialization — the data is already a clean DataFrame, "
+    "and it is just written out in a different format. Import is the harder direction because it involves "
+    "trusting an unknown user file and normalizing it into a usable table.",
+    "TL: Habang ang import ay limitado sa CSV, sinusuportahan ng SynthCS ang limang export format para sa "
+    "nagawang synthetic dataset. Ang asymmetry na ito ay umiiral dahil ang export ay simpleng serialization — "
+    "ang data ay isang malinis na DataFrame na, at isinusulat lamang ito sa ibang format. "
+    "Ang import ang mas mahirap na direksyon dahil kailangan nitong pagkatiwalaan ang isang hindi kilalang file ng user "
+    "at i-normalize ito sa isang magagamit na table."
+)
+
+export_formats = [
+    ("CSV",   "Comma-separated values — universal tabular format",
+               "Comma-separated values — universal na tabular format"),
+    ("JSON",  "Array of objects — suitable for REST APIs and JavaScript apps",
+               "Array ng mga objects — angkop para sa REST APIs at JavaScript apps"),
+    ("JSONL", "One JSON object per line — optimized for streaming and LLM training data",
+               "Isang JSON object bawat linya — optimized para sa streaming at LLM training data"),
+    ("SQL",   "INSERT statements — ready to load directly into a relational database",
+               "Mga INSERT statement — handa nang i-load direkta sa isang relational database"),
+    ("Excel", ".xlsx workbook — for non-technical users and business stakeholders",
+               ".xlsx workbook — para sa mga hindi teknikal na user at business stakeholders"),
+]
+for fmt, en_desc, tl_desc in export_formats:
+    p = doc.add_paragraph()
+    p.paragraph_format.left_indent = Inches(0.3)
+    r = p.add_run(f"• {fmt}: ")
+    r.bold = True; r.font.color.rgb = RGBColor(0x6d, 0x28, 0xd9)
+    p.add_run(f"{en_desc}\n    TL: {tl_desc}")
+    p.paragraph_format.space_after = Pt(4)
+
+add_heading(doc, "12.3 Panel Talking Point", 2)
+section(doc,
+    "EN: \"We support CSV import because the synthesis models require flat, tabular data. "
+    "Formats like JSON or SQL can be hierarchical or multi-table, which would need additional preprocessing "
+    "before synthesis. CSV is also the universal export format for spreadsheets and databases, "
+    "so users can easily convert from any source. We prioritized getting the synthesis pipeline right "
+    "over supporting multiple import formats. "
+    "Adding JSON or Excel import is straightforward — pandas already reads both natively — "
+    "it is a planned enhancement, not a technical limitation.\"",
+    "TL: \"Sinusuportahan namin ang CSV import dahil ang mga synthesis models ay nangangailangan ng flat, tabular data. "
+    "Ang mga format tulad ng JSON o SQL ay maaaring hierarchical o multi-table, na mangangailangan ng karagdagang preprocessing "
+    "bago ang synthesis. Ang CSV ay din ang universal na export format para sa mga spreadsheets at databases, "
+    "kaya madaling makakapag-convert ang mga user mula sa anumang source. "
+    "Inuna namin ang wastong pagtatayo ng synthesis pipeline kaysa sa pagsuporta sa maraming import format. "
+    "Ang pagdaragdag ng JSON o Excel import ay straightforward — ang pandas ay nagbabasa ng pareho natively — "
+    "ito ay isang planong enhancement, hindi isang teknikal na limitasyon.\""
+)
+
 # ── Save ──────────────────────────────────────────────────────────────────────
 import os
 out_path = os.path.join(os.path.dirname(__file__), "SynthCS_Backend_Reviewer.docx")

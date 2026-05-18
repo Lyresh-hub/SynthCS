@@ -86,7 +86,7 @@ export default function DataPreview() {
   const [retryCount, setRetryCount] = useState(0);
   const [validation, setValidation]   = useState(null);
   const [validating, setValidating]   = useState(false);
-const [exportFormat, setExportFormat] = useState("csv");
+  const [exportFormat, setExportFormat] = useState("csv");
   const [exporting, setExporting]       = useState(false);
 
   const exportFormats = [
@@ -454,7 +454,7 @@ const [exportFormat, setExportFormat] = useState("csv");
         </div>
 
         {/* Tabs + export controls */}
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between border-b border-gray-100 px-4 gap-0">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between border-b border-gray-100 px-4">
           <div className="flex items-center overflow-x-auto scrollbar-hide">
             {TABS.map((t) => (
               <button
@@ -469,7 +469,7 @@ const [exportFormat, setExportFormat] = useState("csv");
               </button>
             ))}
           </div>
-          <div className="flex items-center gap-2 flex-shrink-0 py-2 sm:py-1.5 overflow-x-auto scrollbar-hide">
+          <div className="flex items-center gap-2 flex-shrink-0 py-2 sm:py-1.5 overflow-x-auto scrollbar-hide border-t border-gray-50 sm:border-t-0">
             <div className="flex items-center border border-gray-200 rounded-md overflow-hidden text-xs flex-shrink-0">
               {exportFormats.map((f) => (
                 <button

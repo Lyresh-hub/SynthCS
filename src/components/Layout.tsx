@@ -36,6 +36,8 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   const [isSchemaBuilderPage]= useRoute("/schema-builder");
   const [isAdminPage]        = useRoute("/admin");
   const [isAdminUsersPage]   = useRoute("/admin/users");
+  const [isPreviewPage]      = useRoute("/preview");
+  const [isValidationPage]   = useRoute("/validation-report");
 
   // Kinukuha yung pangalan ng naka-login na user mula sa localStorage
   const userName = localStorage.getItem("user_name") ?? "User";
@@ -230,10 +232,15 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                   : navItems.find((n) => n.href === location)?.label ?? "Dashboard"}
               </h1>
               <p className="text-xs text-gray-400 hidden sm:block">
-                {isAccountPage   ? "Manage your account information, settings, and usage."
-                  : isAdminPage      ? "Platform analytics and statistics"
-                  : isAdminUsersPage ? "Manage user accounts and permissions"
-                  : "Generate and manage synthetic datasets"}
+                {isAccountPage     ? "Manage your account information, settings, and usage."
+                  : isAdminPage       ? "Platform analytics and statistics"
+                  : isAdminUsersPage  ? "Manage user accounts and permissions"
+                  : isSchemaBuilderPage ? "Build schemas, search datasets, and generate synthetic data"
+                  : isDownloadsPage   ? "Generated datasets · available for 30 days"
+                  : isSavedSchemasPage ? "Saved schema templates for quick generation"
+                  : isPreviewPage     ? "Preview and export your synthetic dataset"
+                  : isValidationPage  ? "Statistical validation of synthetic vs real data"
+                  : "Overview of your activity and generated datasets"}
               </p>
             </div>
           </div>
