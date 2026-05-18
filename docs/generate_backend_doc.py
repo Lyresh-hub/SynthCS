@@ -1096,6 +1096,156 @@ for q_eng, q_tag, a_eng, a_tag in combined_qas:
     p4.add_run(a_tag)
     add_divider(doc)
 
+doc.add_page_break()
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# SECTION 11 — DEMO DATASET PROMPTS
+# ═══════════════════════════════════════════════════════════════════════════════
+add_heading(doc, "11. Demo Dataset Prompts — For System Defense Demonstration", 1, (0x6d, 0x28, 0xd9))
+add_divider(doc)
+
+section(doc,
+    "This section provides ready-to-use prompts that demonstrate SynthCS capabilities during the panel defense. "
+    "These prompts were chosen because they showcase key features: schema awareness, approval logic, numeric correlations, "
+    "and categorical value control. Use these exact prompts when demonstrating the system live.",
+    "Ang seksyon na ito ay nagbibigay ng mga handa nang gamitin na prompts na nagpapakita ng mga kakayahan ng SynthCS "
+    "sa panahon ng panel defense. Ang mga prompt na ito ay pinili dahil ipinapakita nila ang mga pangunahing features: "
+    "schema awareness, approval logic, numeric correlations, at categorical value control. "
+    "Gamitin ang mga eksaktong prompt na ito kapag nagde-demonstrate ng sistema nang live."
+)
+
+# ─── Demo Prompt 1: Loan Applicant Dataset ────────────────────────────────────
+add_heading(doc, "11.1 Demo Prompt — Loan Applicant Dataset", 2)
+
+section(doc,
+    "USE CASE: Demonstrates SynthCS generating financial risk data with realistic approval logic. "
+    "Suitable for fraud detection, credit scoring, or machine learning classification demos.",
+    "GAMIT: Ipinapakita ang SynthCS na gumagawa ng financial risk data na may realistic na approval logic. "
+    "Angkop para sa fraud detection, credit scoring, o machine learning classification demos."
+)
+
+add_heading(doc, "Prompt to type into SynthCS:", 3)
+add_code(doc,
+    "Loan applicant dataset with fields: id, loan_amount, term_months, credit_score, "
+    "annual_income, employment_years, debt_to_income, home_ownership, purpose, approved"
+)
+
+add_heading(doc, "What to say to the panel while typing this prompt:", 3)
+section(doc,
+    "EN: \"I will now type a plain-English description of the dataset I need. Notice that I am not writing code or SQL — "
+    "just a natural description. SynthCS will send this to Claude, which will extract the field names, infer appropriate "
+    "types and constraints for each field, and return a structured schema.\"",
+    "TL: \"Magta-type na ako ng plain-English na paglalarawan ng dataset na kailangan ko. Pansinin na hindi ako "
+    "sumusulat ng code o SQL — natural na paglalarawan lamang. Ipapadala ito ng SynthCS kay Claude, na kukuha ng "
+    "mga field names, mag-iinfer ng angkop na types at constraints para sa bawat field, at magbabalik ng structured schema.\""
+)
+
+add_heading(doc, "Expected schema fields and their types:", 3)
+loan_fields = [
+    ("id", "integer", "Unique applicant identifier. Auto-increments from 1.",
+     "Natatanging identifier ng aplikante. Awtomatikong dumarami mula sa 1."),
+    ("loan_amount", "float", "Requested loan amount in Philippine pesos. Range: ₱50,000–₱5,000,000.",
+     "Halagang hinihingi bilang pautang sa Philippine pesos. Range: ₱50,000–₱5,000,000."),
+    ("term_months", "integer", "Loan repayment period in months. Enum: 12, 24, 36, 48, 60.",
+     "Panahon ng pagbabayad ng pautang sa buwan. Enum: 12, 24, 36, 48, 60."),
+    ("credit_score", "integer", "Applicant's credit score. Range: 300–850. Higher = better creditworthiness.",
+     "Credit score ng aplikante. Range: 300–850. Mas mataas = mas mahusay na creditworthiness."),
+    ("annual_income", "float", "Annual income in Philippine pesos. Range: ₱180,000–₱5,000,000.",
+     "Taunang kita sa Philippine pesos. Range: ₱180,000–₱5,000,000."),
+    ("employment_years", "float", "Years at current employer. Range: 0–30.",
+     "Taon sa kasalukuyang employer. Range: 0–30."),
+    ("debt_to_income", "float", "Total monthly debt divided by monthly income. Range: 0.05–0.80.",
+     "Kabuuang buwanang utang na hinati sa buwanang kita. Range: 0.05–0.80."),
+    ("home_ownership", "string (enum)", "Housing status. Values: OWN, RENT, MORTGAGE.",
+     "Katayuan sa pabahay. Values: OWN, RENT, MORTGAGE."),
+    ("purpose", "string (enum)", "Reason for the loan. Values: home_improvement, debt_consolidation, education, medical, business, car, vacation.",
+     "Dahilan ng pautang. Values: home_improvement, debt_consolidation, education, medical, business, car, vacation."),
+    ("approved", "boolean", "Loan approval decision. true = approved, false = declined.",
+     "Desisyon sa pag-apruba ng pautang. true = approved, false = declined."),
+]
+
+for fname, ftype, eng_desc, tag_desc in loan_fields:
+    p = doc.add_paragraph()
+    p.paragraph_format.left_indent = Inches(0.3)
+    r = p.add_run(f"{fname}  ")
+    r.bold = True; r.font.name = "Courier New"; r.font.color.rgb = RGBColor(0x6d, 0x28, 0xd9)
+    r2 = p.add_run(f"[{ftype}]")
+    r2.font.color.rgb = RGBColor(0x0f, 0x76, 0x6e); r2.font.name = "Courier New"
+    p.add_run(f"\n    EN: {eng_desc}\n    TL: {tag_desc}")
+    p.paragraph_format.space_after = Pt(4)
+
+add_heading(doc, "Generation settings to use during the demo:", 3)
+demo_settings = [
+    ("Row count", "50 rows", "Small enough to load instantly, large enough to show variety.",
+     "Sapat na maliit para mag-load agad, sapat na malaki para ipakita ang pagkakaiba-iba."),
+    ("Generation path", "LLM Path (no real dataset)", "Shows the pure AI schema generation capability.",
+     "Ipinapakita ang purong AI schema generation capability."),
+    ("Approval logic to mention", "~60% approved, ~40% declined",
+     "The Gaussian Copula will learn the true/false ratio from the 200-row template and preserve it at scale.",
+     "Matututo ang Gaussian Copula sa true/false ratio mula sa 200-row template at pananatilihin ito sa malaking bilang."),
+]
+for setting, value, eng_note, tag_note in demo_settings:
+    p = doc.add_paragraph()
+    p.paragraph_format.left_indent = Inches(0.3)
+    r = p.add_run(f"• {setting}: ")
+    r.bold = True
+    r2 = p.add_run(value)
+    r2.bold = True; r2.font.color.rgb = RGBColor(0x6d, 0x28, 0xd9)
+    p.add_run(f"\n    EN: {eng_note}\n    TL: {tag_note}")
+    p.paragraph_format.space_after = Pt(4)
+
+add_heading(doc, "Key talking point for the panel:", 3)
+section(doc,
+    "EN: \"The approved column demonstrates how SynthCS can encode business logic into schema constraints. "
+    "By setting the true_ratio in the schema, I can control the approval rate in the generated dataset. "
+    "The Gaussian Copula then learns the correlation between credit_score, debt_to_income, and approved — "
+    "so in the scaled-up output, high-credit-score applicants are statistically more likely to be approved, "
+    "just as they would be in a real bank's dataset.\"",
+    "TL: \"Ang approved column ay nagpapakita kung paano makakapaglagay ang SynthCS ng business logic sa schema constraints. "
+    "Sa pamamagitan ng pagtatakda ng true_ratio sa schema, makokontrol ko ang approval rate sa nagawang dataset. "
+    "Pagkatapos ay matututo ang Gaussian Copula sa correlation sa pagitan ng credit_score, debt_to_income, at approved — "
+    "kaya sa scaled-up na output, ang mga aplikanteng may mataas na credit score ay statistically mas malamang na maaprubahan, "
+    "tulad ng sa tunay na dataset ng isang bangko.\""
+)
+
+add_divider(doc)
+
+add_heading(doc, "11.2 How the Generated Dataset Can Be Used (Downstream Application)", 2)
+section(doc,
+    "The 50-row (or scaled-up) loan applicant dataset generated by SynthCS can be directly used in downstream applications "
+    "such as a fraud detection or credit scoring prototype. The following fields are particularly useful for ML classification:",
+    "Ang 50-row (o scaled-up) loan applicant dataset na ginawa ng SynthCS ay maaaring direktang gamitin sa mga downstream applications "
+    "tulad ng isang fraud detection o credit scoring prototype. Ang mga sumusunod na fields ay partikular na kapaki-pakinabang "
+    "para sa ML classification:"
+)
+
+ml_fields = [
+    ("Features (X)", "credit_score, annual_income, employment_years, debt_to_income, loan_amount, home_ownership, purpose",
+     "Mga input na ginagamit ng modelo para hulaan"),
+    ("Target (y)", "approved",
+     "Ang label na sinusubukan ng modelo na hulaan (binary: true/false)"),
+]
+for role, fields_list, tag_desc in ml_fields:
+    p = doc.add_paragraph()
+    p.paragraph_format.left_indent = Inches(0.3)
+    r = p.add_run(f"• {role}: ")
+    r.bold = True; r.font.color.rgb = RGBColor(0x6d, 0x28, 0xd9)
+    p.add_run(f"{fields_list}\n    TL: {tag_desc}")
+    p.paragraph_format.space_after = Pt(4)
+
+section(doc,
+    "EN: This demonstrates the VALUE CHAIN of SynthCS: "
+    "(1) No real loan data is needed — SynthCS generates realistic synthetic records. "
+    "(2) The generated dataset can be downloaded as CSV and immediately imported into a Jupyter notebook, "
+    "scikit-learn pipeline, or Tableau dashboard. "
+    "(3) Privacy is preserved — no real applicant PII is ever used or exposed.",
+    "TL: Ipinapakita nito ang VALUE CHAIN ng SynthCS: "
+    "(1) Hindi kailangan ng tunay na loan data — gumagawa ang SynthCS ng realistic synthetic records. "
+    "(2) Ang nagawang dataset ay maaaring i-download bilang CSV at agad na i-import sa Jupyter notebook, "
+    "scikit-learn pipeline, o Tableau dashboard. "
+    "(3) Napanatili ang privacy — walang tunay na PII ng aplikante ang ginamit o na-expose."
+)
+
 # ── Save ──────────────────────────────────────────────────────────────────────
 import os
 out_path = os.path.join(os.path.dirname(__file__), "SynthCS_Backend_Reviewer.docx")

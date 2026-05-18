@@ -1,15 +1,25 @@
-"""
-Relational dataset generator.
+# =============================================================================
+# relational_gen.py
+# =============================================================================
+# Multi-table / relational generation. This is the "Relational Dataset" mode
+# in the Schema Editor — when you add multiple tables with FK relationships.
+#
+# The core idea: generate master entity tables first (employees, products,
+# students, etc.), then generate transaction/fact rows that sample from those
+# masters. This guarantees FK consistency — no orphan foreign keys.
+#
+# It also runs a bunch of consistency passes at the end:
+#   • email_name consistency — email derived from the same row's name
+#   • inventory state machine — Purchase → stock+, Sale → stock-
+#   • professor-subject assignment — each professor gets ≤3 subjects
+#   • schedule consistency — same subject always meets same day/time
+#   • grade-attendance correlation — high attendance → better grade odds
+#   • HR/payroll consistency — salary from role+experience+dept, not random
+#
+# Entry point: generate_relational_dataset(schema_fields, n_rows, save_dir)
+# Everything else is internal.
+# =============================================================================
 
-Build master entity tables FIRST, then generate transaction / enrollment rows
-that reference them consistently.
-
-Fixes:
-    • Email is derived from the same entity's name (no more "James King / noahconstantino@...")
-    • FK-only fields (e.g. professor_id alone) still get a consistent pool of IDs
-    • Separate entity CSVs are saved to disk and returned for multi-table preview
-    • Inventory state machine: Purchase → stock+, Sale → stock-
-"""
 from __future__ import annotations
 
 import random
@@ -29,6 +39,9 @@ def _random_full_name() -> str:
 
 
 def _email_from_name(name: str) -> str:
+    # Derives a plausible email from a person's name. Adds a random number
+    # 35% of the time and picks a random separator (., _, or nothing) to
+    # prevent every email from looking identical.
     parts = str(name).lower().split()
     first = parts[0] if parts else "user"
     last  = parts[-1] if len(parts) > 1 else "x"
@@ -40,11 +53,12 @@ def _email_from_name(name: str) -> str:
 # ── Entity prefix detection ───────────────────────────────────────────────────
 
 def _detect_entity_prefixes(field_names: list[str]) -> dict[str, list[str]]:
-    """
-    Return {prefix: [field_names]} for every prefix that appears in ≥2 fields
-    OR appears in exactly 1 field that ends with _id / _code / _ref
-    (those are FK-only references and still need consistent pools).
-    """
+    # Groups fields by their first underscore-prefix. For example:
+    #   employee_id, employee_name, employee_dept → group "employee"
+    #   product_id (alone) → still a group because it ends with _id
+    #
+    # This is how we figure out which fields belong to the same entity
+    # so we can build a consistent master table for them.
     groups: dict[str, list[str]] = defaultdict(list)
     for name in field_names:
         parts = name.split("_")
@@ -58,7 +72,7 @@ def _detect_entity_prefixes(field_names: list[str]) -> dict[str, list[str]]:
         elif len(names) == 1:
             fn = names[0]
             if fn.endswith("_id") or fn.endswith("_code") or fn.endswith("_ref"):
-                result[prefix] = names      # FK-only reference
+                result[prefix] = names      # FK-only reference — still needs a master pool
     return result
 
 
@@ -70,41 +84,45 @@ def _build_entity_lookup(
     n_entities: int,
     save_dir: str | None = None,
 ) -> tuple[list[dict], pd.DataFrame | None]:
-    """
-    Generate n_entities records for one entity type.
+    # Builds a list of entity records (the "master table") with n_entities rows.
+    # Two modes:
+    #   FK-only: field is just <prefix>_id with no other columns in the schema.
+    #     We auto-generate an ID + name (+ email if it's a person entity).
+    #     That name column gets appended to the main table as a convenience.
+    #   Full entity: multiple fields define the entity. We run gen_col() on each.
+    #     Then we post-process for email-name consistency and sequential IDs.
+    #
+    # Returns (records, ext_df):
+    #   records — list of dicts used for FK sampling in generate_relational_dataset
+    #   ext_df  — extra DataFrame for FK-only entities (saved as a _master.csv file);
+    #              None for full entities (no extra table needed)
 
-    Returns:
-        records  – list of dicts, one per entity (used for FK sampling)
-        ext_df   – a DataFrame with extra columns (e.g. professor_name added
-                   automatically for FK-only professor_id fields); None if the
-                   entity group already has a name column.
-    """
     is_fk_only = len(group_fields) == 1 and (
         group_fields[0].name.endswith("_id")
         or group_fields[0].name.endswith("_code")
         or group_fields[0].name.endswith("_ref")
     )
 
-    # ── FK-only: build a minimal master with ID + name (+ email if person) ──
+    # ── FK-only: minimal master with ID + name (+ email if person) ──
     if is_fk_only:
         id_field = group_fields[0]
         ids: list[str] = []
         names: list[str] = []
         emails: list[str] = []
 
-        # Determine whether this entity is a person or an object
+        # Person entities get real names; object entities get pool-based labels
         person_prefixes = {"student", "professor", "teacher", "employee", "staff",
                            "customer", "user", "person", "patient", "doctor", "nurse",
                            "faculty", "instructor", "advisor", "guardian", "parent"}
         is_person = prefix.lower() in person_prefixes
 
         for i in range(n_entities):
-            # Generate ID
+            # Student IDs use cohort-year format (2020-000001) — matches typical
+            # Philippine university SIS systems. Everything else gets PREFIX001 style.
             if id_field.field_type == "uuid":
                 import uuid as _uuid
                 ids.append(str(_uuid.uuid4()))
             elif prefix.lower() == "student":
-                # Cohort-style IDs: 2020-000001 spread across enrollment years
                 cohort_years = [2020, 2021, 2022, 2023, 2024]
                 year = cohort_years[i % len(cohort_years)]
                 ids.append(f"{year}-{str(i // len(cohort_years) + 1).zfill(6)}")
@@ -116,7 +134,6 @@ def _build_entity_lookup(
                 names.append(name)
                 emails.append(_email_from_name(name))
             else:
-                # Use pool-based name for objects
                 from smart_gen_data import _keyword_pool
                 pool = _keyword_pool(f"{prefix}_name", f"{prefix} name")
                 names.append(
@@ -135,14 +152,15 @@ def _build_entity_lookup(
         ext_df = pd.DataFrame(records)
         return records, ext_df
 
-    # ── Full entity: generate all columns, then fix email ── ─────────────────
+    # ── Full entity: run gen_col on every field, then fix IDs and emails ──
     col_arrays: dict[str, np.ndarray] = {}
     for f in group_fields:
         col_arrays[f.name] = gen_col(
             f.field_type, n_entities, f.constraints, f.name, f.description
         )
 
-    # Make ID field unique / sequential
+    # Override the ID column with sequential values — gen_col would give random
+    # integers which would cause FK conflicts when we sample from this master.
     for f in group_fields:
         fn = f.name.lower()
         if fn.endswith("_id") or fn == f"{prefix}_id":
@@ -162,7 +180,8 @@ def _build_entity_lookup(
                     )
             break
 
-    # Fix email-name consistency within the same entity
+    # Fix email-name consistency: re-derive the email column from the name column
+    # so you don't get "John Smith / noahconstantino@gmail.com" mismatches.
     name_field_name  = next(
         (f.name for f in group_fields if "name" in f.name.lower()
          and "email" not in f.name.lower()
@@ -186,6 +205,8 @@ def _build_entity_lookup(
 # ── Inventory state machine ───────────────────────────────────────────────────
 
 def _find_col(df: pd.DataFrame, keywords: tuple[str, ...]) -> str | None:
+    # Returns the first column name that contains any of the keywords.
+    # Used throughout the consistency passes to find columns without hardcoding names.
     for col in df.columns:
         lc = col.lower()
         if any(kw in lc for kw in keywords):
@@ -194,6 +215,13 @@ def _find_col(df: pd.DataFrame, keywords: tuple[str, ...]) -> str | None:
 
 
 def _apply_inventory_state(df: pd.DataFrame) -> pd.DataFrame:
+    # Inventory datasets have a natural causality: Purchase → stock goes up,
+    # Sale → stock goes down. CTGAN ignores this and generates both columns
+    # independently, so you get stock_after < stock_before on a Purchase row.
+    # This state machine iterates the rows in date order and enforces the logic.
+    #
+    # Starts each product at 200 units if no prior state exists.
+    # Skips silently if the required columns (txn_type, qty, stock_after) aren't found.
     txn_col = _find_col(df, ("transaction_type", "movement_type", "operation_type",
                               "txn_type", "stock_movement"))
     qty_col = _find_col(df, ("quantity", "qty", "units_sold", "units_purchased", "units"))
@@ -233,7 +261,7 @@ def _apply_inventory_state(df: pd.DataFrame) -> pd.DataFrame:
         if any(k in txn for k in INC):
             current = min(current + qty, 9999)
         elif any(k in txn for k in DEC):
-            qty     = min(qty, current)
+            qty     = min(qty, current)          # can't sell more than you have
             current = max(0, current - qty)
         tracker[pid] = current
         sa_vals.append(current)
@@ -247,7 +275,9 @@ def _apply_inventory_state(df: pd.DataFrame) -> pd.DataFrame:
 # ── Email-name consistency (final pass on assembled DataFrame) ───────────────
 
 def _fix_email_name_consistency(df: pd.DataFrame) -> pd.DataFrame:
-    """Derive every *_email column from its matching *_name column."""
+    # Final pass over the whole main table. Finds every *_email column and
+    # re-derives it from the corresponding *_name column. This catches emails
+    # that were generated independently by gen_col and ended up mismatched.
     name_cols  = [c for c in df.columns
                   if "name" in c.lower() and "email" not in c.lower()
                   and not c.lower().endswith("_id")]
@@ -258,7 +288,8 @@ def _fix_email_name_consistency(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
     for email_col in email_cols:
         ep = email_col.lower().replace("_email", "").replace("email", "")
-        # Prefer prefix-matched name col, fall back to first name col
+        # Prefer a prefix-matched name col (employee_email → employee_name),
+        # fall back to the first name column in the DataFrame.
         matched = next(
             (nc for nc in name_cols if nc.lower().replace("_name", "").replace("name", "") == ep),
             name_cols[0],
@@ -270,6 +301,10 @@ def _fix_email_name_consistency(df: pd.DataFrame) -> pd.DataFrame:
 # ── Grade ↔ Attendance correlation ───────────────────────────────────────────
 
 def _apply_grade_attendance_correlation(df: pd.DataFrame) -> pd.DataFrame:
+    # Students with ≥90% attendance skew strongly toward A/B.
+    # Students with <60% attendance skew heavily toward D/F.
+    # This is a real-world pattern — not enforced by CTGAN but needed for
+    # academic datasets to look realistic.
     att_col   = _find_col(df, ("attendance",))
     grade_col = _find_col(df, ("letter_grade", "final_grade", "grade"))
     if not att_col or not grade_col:
@@ -298,6 +333,9 @@ def _apply_grade_attendance_correlation(df: pd.DataFrame) -> pd.DataFrame:
 # ── Professor → subject consistency ──────────────────────────────────────────
 
 def _apply_professor_subject_consistency(df: pd.DataFrame) -> pd.DataFrame:
+    # Assigns each professor a fixed set of subjects (≤3) so the same professor
+    # doesn't teach wildly different courses across rows. Circular distribution
+    # over the subject list ensures all subjects are covered.
     prof_col = _find_col(df, ("professor_name", "professor_id",
                                "faculty_name", "faculty_id",
                                "teacher_name", "teacher_id",
@@ -312,7 +350,6 @@ def _apply_professor_subject_consistency(df: pd.DataFrame) -> pd.DataFrame:
     if not professors or not subjects:
         return df
 
-    # Assign ≤3 subjects per professor (circular distribution)
     n_each = max(1, min(3, len(subjects) // max(1, len(professors)) + 1))
     random.shuffle(subjects)
     prof_subjects: dict[Any, list] = {}
@@ -331,6 +368,9 @@ def _apply_professor_subject_consistency(df: pd.DataFrame) -> pd.DataFrame:
 # ── Schedule realism: same subject → same day + time ─────────────────────────
 
 def _apply_schedule_consistency(df: pd.DataFrame) -> pd.DataFrame:
+    # A subject always meets on the same day at the same time across all rows.
+    # Without this, the same "Database Systems" course would appear on Monday
+    # at 8am in one row and Thursday at 3pm in the next.
     subj_col = _find_col(df, ("subject_name", "subject_id", "subject_code",
                                "course_name", "course_id", "course_code"))
     day_col  = _find_col(df, ("day_of_week", "class_day", "schedule_day", "weekday"))
@@ -343,6 +383,7 @@ def _apply_schedule_consistency(df: pd.DataFrame) -> pd.DataFrame:
     times = ["07:00", "08:00", "09:00", "10:00", "11:00",
              "13:00", "14:00", "15:00", "16:00", "17:00"]
 
+    # Assign one day + time per subject, then apply that assignment to all rows
     sched: dict[Any, dict] = {
         s: {"day": random.choice(days), "time": random.choice(times)}
         for s in subjects
@@ -359,8 +400,9 @@ def _apply_schedule_consistency(df: pd.DataFrame) -> pd.DataFrame:
 
 
 # ── HR / Payroll behavioral consistency ──────────────────────────────────────
-# Salary, bonus, experience, and benefits are derived from role+hire_date,
-# not generated independently.
+# Salary, bonus, and benefits are derived from role+hire_date+dept.
+# These lookup tables were calibrated to approximate Philippine professional
+# salary ranges (monthly, PHP). Adjust the bands if you need a different market.
 
 _ROLE_SALARY: list[tuple[str, tuple[int, int]]] = [
     ("ceo",            (300_000, 600_000)),
@@ -419,6 +461,7 @@ _ROLE_BONUS: list[tuple[str, tuple[float, float]]] = [
     ("intern",    (0.0,   3.0)),
 ]
 
+# Department multipliers: tech/engineering roles pay more, support/admin less
 _DEPT_MULT: list[tuple[str, float]] = [
     ("engineering", 1.15), ("software",   1.15),
     ("technology",  1.13), ("data",       1.13),
@@ -433,6 +476,8 @@ _DEPT_MULT: list[tuple[str, float]] = [
 
 
 def _hr_salary(role: str, experience: int, dept: str) -> int:
+    # First matching keyword wins. Falls back to a generic band if no keyword matches.
+    # Experience adds 1.8% per year, capped at 25 years. Department applies a multiplier.
     r = str(role).lower()
     for kw, (lo, hi) in _ROLE_SALARY:
         if kw in r:
@@ -460,6 +505,8 @@ def _hr_bonus(role: str) -> float:
 
 
 def _hr_benefits(role: str, emp_type: str) -> bool:
+    # Interns, trainees, and most contract/part-time workers are usually not
+    # benefits-eligible. Everyone else is 92% eligible.
     r, e = str(role).lower(), str(emp_type).lower()
     excluded = any(k in r for k in ("intern", "trainee")) or \
                any(k in e for k in ("part", "contract", "temporary", "casual", "project"))
@@ -473,14 +520,12 @@ def _apply_hr_payroll_consistency(
     hire_lookup: dict | None = None,
     id_col: str | None = None,
 ) -> pd.DataFrame:
-    """
-    Fix salary / bonus / experience / benefits to be causally consistent.
-
-    Works in two modes:
-      - Single-table (role_lookup=None): role + salary are in the same DataFrame.
-      - Cross-table  (role_lookup given): role comes from a parent table, looked
-        up via id_col (the FK column in this DataFrame).
-    """
+    # Two modes:
+    #   Single-table: role and salary are columns in the same DataFrame.
+    #   Cross-table: role comes from a parent entity table, looked up via id_col.
+    #
+    # Steps: 1) derive experience from hire_date, 2) salary from role+exp+dept,
+    #        3) bonus from role, 4) benefits from role+employment_type.
     from datetime import datetime as _dt
 
     role_col     = _find_col(df, ("job_role", "role", "position", "job_title",
@@ -503,7 +548,7 @@ def _apply_hr_payroll_consistency(
     has_cross_role = role_lookup is not None and id_col is not None and id_col in df.columns
 
     if not has_own_role and not has_cross_role:
-        return df  # nothing HR-related here
+        return df  # nothing HR-related here, skip entirely
     if not (salary_col or bonus_col or exp_col or benefits_col or hire_col):
         return df  # no payroll fields to fix
 
@@ -527,7 +572,7 @@ def _apply_hr_payroll_consistency(
     def _get_emp_type(i: int) -> str:
         return str(df[emp_type_col].iloc[i]) if emp_type_col else ""
 
-    # 1. Derive experience from hire_date (takes priority over random)
+    # 1. Experience from hire_date — more reliable than generating it independently
     if hire_col and exp_col:
         new_exp = []
         for val in df[hire_col]:
@@ -539,7 +584,7 @@ def _apply_hr_payroll_consistency(
             new_exp.append(yrs)
         df[exp_col] = new_exp
 
-    # Also fix cross-table hire_date → experience
+    # Cross-table hire_date → experience (for when hire_date is in a parent entity)
     if hire_lookup and id_col and id_col in df.columns and exp_col:
         new_exp = []
         for emp_id in df[id_col]:
@@ -555,7 +600,7 @@ def _apply_hr_payroll_consistency(
             new_exp.append(yrs)
         df[exp_col] = new_exp
 
-    # 2. Salary = f(role, experience, department)
+    # 2. Salary derived from role + experience + department
     if salary_col:
         new_sal = []
         for i in range(n):
@@ -568,11 +613,9 @@ def _apply_hr_payroll_consistency(
             new_sal.append(_hr_salary(role, exp, dept))
         df[salary_col] = new_sal
 
-    # 3. Bonus = f(role)
     if bonus_col:
         df[bonus_col] = [_hr_bonus(_get_role(i)) for i in range(n)]
 
-    # 4. Benefits = f(role, employment_type)
     if benefits_col:
         df[benefits_col] = [_hr_benefits(_get_role(i), _get_emp_type(i)) for i in range(n)]
 
@@ -581,6 +624,8 @@ def _apply_hr_payroll_consistency(
 
 # ── Main entry point ──────────────────────────────────────────────────────────
 
+# How many entities to generate per type. Bigger pools = more variety in FK values.
+# ENTITY_COUNTS is tuned so FK columns don't look repetitive at small n_rows values.
 ENTITY_COUNTS = {
     "product": 30, "item": 30, "sku": 30,
     "supplier": 15, "vendor": 15, "manufacturer": 15,
@@ -598,20 +643,18 @@ def generate_relational_dataset(
     n_rows: int,
     save_dir: str | None = None,
 ) -> tuple[pd.DataFrame, dict[str, pd.DataFrame]]:
-    """
-    Generate n_rows with FK consistency, email-name consistency,
-    and inventory state tracking.
+    # High-level flow:
+    #   1. Detect entity groups from field names (employee_*, product_*, etc.)
+    #   2. Build a master record pool for each entity
+    #   3. Generate independent columns with gen_col()
+    #   4. For each output row, sample one entity record per group → FK consistency
+    #   5. Assemble the full DataFrame
+    #   6. Run consistency passes (inventory, email, schedule, HR, etc.)
+    #   7. Return main_df + entity_tables (separate CSVs for multi-table preview)
 
-    Returns
-    -------
-    main_df       : the primary flat table
-    entity_tables : {entity_name: DataFrame} — separate master tables
-                    (saved to save_dir as <entity_name>.csv when save_dir given)
-    """
     field_names   = [f.name for f in schema_fields]
     entity_groups = _detect_entity_prefixes(field_names)
 
-    # Build master lookups
     lookups:      dict[str, list[dict]]  = {}
     entity_tables: dict[str, pd.DataFrame] = {}
 
@@ -621,28 +664,28 @@ def generate_relational_dataset(
         records, ext_df = _build_entity_lookup(prefix, group_fields, n_ent, save_dir)
         lookups[prefix] = records
 
-        # For FK-only entities, save the auto-generated master table
         if ext_df is not None:
             entity_tables[prefix] = ext_df
             if save_dir:
                 import os
                 ext_df.to_csv(os.path.join(save_dir, f"{prefix}_master.csv"), index=False)
 
-    # Field → entity prefix mapping
     field_to_prefix: dict[str, str] = {
         name: prefix
         for prefix, names in entity_groups.items()
         for name in names
     }
 
-    # Independent fields (not in any entity group)
+    # Generate independent columns (not part of any entity group) normally
     independent = [f for f in schema_fields if f.name not in field_to_prefix]
     indep_arrays: dict[str, np.ndarray] = {
         f.name: gen_col(f.field_type, n_rows, f.constraints, f.name, f.description)
         for f in independent
     }
 
-    # Entity columns: sample from master per row
+    # For each row, pick one random entity record per group.
+    # All columns from the same entity group get the same entity's values —
+    # that's what gives us FK consistency across columns.
     entity_cols: dict[str, list] = {
         f.name: [] for f in schema_fields if f.name in field_to_prefix
     }
@@ -651,7 +694,7 @@ def generate_relational_dataset(
         for f_name, prefix in field_to_prefix.items():
             entity_cols[f_name].append(row_entities[prefix][f_name])
 
-    # Assemble in original schema order
+    # Assemble in the original schema order
     combined: dict[str, Any] = {}
     for f in schema_fields:
         combined[f.name] = (
@@ -659,6 +702,10 @@ def generate_relational_dataset(
         )
 
     main_df = pd.DataFrame(combined)
+
+    # Consistency passes — order matters here.
+    # Inventory must run before email fix (it rearranges row order by date).
+    # HR payroll should run last because it depends on all other columns being set.
     main_df = _apply_inventory_state(main_df)
     main_df = _fix_email_name_consistency(main_df)
     main_df = _apply_professor_subject_consistency(main_df)

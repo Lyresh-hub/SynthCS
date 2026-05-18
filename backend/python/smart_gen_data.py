@@ -1,7 +1,30 @@
-"""
-Shared data pools and column-generation logic used by generate-from-schema
-and generate-hybrid endpoints.
-"""
+# =============================================================================
+# smart_gen_data.py
+# =============================================================================
+# The big brain behind the Schema-only generation path (no real dataset).
+# When the LLM path generates a schema and we need to fill it with plausible
+# values, this is what does it.
+#
+# Two layers of intelligence:
+#   1. _keyword_pool(field_name, description) — matches field names to curated
+#      value pools. "job_title" returns real job titles. "ph_province" returns
+#      Philippine provinces. "attack_type" returns cyber attack names. Etc.
+#
+#   2. gen_col(ftype, n, constraints, field_name, description) — generates n
+#      values for a column. Uses keyword pools when available, falls back to
+#      range-based generation with smart defaults from _NUMERIC_SMART, and
+#      handles special types: uuid, email, phone, date, boolean, ip, address.
+#
+# Philippine locale awareness: if the schema hints at Philippine context
+# (city names, "PH", "Pilipinas", etc.), addresses use PH street names,
+# phones use PH mobile prefixes (0917-, 0915-, etc.), and lat/lon stay within
+# PH bounds (5–21°N, 116–127°E).
+#
+# Data pools are defined as top-level constants (_POOLS dict). There are 100+
+# categories. If a column name matches a pool key, that pool is used directly.
+# The _DOMAIN_PRODUCT_OVERRIDES list handles the case where "product_name" in
+# a "grocery store" context should return groceries, not electronics.
+# =============================================================================
 import random
 import string
 import uuid as uuid_module
@@ -743,17 +766,14 @@ _PRODUCT_HINT_TRIGGERS = frozenset(
 
 
 def _extract_enum_from_description(description: str) -> list[str] | None:
-    """
-    Parse a field description for an explicit value list and return those values.
-    Handles patterns like:
-      - "one of: A, B, C"
-      - "A, B, or C"
-      - "A or B"
-      - "choose from A, B, C"
-      - "either A or B"
-      - "Field label — A, B, C"  (after a dash or colon)
-    Returns None when no clear list is found.
-    """
+    # When the LLM generates a schema, it sometimes puts the allowed values right
+    # in the description: "Employment type: Full-time, Part-time, Contract".
+    # This function picks those out so gen_col can use them as an enum pool
+    # instead of returning generic fallback values.
+    #
+    # Handles:  "one of: A, B, C" / "choose from A, B" / "either A or B"
+    #           "Label — A, B, C" (after a dash/colon) / "(A, B, C)" in parens
+    # Returns None when no clear list is found — gen_col will use keyword pools instead.
     import re
     if not description:
         return None
@@ -804,6 +824,13 @@ def _extract_enum_from_description(description: str) -> list[str] | None:
 
 
 def _keyword_pool(field_name: str, description: str) -> list | None:
+    # Returns a pool of realistic values for this field, or None if we don't
+    # recognize the column. None signals gen_col to fall back to range/enum logic.
+    #
+    # Priority order:
+    #   1. Philippine geographic context (PH locale detected → use PH pools)
+    #   2. Domain product override (product_name in "grocery" context → grocery items)
+    #   3. Standard pool key match (longest key wins — "product_name" beats "product")
     hint = (field_name + " " + description).lower().replace("_", " ")
 
     # Philippine geographic context: must run before standard pass so
@@ -837,7 +864,18 @@ def _keyword_pool(field_name: str, description: str) -> list | None:
 
 
 def gen_col(ftype: str, n: int, c: Any, field_name: str = "", description: str = "") -> np.ndarray:
-    """Generate n values for a column given its type, constraints, and name hints."""
+    # The workhorse of schema-only generation. Called by relational_gen.py and main.py.
+    #
+    # Decision tree (roughly):
+    #   1. Time field name detected → return HH:MM string regardless of ftype
+    #   2. ftype is integer/float with no min/max → look up _NUMERIC_SMART for smart defaults
+    #      (PH lat/lon get overridden to PH bounds if PH locale is detected)
+    #   3. ftype is string → check enum_values first, then keyword pools, then
+    #      name/email/phone/address special cases, then generic fallback labels
+    #   4. ftype is boolean/date/email/uuid/phone/address/ip → type-specific generation
+    #   5. Unknown ftype → generic labeled fallback
+    #
+    # null_mask is applied at the very end — None is inserted at null_rate% of positions.
     null_mask = np.random.random(n) < (min(getattr(c, "null_rate", 0) or 0, 50.0) / 100.0)
     fname = field_name.lower().replace(" ", "_").replace("-", "_")
 
@@ -966,16 +1004,10 @@ def gen_col(ftype: str, n: int, c: Any, field_name: str = "", description: str =
 
         elif any(p in fname for p in ("phone", "mobile", "contact_number", "contact_no",
                                        "cell", "cellphone", "telephone", "landline", "tel")):
-            if _is_ph_locale(field_name, description):
-                data = np.array([
-                    f"{random.choice(PH_MOBILE_PREFIXES)}-{random.randint(100,999)}-{random.randint(1000,9999)}"
-                    for _ in range(n)
-                ], dtype=object)
-            else:
-                data = np.array([
-                    f"+1-{random.randint(200,999)}-{random.randint(100,999)}-{random.randint(1000,9999)}"
-                    for _ in range(n)
-                ], dtype=object)
+            data = np.array([
+                f"{random.choice(PH_MOBILE_PREFIXES)}-{random.randint(100,999)}-{random.randint(1000,9999)}"
+                for _ in range(n)
+            ], dtype=object)
 
         elif any(p in fname for p in ("address", "street", "home_address", "mailing_address",
                                        "residential_address", "billing_address", "shipping_address")):
@@ -1083,19 +1115,19 @@ def gen_col(ftype: str, n: int, c: Any, field_name: str = "", description: str =
         data = np.array([str(uuid_module.uuid4()) for _ in range(n)], dtype=object)
 
     elif ftype == "phone":
-        if _is_ph_locale(field_name, description):
-            data = np.array([
-                f"{random.choice(PH_MOBILE_PREFIXES)}-{random.randint(100,999)}-{random.randint(1000,9999)}"
-                for _ in range(n)
-            ], dtype=object)
-        else:
-            data = np.array([
-                f"+1-{random.randint(200,999)}-{random.randint(100,999)}-{random.randint(1000,9999)}"
-                for _ in range(n)
-            ], dtype=object)
+        data = np.array([
+            f"{random.choice(PH_MOBILE_PREFIXES)}-{random.randint(100,999)}-{random.randint(1000,9999)}"
+            for _ in range(n)
+        ], dtype=object)
 
     elif ftype == "address":
-        if _is_ph_locale(field_name, description):
+        # LLM sometimes tags "city" as address type — detect and redirect
+        if any(w in fname for w in ("city", "municipality", "town", "lungsod")):
+            pool = _keyword_pool(field_name, description)
+            if not pool:
+                pool = PH_CITIES if _is_ph_locale(field_name, description) else list(_POOLS["city"])
+            data = np.random.choice(pool, n).astype(object)
+        elif _is_ph_locale(field_name, description):
             data = np.array([
                 _ph_address()
                 for _ in range(n)
@@ -1108,6 +1140,11 @@ def gen_col(ftype: str, n: int, c: Any, field_name: str = "", description: str =
         smart_pool = _keyword_pool(field_name, description)
         if smart_pool:
             data = np.random.choice(smart_pool, n).astype(object)
+        # first_name → only first, last_name → only last (full name is wrong here)
+        elif any(p in fname for p in ("first_name", "firstname", "fname", "given_name", "forename")):
+            data = np.array([random.choice(FIRST) for _ in range(n)], dtype=object)
+        elif any(p in fname for p in ("last_name", "lastname", "lname", "surname", "family_name", "middle_name", "middlename")):
+            data = np.array([random.choice(LAST) for _ in range(n)], dtype=object)
         else:
             _PERSON_HINTS = (
                 "customer","user","patient","employee","staff","person",
@@ -1119,7 +1156,7 @@ def gen_col(ftype: str, n: int, c: Any, field_name: str = "", description: str =
             )
             hint_text = (field_name + " " + description).lower()
             has_person = any(p in hint_text for p in _PERSON_HINTS)
-            if has_person or fname in ("name", "full_name", "first_name", "last_name", "given_name"):
+            if has_person or fname in ("name", "full_name"):
                 data = np.array(
                     [f"{random.choice(FIRST)} {random.choice(LAST)}" for _ in range(n)],
                     dtype=object,

@@ -1,9 +1,21 @@
+# =============================================================================
+# datagov_ph_service.py
+# =============================================================================
+# Searches and downloads datasets from data.gov.ph — the Philippine government's
+# open data portal. It runs on CKAN (same engine as data.gov.ph), so the API
+# calls look identical to any other CKAN instance.
+#
+# PSA datasets also come through here — psa_service.py just calls this file's
+# download_dataset() with a PSA-specific package ID.
+# =============================================================================
+
 import os
 import requests
 import pandas as pd
 import io
 
 CKAN_BASE = "https://data.gov.ph/api/3/action"
+# data.gov.ph uses inconsistent format strings — normalize them all
 _CSV_FORMATS = {"CSV", "TEXT/CSV", "TEXT/COMMA-SEPARATED-VALUES"}
 
 
@@ -12,6 +24,9 @@ def _is_csv(resource: dict) -> bool:
 
 
 def search_datasets(query: str) -> list:
+    # package_search supports full-text search + resource format filter.
+    # We ask for 20, then cap results at 10 to stay consistent with other sources.
+    # Packages with zero CSV resources are silently skipped.
     try:
         resp = requests.get(
             f"{CKAN_BASE}/package_search",
@@ -41,6 +56,9 @@ def search_datasets(query: str) -> list:
 
 
 def download_dataset(dataset_id: str, dest: str) -> str | None:
+    # Two-step: first get the package metadata to find the CSV resource URL,
+    # then stream the actual file. We stream it into BytesIO instead of a temp
+    # file so we can run it through pandas for the 20k-row cap before saving.
     try:
         resp = requests.get(
             f"{CKAN_BASE}/package_show", params={"id": dataset_id}, timeout=15
@@ -58,7 +76,9 @@ def download_dataset(dataset_id: str, dest: str) -> str | None:
         r = requests.get(url, timeout=60, stream=True)
         r.raise_for_status()
 
-        # Read into pandas to validate and cap rows
+        # Buffer the entire response, then hand to pandas.
+        # 20k-row cap matches what every other source does — keeps the
+        # training set lightweight on the HuggingFace free tier.
         content = b"".join(r.iter_content(chunk_size=8192))
         df = pd.read_csv(io.BytesIO(content), low_memory=False)
         if len(df) > 20_000:

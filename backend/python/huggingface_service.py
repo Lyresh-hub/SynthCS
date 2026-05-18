@@ -1,8 +1,25 @@
+# =============================================================================
+# huggingface_service.py
+# =============================================================================
+# Searches and downloads tabular datasets from HuggingFace Hub.
+#
+# HF Hub has a lot of non-tabular datasets (text, images, audio). The search
+# is keyword-based and returns whatever HF thinks is relevant — you'll get
+# some good matches and some garbage. The user picks what they want.
+#
+# Download gotcha: HF datasets often have columns with bytes (image tensors),
+# lists (token arrays), or dicts. CTGAN/pandas can't handle those. We drop
+# them after converting to a DataFrame.
+# =============================================================================
+
 import os
 import pandas as pd
 
 
 def search_datasets(query: str) -> list:
+    # HfApi is the official HuggingFace Python library. No API key needed for
+    # public dataset search. list_datasets() returns an iterator — we cap at 20
+    # on the HF side, then trim to 10 in our loop.
     from huggingface_hub import HfApi
     api = HfApi()
     try:
@@ -13,6 +30,7 @@ def search_datasets(query: str) -> list:
 
     results = []
     for ds in raw:
+        # ds.id is "owner/dataset-name". We prettify the name portion for display.
         results.append({
             "ref":           ds.id,
             "title":         ds.id.split("/")[-1].replace("-", " ").replace("_", " ").title(),
@@ -27,9 +45,12 @@ def search_datasets(query: str) -> list:
 
 
 def download_dataset(dataset_ref: str, dest: str) -> str | None:
+    # load_dataset() from the `datasets` library does the actual download.
+    # HF datasets have "splits" (train/test/validation). We try to get the
+    # split names first so we can pick the first available one. Falls back to
+    # "train" if get_dataset_split_names() fails.
     from datasets import load_dataset, get_dataset_split_names
     try:
-        # Try common split names in order
         split = "train"
         try:
             splits = get_dataset_split_names(dataset_ref)
@@ -41,7 +62,10 @@ def download_dataset(dataset_ref: str, dest: str) -> str | None:
         ds = load_dataset(dataset_ref, split=split)
         df: pd.DataFrame = ds.to_pandas()
 
-        # Drop columns that are entirely bytes / objects that can't be serialised
+        # HF tabular datasets sometimes include raw bytes (image data), lists
+        # (tokenized text), or dicts (nested objects). Those can't be serialised
+        # to CSV or fed to CTGAN, so we drop them. What's left should be numeric
+        # and string columns — the useful stuff.
         df = df.select_dtypes(exclude=["object"]).join(
             df.select_dtypes(include=["object"]).apply(
                 lambda col: col.where(col.map(lambda v: not isinstance(v, (bytes, list, dict))), other=None)

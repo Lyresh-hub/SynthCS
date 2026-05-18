@@ -1,3 +1,36 @@
+# =============================================================================
+# main.py
+# =============================================================================
+# FastAPI app — the Python backend's entire surface area.
+# Runs on HuggingFace Spaces (Docker), accessible at port 7860.
+#
+# Endpoints by category:
+#   /api/<source>/search + /api/<source>/download  — one pair per data source
+#     Sources: kaggle, huggingface, uci, openml, datagov_ph, psa
+#
+#   /api/upload-dataset         — user uploads their own CSV
+#   /api/dataset-peek           — preview columns + 3 rows without storing
+#   /api/smart-search           — concurrent search across all sources with
+#                                 query expansion (domain synonyms + LLM terms)
+#
+#   /api/generate-from-schema   — schema-only generation (200-row template via
+#                                 relational_gen.py, then expand separately)
+#   /api/expand-with-ctgan      — scales up a template using Gaussian Copula
+#                                 (confusingly named — see generator.py note)
+#   /api/generate               — CTGAN on a real downloaded dataset
+#   /api/generate-hybrid        — CTGAN real fields + schema-based extra fields
+#   /api/generate-multi-table   — multi-table FK-consistent generation
+#
+#   /api/preview/{id}           — first N rows of synthetic_output.csv as JSON
+#   /api/validate/{id}          — Wasserstein / correlation / ML utility / privacy scores
+#   /api/download/{id}          — serve the synthetic CSV file
+#   /api/download-template/{id} — serve the 200-row template (CSV/JSON/XLSX)
+#   /api/download-entity/{id}/{table}  — serve an entity master CSV
+#   /api/download-multi/{id}    — serve multi-table output as ZIP or XLSX
+#
+# Request/response models are Pydantic BaseModels defined inline.
+# =============================================================================
+
 import os
 import uuid
 from typing import Any
@@ -514,7 +547,11 @@ def generate_from_schema(req: SchemaGenerateRequest):
         "entity_tables": entity_meta,
     }
 
-    # ── The code below is unreachable — refactored into smart_gen_data.py ──
+    # ── Dead code below — left here intentionally ──────────────────────────────
+    # This was the original inline gen_col() implementation. It was extracted
+    # into smart_gen_data.py to share the logic with generate-hybrid and
+    # generate-multi-table. Never delete this block — it causes a syntax error
+    # if the function return above is removed, and it serves as a historical ref.
     import numpy as np  # noqa
     import random       # noqa
     import string       # noqa
@@ -1452,12 +1489,14 @@ def _expand_query(prompt: str) -> list[str]:
 
 @app.post("/api/smart-search")
 def smart_search(req: SmartSearchRequest) -> dict[str, Any]:
-    """
-    Search all dataset sources concurrently using query expansion.
-    Each source is searched with multiple related terms derived from the prompt,
-    so 'student academic performance' also tries 'student', 'academic',
-    'grades', 'education', etc. Results are deduplicated by source+ref.
-    """
+    # Fires 6 sources × up to 8 search terms simultaneously (48 tasks max).
+    # ThreadPoolExecutor capped at 12 workers to keep Railway/Render memory reasonable.
+    # 22-second overall timeout: if a source hangs, we return whatever we have.
+    # Results are deduplicated by "source:ref" key, then sorted by download count.
+    #
+    # Term expansion: the Node.js backend passes LLM-generated terms via expanded_terms.
+    # If provided, those come first (higher quality) and the domain-map terms fill the rest.
+    # If not provided, _expand_query() does the expansion with the domain synonym map above.
     from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as _FT
 
     sources = {
@@ -1537,10 +1576,11 @@ def smart_search(req: SmartSearchRequest) -> dict[str, Any]:
 
 @app.post("/api/generate-hybrid")
 def generate_hybrid(req: HybridGenerateRequest):
-    """
-    Run CTGAN on a real downloaded dataset, then append any LLM-specified
-    extra columns using smart schema-based generation.
-    """
+    # The AI Augmented path: user's prompt found a real dataset, but LLM added
+    # extra fields that weren't in the original data. We run CTGAN on the real
+    # columns first, then append the extra columns using gen_col(). The extra
+    # columns know nothing about the CTGAN-generated ones — they're independent.
+    # Temporal, rules, and anomaly post-processing apply to the merged result.
     import pandas as pd
 
     dataset_path = os.path.join(DATASETS_DIR, req.dataset_id)
@@ -1589,7 +1629,29 @@ def generate_hybrid(req: HybridGenerateRequest):
 
 @app.get("/api/validate/{dataset_id}")
 def validate_dataset(dataset_id: str):
-    """Compare original vs synthetic data using Wasserstein, Correlation, and ML Utility metrics."""
+    # Computes 4 quality metrics — all between 0 and 1 (higher = better).
+    #
+    # 1. Wasserstein Distance: per numeric column, how similar are the value
+    #    distributions? Normalized by the real column's std dev so wide-range
+    #    columns don't dominate. Score = 1/(1 + W/std).
+    #
+    # 2. Correlation Preservation: are inter-column relationships maintained?
+    #    Compares correlation matrices element-wise. Score = 1 - mean(|Δcorr|).
+    #
+    # 3. ML Utility (TSTR): Train on Synthetic, Test on Real. We train a Random
+    #    Forest on the synthetic data and test it on the real held-out set. The
+    #    score is TSTR accuracy / TRTR accuracy — how close to "real" training quality.
+    #
+    # 4. Privacy: fraction of synthetic rows NOT found verbatim in the real set.
+    #    High score = good (synthetic rows are novel, not memorized copies).
+    #
+    # Overall = 40% Wasserstein + 40% Correlation + 20% ML Utility.
+    # Privacy is reported separately — it's an independent axis.
+    #
+    # Note: for the Kaggle/real path, "original" = the 20% held-out test_set.csv.
+    # For the LLM path, "original" = the 200-row Faker template. This means LLM
+    # path validation compares two generated datasets — scores will look better
+    # than they actually are. Known limitation.
     dataset_path = os.path.join(DATASETS_DIR, dataset_id)
     if not os.path.isdir(dataset_path):
         raise HTTPException(status_code=404, detail="Dataset not found.")

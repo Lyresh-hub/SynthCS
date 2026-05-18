@@ -446,7 +446,7 @@ const [exportFormat, setExportFormat] = useState("csv");
             </div>
           </div>
           <button
-            onClick={() => setLocation("/downloads")}
+            onClick={() => setLocation("/schema-builder")}
             className="flex-shrink-0 px-3 py-1.5 border border-gray-200 rounded-md text-xs text-gray-600 hover:bg-gray-50 transition-colors"
           >
             ← Back

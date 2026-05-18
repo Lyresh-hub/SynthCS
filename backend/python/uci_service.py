@@ -1,3 +1,17 @@
+# =============================================================================
+# uci_service.py
+# =============================================================================
+# Searches and downloads datasets from the UCI Machine Learning Repository.
+#
+# Search uses the REST API directly (not the Python SDK) because the SDK's
+# list_datasets call is painfully slow — it fetches the entire catalog.
+# We hit the /api/datasets/list endpoint with a search param instead.
+#
+# Fallback multi-word strategy: if "diabetes blood glucose" returns nothing,
+# we retry with "diabetes" alone, then "blood", etc. Cuts through cases where
+# UCI's search needs more specific terms than what the user typed.
+# =============================================================================
+
 import os
 import requests
 import pandas as pd
@@ -6,10 +20,13 @@ UCI_LIST_URL = "https://archive.ics.uci.edu/api/datasets/list"
 
 
 def search_datasets(query: str) -> list:
-    """Search UCI ML Repository using the correct /api/datasets/list endpoint."""
+    # Stop words — too generic to be useful as individual search terms.
+    # "data" and "dataset" are especially noisy on a dataset repository.
     STOP = {"with", "from", "that", "this", "have", "data", "dataset",
             "using", "based", "about", "into", "over", "some"}
     words = [w for w in query.lower().split() if len(w) > 3 and w not in STOP]
+    # Try the full query first, then individual significant words.
+    # Stop after we have 3+ results — no need to burn more API calls.
     queries_to_try = [query] + words[:2]
 
     seen_ids: set[str] = set()
@@ -55,6 +72,9 @@ def search_datasets(query: str) -> list:
 
 
 def download_dataset(dataset_id: str, dest: str) -> str | None:
+    # ucimlrepo is the official UCI Python package. Lazy import keeps startup fast —
+    # it's only needed when someone actually clicks "Download" on a UCI result.
+    # fetch_ucirepo() returns features + targets separately, so we concat them.
     try:
         from ucimlrepo import fetch_ucirepo
         ds = fetch_ucirepo(id=int(dataset_id))

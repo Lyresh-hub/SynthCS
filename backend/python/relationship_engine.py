@@ -1,11 +1,23 @@
-"""
-Relationship/dependency rule engine — enforces if-then constraints on a DataFrame
-after CTGAN/schema generation, turning random independent columns into correlated ones.
+# =============================================================================
+# relationship_engine.py
+# =============================================================================
+# Post-generation rule engine: enforces IF–THEN constraints across columns.
+# This is the "Relationship Rules" panel in the Schema Editor.
+#
+# Why it runs post-generation: CTGAN/Copula generate each column semi-independently.
+# That means you'll get rows like {login_status: "SUCCESS", failed_attempts: 47}
+# which is nonsense. This engine fixes those contradictions after generation.
+#
+# How it works:
+#   1. User defines rules in the UI: IF login_status = "FAILURE" THEN failed_attempts > 5
+#   2. Frontend sends them as a list of rule dicts to the /api/generate endpoint
+#   3. main.py calls apply_rules(df, rules) here
+#   4. For each rule: find rows matching the IF condition, then modify the THEN column
+#
+# apply_rules() is the only function main.py calls. The two helpers below it
+# (_condition_mask, _apply_consequence) are internal.
+# =============================================================================
 
-Example:
-    If login_status == "SUCCESS" then failed_attempts <= 2
-    If transaction_amount > 5000 then risk_score >= 0.7
-"""
 from __future__ import annotations
 
 from typing import Any
@@ -15,7 +27,10 @@ import pandas as pd
 
 
 def _condition_mask(series: pd.Series, op: str, value: str) -> pd.Series:
-    """Return boolean mask where `series <op> value` is True."""
+    # Returns a boolean Series — True where the IF condition matches.
+    # eq/neq compare as strings (handles mixed types safely).
+    # gt/lt/gte/lte coerce to numeric first — non-numeric rows become NaN
+    # which evaluates False in comparisons, so they're safely excluded.
     if op == "eq":
         return series.astype(str) == str(value)
     if op == "neq":
@@ -26,6 +41,7 @@ def _condition_mask(series: pd.Series, op: str, value: str) -> pd.Series:
     if op == "gte": return num >= float(value)
     if op == "lte": return num <= float(value)
     if op == "in":
+        # "in" takes a comma-separated value string: "A, B, C"
         vals = {v.strip() for v in str(value).split(",")}
         return series.astype(str).isin(vals)
     return pd.Series([False] * len(series), index=series.index)
@@ -38,7 +54,9 @@ def _apply_consequence(
     op: str,
     value: str,
 ) -> None:
-    """Mutate df[col] on rows where mask=True according to (op, value)."""
+    # Mutates df[col] in-place on the rows where mask=True.
+    # Returns early if the column doesn't exist or no rows match — silently
+    # ignoring missing columns is intentional: the rule is just a no-op.
     if col not in df.columns:
         return
     k = int(mask.sum())
@@ -46,52 +64,43 @@ def _apply_consequence(
         return
 
     if op == "set":
+        # Hard-set every matching row to this literal value
         df.loc[mask, col] = value
 
     elif op == "one_of":
+        # Pick a random value from a comma-separated list for each matching row.
+        # Good for "IF status = CANCELLED THEN reason = one_of: refund, chargeback, fraud"
         choices = [v.strip() for v in str(value).split(",")]
         df.loc[mask, col] = np.random.choice(choices, size=k)
 
     elif op == "set_range":
+        # Random float in [lo, hi] — "IF risk_flag = high THEN risk_score = set_range: 0.7, 1.0"
         parts = [float(x) for x in str(value).split(",")]
         lo, hi = parts[0], parts[1] if len(parts) > 1 else parts[0] + 1
         df.loc[mask, col] = np.round(np.random.uniform(lo, hi, size=k), 2)
 
     elif op == "set_int_range":
+        # Same but integer
         parts = [int(float(x)) for x in str(value).split(",")]
         lo, hi = parts[0], parts[1] if len(parts) > 1 else parts[0] + 1
         df.loc[mask, col] = np.random.randint(lo, hi + 1, size=k)
 
     elif op == "clamp_max":
+        # Cap values that exceed the upper bound — leaves values below the cap alone
         nums = pd.to_numeric(df.loc[mask, col], errors="coerce")
         df.loc[mask, col] = nums.clip(upper=float(value))
 
     elif op == "clamp_min":
+        # Floor values below the lower bound
         nums = pd.to_numeric(df.loc[mask, col], errors="coerce")
         df.loc[mask, col] = nums.clip(lower=float(value))
 
 
 def apply_rules(df: pd.DataFrame, rules: list[dict[str, Any]]) -> pd.DataFrame:
-    """
-    Apply a list of if-then relationship rules to df.
-
-    Rule dict keys
-    --------------
-    if_col   str   column whose value triggers the rule
-    if_op    str   eq | neq | gt | lt | gte | lte | in
-    if_val   str   comparison value (use "a,b,c" for `in`)
-    then_col str   column to modify when condition is True
-    then_op  str   set | one_of | set_range | set_int_range | clamp_max | clamp_min
-    then_val str   argument for the consequence
-                   set          → literal value to assign
-                   one_of       → "A,B,C" — random choice from list
-                   set_range    → "lo,hi" — random float in [lo,hi]
-                   set_int_range→ "lo,hi" — random int in [lo,hi]
-                   clamp_max    → upper cap
-                   clamp_min    → lower floor
-    """
+    # Fast no-op if no rules were configured
     if not rules:
         return df
+    # Work on a copy — the caller (main.py) owns the original df
     df = df.copy()
     for rule in rules:
         if_col   = rule.get("if_col",   "")
@@ -100,6 +109,7 @@ def apply_rules(df: pd.DataFrame, rules: list[dict[str, Any]]) -> pd.DataFrame:
         then_col = rule.get("then_col", "")
         then_op  = rule.get("then_op",  "set")
         then_val = rule.get("then_val", "")
+        # Skip malformed rules silently — better than crashing mid-generation
         if not if_col or not then_col:
             continue
         if if_col not in df.columns:

@@ -1,7 +1,17 @@
-"""
-Anomaly injection engine — inserts realistic attack payloads and anomalous rows
-into synthetic datasets for cybersecurity model training.
-"""
+# =============================================================================
+# anomaly_injector.py
+# =============================================================================
+# Injects realistic attack payloads and anomalous values into a synthetic
+# dataset. This is the "Anomaly Injection" toggle in the Schema Editor.
+#
+# Why it exists: if you're training a security model (e.g. intrusion detection,
+# WAF bypass classifier), you need labeled bad rows mixed in with the normal
+# ones. This module creates those. It doesn't break the whole dataset —
+# it modifies `ratio` fraction of rows (default 5%) and marks them.
+#
+# Public API: just inject_anomalies(df, config). Everything else is internal.
+# =============================================================================
+
 from __future__ import annotations
 
 import random
@@ -10,6 +20,10 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+
+# ── Payload banks ─────────────────────────────────────────────────────────────
+# Curated to cover common attack patterns used in security training datasets.
+# Not exhaustive — just representative enough for ML feature variety.
 
 _SQL_PAYLOADS = [
     "' OR '1'='1",
@@ -36,6 +50,7 @@ _XSS_PAYLOADS = [
 ]
 
 _INVALID_JWTS = [
+    # alg:none attack — strips the signature
     "eyJhbGciOiJub25lIn0.eyJ1c2VyIjoiYWRtaW4ifQ.",
     "Bearer eyJhbGciOiJIUzI1NiJ9.INVALID.payload",
     "eyJhbGciOiJub25lIiwidHlwIjoiSldUIn0.eyJzdWIiOiJhZG1pbiIsInJvbGUiOiJhZG1pbiJ9.",
@@ -45,11 +60,13 @@ _INVALID_JWTS = [
     "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.FAKE_SIGNATURE",
 ]
 
+# Timestamps that shouldn't appear in real production logs —
+# Y2K38 bug, Unix epoch 0, year 9999, etc.
 _IMPOSSIBLE_TIMESTAMPS = [
     "2099-01-01 00:00:00",
     "1970-01-01 00:00:00",
     "0000-00-00 00:00:00",
-    "2038-01-19 03:14:07",
+    "2038-01-19 03:14:07",  # Y2K38 int overflow boundary
     "9999-12-31 23:59:59",
 ]
 
@@ -59,6 +76,7 @@ def _rand_ip() -> str:
 
 
 def _inject_brute_force(df: pd.DataFrame, idx: int) -> None:
+    # Brute force signature: high failed_attempts count, FAILURE status, single source IP
     for col in df.columns:
         lc = col.lower()
         if "failed" in lc or "attempt" in lc:
@@ -72,6 +90,8 @@ def _inject_brute_force(df: pd.DataFrame, idx: int) -> None:
 
 
 def _inject_port_scan(df: pd.DataFrame, idx: int) -> None:
+    # Port scan signature: single source IP, high packet count, sequential dst ports,
+    # TCP SYN flag. All from a single source so the classifier can learn that pattern.
     src = _rand_ip()
     for col in df.columns:
         lc = col.lower()
@@ -90,6 +110,8 @@ def _inject_port_scan(df: pd.DataFrame, idx: int) -> None:
 
 
 def _inject_impossible_ts(df: pd.DataFrame, idx: int) -> None:
+    # Finds the first timestamp-ish column and clobbers it with a sentinel value.
+    # Breaks after the first hit — one impossible timestamp per row is enough.
     for col in df.columns:
         if any(kw in col.lower() for kw in ("timestamp", "time", "date", "created", "updated")):
             df.at[idx, col] = random.choice(_IMPOSSIBLE_TIMESTAMPS)
@@ -97,7 +119,8 @@ def _inject_impossible_ts(df: pd.DataFrame, idx: int) -> None:
 
 
 def _mark_anomaly(df: pd.DataFrame, idx: int) -> None:
-    """Set an anomaly label column if one exists."""
+    # If the dataset has a label column, flip it to indicate this is an anomalous row.
+    # Supports both integer labels (0/1) and string labels ("normal"/"anomaly").
     label_names = {"label", "is_anomaly", "anomaly", "is_attack", "attack_flag", "malicious"}
     for col in df.columns:
         if col.lower() in label_names:
@@ -109,16 +132,18 @@ def _mark_anomaly(df: pd.DataFrame, idx: int) -> None:
 
 
 def inject_anomalies(df: pd.DataFrame, config: dict[str, Any]) -> pd.DataFrame:
-    """
-    Inject realistic attack payloads into a fraction of rows.
-
-    Config keys
-    -----------
-    enabled  bool         (default False)
-    ratio    float 0–0.5  fraction of rows to modify (default 0.05)
-    types    list[str]    any of: sql_injection, xss, brute_force,
-                          port_scan, invalid_jwt, impossible_timestamp
-    """
+    # Returns df unchanged if anomaly injection is disabled — zero overhead on
+    # the normal generation path. When enabled, modifies in-place on a copy
+    # (never mutates the original).
+    #
+    # ratio is clamped to [0.001, 0.5]. Going above 50% would mean more anomalies
+    # than clean rows, which defeats the purpose of a labeled training set.
+    #
+    # Config keys:
+    #   enabled  bool
+    #   ratio    float 0–0.5   (default 0.05)
+    #   types    list[str]     sql_injection | xss | brute_force |
+    #                          port_scan | invalid_jwt | impossible_timestamp
     if not config.get("enabled", False):
         return df
 
@@ -142,6 +167,7 @@ def inject_anomalies(df: pd.DataFrame, config: dict[str, Any]) -> pd.DataFrame:
             df.at[idx, random.choice(str_cols)] = random.choice(_XSS_PAYLOADS)
 
         elif kind == "invalid_jwt":
+            # Prefer an actual token/auth column; fall back to any string column
             jwt_cols = [c for c in str_cols
                         if any(kw in c.lower() for kw in ("token", "jwt", "auth", "bearer"))]
             col = jwt_cols[0] if jwt_cols else (str_cols[0] if str_cols else None)
