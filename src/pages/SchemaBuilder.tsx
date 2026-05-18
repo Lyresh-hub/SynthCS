@@ -124,32 +124,6 @@ const SOURCE_COLORS: Record<string, { dot: string; badge: string; text: string; 
 
 interface Table { id: string; name: string; fields: Field[]; rowCount?: number; }
 
-interface TemporalConfig {
-  enabled:           boolean;
-  start_date:        string;
-  end_date:          string;
-  business_hours:    boolean;
-  ordered:           boolean;
-  timestamp_columns: string[];
-}
-
-interface RelRule {
-  id:       string;
-  if_col:   string;
-  if_op:    string;
-  if_val:   string;
-  then_col: string;
-  then_op:  string;
-  then_val: string;
-}
-
-interface AnomalyCfg {
-  enabled: boolean;
-  ratio:   number;
-  types:   string[];
-}
-
-type GenerationMode = "mock" | "ai_training" | "cybersecurity" | "stress_testing";
 
 interface KaggleDataset {
   ref: string; title: string; size: string;
@@ -242,153 +216,6 @@ const MULTI_TABLE_PRESETS: MultiTablePreset[] = [
   },
 ];
 
-const PRESETS: Record<GenerationMode, Preset[]> = {
-  mock: [
-    { name: "User Directory", table: "users", fields: [
-      { name: "user_id",    type: "uuid",    description: "Primary key" },
-      { name: "first_name", type: "name",    description: "First name" },
-      { name: "last_name",  type: "name",    description: "Last name" },
-      { name: "email",      type: "email",   description: "Email address" },
-      { name: "phone",      type: "phone",   description: "Contact number" },
-      { name: "role",       type: "string",  description: "System role",       constraints: { enum_values: "Admin, User, Manager, Viewer" } },
-      { name: "department", type: "string",  description: "Department",        constraints: { enum_values: "Engineering, HR, Finance, Sales, Operations" } },
-      { name: "created_at", type: "date",    description: "Account created date" },
-      { name: "status",     type: "string",  description: "Account status",    constraints: { enum_values: "Active, Inactive, Suspended" } },
-    ]},
-    { name: "E-commerce Orders", table: "orders", fields: [
-      { name: "order_id",        type: "uuid",    description: "Order identifier" },
-      { name: "customer_name",   type: "name",    description: "Customer full name" },
-      { name: "email",           type: "email",   description: "Customer email" },
-      { name: "product",         type: "string",  description: "Product name",      constraints: { enum_values: "Laptop, Smartphone, Headphones, Monitor, Keyboard, Mouse, Charger, Speaker" } },
-      { name: "quantity",        type: "integer", description: "Units ordered",     constraints: { min_val: 1, max_val: 10 } },
-      { name: "unit_price",      type: "float",   description: "Price per unit",    constraints: { min_val: 5, max_val: 999 } },
-      { name: "total_amount",    type: "float",   description: "Order total",       constraints: { min_val: 5, max_val: 9990 } },
-      { name: "status",          type: "string",  description: "Order status",      constraints: { enum_values: "Pending, Processing, Shipped, Delivered, Cancelled, Refunded" } },
-      { name: "order_date",      type: "date",    description: "Date order placed" },
-      { name: "shipping_address",type: "address", description: "Shipping address" },
-    ]},
-    { name: "CRM Contacts", table: "contacts", fields: [
-      { name: "contact_id",  type: "uuid",    description: "Contact identifier" },
-      { name: "full_name",   type: "name",    description: "Full name" },
-      { name: "email",       type: "email",   description: "Email address" },
-      { name: "phone",       type: "phone",   description: "Phone number" },
-      { name: "company",     type: "string",  description: "Company name",   constraints: { enum_values: "Acme Corp, GlobalTech, DataSystems, CloudWorks, NetSolutions" } },
-      { name: "lead_source", type: "string",  description: "Lead origin",    constraints: { enum_values: "Website, Referral, LinkedIn, Cold Call, Event, Email Campaign" } },
-      { name: "stage",       type: "string",  description: "Pipeline stage", constraints: { enum_values: "Lead, Prospect, Qualified, Negotiation, Closed Won, Closed Lost" } },
-      { name: "deal_value",  type: "float",   description: "Estimated deal", constraints: { min_val: 1000, max_val: 500000 } },
-      { name: "created_at",  type: "date",    description: "Record created" },
-    ]},
-  ],
-  ai_training: [
-    { name: "IDS Network Traffic", table: "network_traffic", fields: [
-      { name: "flow_id",      type: "uuid",    description: "Unique flow identifier" },
-      { name: "timestamp",    type: "date",    description: "Capture timestamp" },
-      { name: "src_ip",       type: "ip",      description: "Source IP address" },
-      { name: "dst_ip",       type: "ip",      description: "Destination IP address" },
-      { name: "src_port",     type: "integer", description: "Source port",       constraints: { min_val: 1, max_val: 65535 } },
-      { name: "dst_port",     type: "integer", description: "Destination port",  constraints: { min_val: 1, max_val: 65535 } },
-      { name: "protocol",     type: "string",  description: "Network protocol",  constraints: { enum_values: "TCP, UDP, ICMP, HTTP, HTTPS, DNS, SSH" } },
-      { name: "packet_count", type: "integer", description: "Packets in flow",   constraints: { min_val: 1, max_val: 10000 } },
-      { name: "byte_count",   type: "integer", description: "Bytes transferred",  constraints: { min_val: 64, max_val: 1500000 } },
-      { name: "duration",     type: "float",   description: "Flow duration (s)",  constraints: { min_val: 0, max_val: 3600 } },
-      { name: "flags",        type: "string",  description: "TCP flags",          constraints: { enum_values: "SYN, ACK, FIN, RST, PSH, URG, SYN-ACK" } },
-      { name: "label",        type: "string",  description: "Traffic class",      constraints: { enum_values: "Normal, DoS, PortScan, Brute Force, Web Attack, Infiltration" } },
-    ]},
-    { name: "Fraud Detection", table: "transactions", fields: [
-      { name: "transaction_id", type: "uuid",    description: "Transaction identifier" },
-      { name: "user_id",        type: "uuid",    description: "Account holder ID" },
-      { name: "timestamp",      type: "date",    description: "Transaction timestamp" },
-      { name: "amount",         type: "float",   description: "Transaction amount",   constraints: { min_val: 0.01, max_val: 10000 } },
-      { name: "merchant",       type: "string",  description: "Merchant name",         constraints: { enum_values: "Amazon, Walmart, Target, Best Buy, Apple, Netflix, Uber, Local Store, Unknown Vendor" } },
-      { name: "category",       type: "string",  description: "Spend category",        constraints: { enum_values: "Groceries, Electronics, Travel, Entertainment, Utilities, Healthcare, Restaurant, Shopping" } },
-      { name: "location",       type: "string",  description: "Transaction location",  constraints: { enum_values: "New York, Los Angeles, Manila, London, Tokyo, Singapore, Unknown" } },
-      { name: "device_type",    type: "string",  description: "Device used",           constraints: { enum_values: "Mobile, Desktop, ATM, POS Terminal, API" } },
-      { name: "ip_address",     type: "ip",      description: "Client IP" },
-      { name: "is_fraud",       type: "boolean", description: "Fraud label",           constraints: { true_ratio: 0.02 } },
-    ]},
-    { name: "Chatbot Intent", table: "utterances", fields: [
-      { name: "utterance_id",  type: "uuid",    description: "Sample identifier" },
-      { name: "text",          type: "string",  description: "User utterance",   constraints: { enum_values: "What is my balance?, Help me reset my password, Cancel my subscription, Track my order, I want to speak to an agent, How do I update my address?, What are your hours?" } },
-      { name: "intent",        type: "string",  description: "Intent label",     constraints: { enum_values: "check_balance, reset_password, cancel_subscription, track_order, escalate, update_info, faq" } },
-      { name: "confidence",    type: "float",   description: "Model confidence", constraints: { min_val: 0.5, max_val: 1.0 } },
-      { name: "language",      type: "string",  description: "Language code",    constraints: { enum_values: "en, tl, es, fr, de, ja" } },
-      { name: "channel",       type: "string",  description: "Input channel",    constraints: { enum_values: "web_chat, mobile_app, voice, email, sms" } },
-      { name: "created_at",    type: "date",    description: "Timestamp" },
-    ]},
-    { name: "Churn Prediction", table: "customer_activity", fields: [
-      { name: "customer_id",      type: "uuid",    description: "Customer identifier" },
-      { name: "tenure_months",    type: "integer", description: "Months as customer",      constraints: { min_val: 1, max_val: 120 } },
-      { name: "monthly_charges",  type: "float",   description: "Monthly billing",         constraints: { min_val: 20, max_val: 500 } },
-      { name: "total_charges",    type: "float",   description: "Lifetime spend",          constraints: { min_val: 20, max_val: 10000 } },
-      { name: "contract_type",    type: "string",  description: "Contract type",           constraints: { enum_values: "Month-to-Month, One Year, Two Year" } },
-      { name: "internet_service", type: "string",  description: "Internet service tier",   constraints: { enum_values: "Fiber optic, DSL, No" } },
-      { name: "num_support_calls",type: "integer", description: "Support calls last 90d",  constraints: { min_val: 0, max_val: 20 } },
-      { name: "last_login_days",  type: "integer", description: "Days since last login",   constraints: { min_val: 0, max_val: 180 } },
-      { name: "churned",          type: "boolean", description: "Churn label",             constraints: { true_ratio: 0.27 } },
-    ]},
-  ],
-  cybersecurity: [
-    { name: "Attack Log Dataset", table: "attack_logs", fields: [
-      { name: "event_id",    type: "uuid",    description: "Event identifier" },
-      { name: "timestamp",   type: "date",    description: "Event timestamp" },
-      { name: "src_ip",      type: "ip",      description: "Attacker IP" },
-      { name: "dst_ip",      type: "ip",      description: "Target IP" },
-      { name: "dst_port",    type: "integer", description: "Target port",    constraints: { min_val: 1, max_val: 65535 } },
-      { name: "attack_type", type: "string",  description: "Attack category", constraints: { enum_values: "SQL Injection, XSS, DDoS, Brute Force, Port Scan, CSRF, RCE, Path Traversal, SSRF" } },
-      { name: "severity",    type: "string",  description: "Risk level",      constraints: { enum_values: "Low, Medium, High, Critical" } },
-      { name: "payload",     type: "string",  description: "Raw payload",     constraints: { enum_values: "' OR '1'='1, <script>alert(1)</script>, ../../../etc/passwd, ; cat /etc/shadow, {{7*7}}" } },
-      { name: "status",      type: "string",  description: "Action taken",    constraints: { enum_values: "Blocked, Allowed, Detected, Escalated" } },
-      { name: "user_agent",  type: "string",  description: "HTTP user agent", constraints: { enum_values: "Mozilla/5.0, sqlmap/1.7, curl/7.81.0, python-requests/2.28, Nikto/2.1.6" } },
-      { name: "is_malicious",type: "boolean", description: "Malicious flag",  constraints: { true_ratio: 0.3 } },
-    ]},
-    { name: "WAF Events", table: "waf_events", fields: [
-      { name: "request_id",   type: "uuid",    description: "Request identifier" },
-      { name: "timestamp",    type: "date",    description: "Request timestamp" },
-      { name: "client_ip",    type: "ip",      description: "Client IP address" },
-      { name: "method",       type: "string",  description: "HTTP method",        constraints: { enum_values: "GET, POST, PUT, DELETE, PATCH, OPTIONS, HEAD" } },
-      { name: "uri",          type: "string",  description: "Request URI",        constraints: { enum_values: "/login, /admin, /api/users, /search?q=, /wp-admin, /../../../etc/passwd, /api/v1/token" } },
-      { name: "status_code",  type: "integer", description: "HTTP status",        constraints: { min_val: 200, max_val: 503 } },
-      { name: "response_time",type: "float",   description: "Response time (ms)", constraints: { min_val: 1, max_val: 5000 } },
-      { name: "rule_id",      type: "string",  description: "WAF rule triggered", constraints: { enum_values: "SQLI-001, XSS-002, RCE-003, PT-004, NONE" } },
-      { name: "is_blocked",   type: "boolean", description: "Request blocked",    constraints: { true_ratio: 0.25 } },
-    ]},
-    { name: "Auth / Brute Force Log", table: "auth_logs", fields: [
-      { name: "log_id",          type: "uuid",    description: "Log entry ID" },
-      { name: "timestamp",       type: "date",    description: "Attempt timestamp" },
-      { name: "user_id",         type: "uuid",    description: "Target account" },
-      { name: "src_ip",          type: "ip",      description: "Source IP address" },
-      { name: "login_status",    type: "string",  description: "Auth result",        constraints: { enum_values: "SUCCESS, FAILURE, LOCKED, MFA_REQUIRED" } },
-      { name: "failed_attempts", type: "integer", description: "Failed attempts",    constraints: { min_val: 0, max_val: 100 } },
-      { name: "session_token",   type: "string",  description: "Session token",      constraints: { enum_values: "valid_token_abc, eyJhbGciOiJub25lIn0.eyJ1c2VyIjoiYWRtaW4ifQ., null, EXPIRED" } },
-      { name: "device",          type: "string",  description: "Device type",        constraints: { enum_values: "Desktop, Mobile, Unknown, Tor Browser" } },
-      { name: "location",        type: "string",  description: "Geo-location",       constraints: { enum_values: "Philippines, United States, Russia, China, Unknown, Tor Exit Node" } },
-    ]},
-  ],
-  stress_testing: [
-    { name: "Application Log", table: "app_logs", fields: [
-      { name: "log_id",    type: "uuid",    description: "Log entry identifier" },
-      { name: "timestamp", type: "date",    description: "Log timestamp" },
-      { name: "level",     type: "string",  description: "Log level",     constraints: { enum_values: "DEBUG, INFO, WARNING, ERROR, CRITICAL" } },
-      { name: "service",   type: "string",  description: "Microservice",  constraints: { enum_values: "auth-service, api-gateway, payment-service, notification-service, user-service, db-proxy" } },
-      { name: "message",   type: "string",  description: "Log message",   constraints: { enum_values: "Request processed, Connection timeout, Rate limit exceeded, Cache miss, DB query slow, Memory high, OK" } },
-      { name: "duration_ms",type:"integer", description: "Processing time",constraints: { min_val: 1, max_val: 30000 } },
-      { name: "status_code",type:"integer", description: "HTTP status",   constraints: { min_val: 200, max_val: 503 } },
-      { name: "user_id",   type: "uuid",    description: "Actor user ID" },
-      { name: "request_id",type: "uuid",    description: "Trace ID" },
-    ]},
-    { name: "IoT Sensor Stream", table: "sensor_readings", fields: [
-      { name: "reading_id",  type: "uuid",    description: "Reading identifier" },
-      { name: "device_id",   type: "uuid",    description: "Device identifier" },
-      { name: "timestamp",   type: "date",    description: "Reading timestamp" },
-      { name: "temperature", type: "float",   description: "Temperature (°C)",  constraints: { min_val: -10, max_val: 85 } },
-      { name: "humidity",    type: "float",   description: "Humidity (%)",       constraints: { min_val: 0, max_val: 100 } },
-      { name: "pressure",    type: "float",   description: "Pressure (hPa)",     constraints: { min_val: 900, max_val: 1100 } },
-      { name: "battery_pct", type: "integer", description: "Battery %",          constraints: { min_val: 0, max_val: 100 } },
-      { name: "signal_rssi", type: "integer", description: "Signal strength",    constraints: { min_val: -100, max_val: 0 } },
-      { name: "status",      type: "string",  description: "Device status",      constraints: { enum_values: "Online, Offline, Degraded, Calibrating" } },
-    ]},
-  ],
-};
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -606,32 +433,7 @@ export default function SchemaBuilder() {
   const [saveStatus, setSaveStatus] = useState<"idle"|"saving"|"saved"|"error">("idle");
   const [aiFieldLoading, setAiFieldLoading] = useState<string | null>(null);
 
-  // ── Advanced generation state ─────────────────────────────────────────────
-  const [genMode] = useState<GenerationMode>("mock");
   const [showPureAiConfirm, setShowPureAiConfirm] = useState(false);
-  const [showAdvanced, setShowAdvanced] = useState(false);
-
-  const [temporal, setTemporal] = useState<TemporalConfig>({
-    enabled: false, start_date: "", end_date: "",
-    business_hours: true, ordered: false, timestamp_columns: [],
-  });
-  const [relRules, setRelRules]   = useState<RelRule[]>([]);
-  const [anomaly, setAnomaly]     = useState<AnomalyCfg>({
-    enabled: false, ratio: 0.05, types: [],
-  });
-
-  const addRelRule = () =>
-    setRelRules((prev) => [
-      ...prev,
-      { id: Date.now().toString(), if_col: "", if_op: "eq", if_val: "",
-        then_col: "", then_op: "set", then_val: "" },
-    ]);
-
-  const updateRelRule = (id: string, patch: Partial<RelRule>) =>
-    setRelRules((prev) => prev.map((r) => (r.id === id ? { ...r, ...patch } : r)));
-
-  const removeRelRule = (id: string) =>
-    setRelRules((prev) => prev.filter((r) => r.id !== id));
 
   const loadMultiTablePreset = (preset: MultiTablePreset) => {
     const tables: Table[] = preset.tables.map((t, i) => ({
@@ -1585,9 +1387,6 @@ export default function SchemaBuilder() {
         body: JSON.stringify({
           dataset_id: templateDatasetId,
           row_count:  rowCount,
-          temporal,
-          rules: relRules.map(({ id: _id, ...r }) => r),
-          anomaly,
         }),
       });
       if (!res.ok) throw new Error(await parsePythonError(res));
@@ -1655,9 +1454,6 @@ export default function SchemaBuilder() {
         body: JSON.stringify({
           dataset_id: templateData.dataset_id,
           row_count:  rowCount,
-          temporal,
-          rules: relRules.map(({ id: _id, ...r }) => r),
-          anomaly,
         }),
         signal: ctrl.signal,
       }, (msg) => setLoadingMsg(msg));
@@ -1717,17 +1513,8 @@ export default function SchemaBuilder() {
     }));
 
     try {
-      const advPayload = {
-        temporal: {
-          ...temporal,
-          timestamp_columns: temporal.timestamp_columns,
-        },
-        rules: relRules.map(({ id: _id, ...r }) => r),
-        anomaly,
-      };
-
       let endpoint = `${PYTHON_API}/api/generate`;
-      let body: any = { dataset_id: activeDatasetId, changes, row_count: rowCount, ...advPayload };
+      let body: any = { dataset_id: activeDatasetId, changes, row_count: rowCount };
 
       if (hasLlmFields) {
         endpoint = `${PYTHON_API}/api/generate-hybrid`;
