@@ -1382,6 +1382,11 @@ def expand_with_ctgan(req: ExpandRequest):
             df = apply_temporal(df, req.temporal.model_dump())
             df = apply_rules(df, [r.model_dump() for r in req.rules])
             df = inject_anomalies(df, req.anomaly.model_dump())
+            # Drop columns the user deleted — keep only fields present in req.fields
+            if req.fields:
+                wanted = [f.name for f in req.fields if f.name in df.columns]
+                if wanted:
+                    df = df[wanted]
             df.to_csv(output_path, index=False)
     except Exception:
         pass
