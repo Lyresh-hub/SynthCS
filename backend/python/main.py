@@ -1811,7 +1811,14 @@ def validate_dataset(dataset_id: str):
             return df.fillna(df.median(numeric_only=True))
 
         if len(common_cols) >= 2:
-            target     = common_cols[-1]
+            # Pick the best target: a categorical column with 2–20 unique values.
+            # Falling back to the last column if nothing better is found.
+            target = common_cols[-1]
+            for col in reversed(common_cols):
+                n_unique = real[col].nunique()
+                if 2 <= n_unique <= 20:
+                    target = col
+                    break
             features   = [c for c in common_cols if c != target]
             real_ml    = _prepare(real)
             synth_ml   = _prepare(synth)
