@@ -525,7 +525,7 @@ class HybridGenerateRequest(BaseModel):
     anomaly:      AnomalyConfig          = AnomalyConfig()
 
 
-_TEMPLATE_ROWS = 200
+_TEMPLATE_ROWS = 100
 
 
 @app.post("/api/generate-from-schema")
