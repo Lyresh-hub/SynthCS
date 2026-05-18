@@ -1483,7 +1483,7 @@ export default function SchemaBuilder() {
 
   const handleRedownload = async () => {
     if (!kaggleRef) return;
-    setLoadingMsg("Re-downloading dataset…");
+    setLoadingMsg("Preparing dataset…");
     setPhase("loading");
     try {
       const res = await fetchPython(DOWNLOAD_ENDPOINTS[downloadSourceId] ?? DOWNLOAD_ENDPOINTS["kaggle"], {
@@ -1494,8 +1494,10 @@ export default function SchemaBuilder() {
       const data = await res.json();
       setDatasetId(data.dataset_id);
       setPhase("schema");
+      // Pass the new id directly — React state won't be committed yet at this point
+      await handleGenerate(data.dataset_id);
     } catch (e: any) {
-      setErrorMsg(e.message ?? "Re-download failed."); setPhase("error");
+      setErrorMsg(e.message ?? "Regeneration failed."); setPhase("error");
     }
   };
 
@@ -1688,10 +1690,11 @@ export default function SchemaBuilder() {
 
   // ── Generate (Kaggle/CTGAN mode; hybrid when LLM-added fields present) ───
 
-  const handleGenerate = async () => {
+  const handleGenerate = async (overrideDatasetId?: string) => {
     const at = getActiveTable();
     if (!at) return;
-    if (!datasetId) return;
+    const activeDatasetId = overrideDatasetId ?? datasetId;
+    if (!activeDatasetId) return;
     setLoadingMsg(`Training CTGAN · generating ${rowCount.toLocaleString()} rows…`);
     setPhase("generating");
 
@@ -1719,7 +1722,7 @@ export default function SchemaBuilder() {
       };
 
       let endpoint = `${PYTHON_API}/api/generate`;
-      let body: any = { dataset_id: datasetId, changes, row_count: rowCount, ...advPayload };
+      let body: any = { dataset_id: activeDatasetId, changes, row_count: rowCount, ...advPayload };
 
       if (hasLlmFields) {
         endpoint = `${PYTHON_API}/api/generate-hybrid`;
@@ -1750,11 +1753,11 @@ export default function SchemaBuilder() {
       if (userId) {
         await fetch(`${NODE_API}/api/datasets`, {
           method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ user_id: userId, name: getActiveTable()?.name ?? "dataset", kaggle_ref: kaggleRef, python_dataset_id: datasetId, row_count: rowCount, source: selectedDataSource }),
+          body: JSON.stringify({ user_id: userId, name: getActiveTable()?.name ?? "dataset", kaggle_ref: kaggleRef, python_dataset_id: activeDatasetId, row_count: rowCount, source: selectedDataSource }),
         }).catch(() => {});
       }
-      sessionStorage.setItem("preview_params", JSON.stringify({ id: datasetId, name: getActiveTable()?.name ?? "dataset", rows: rowCount, ref: kaggleRef }));
-      pushNotification({ title: getActiveTable()?.name ?? "dataset", message: `${rowCount.toLocaleString()} rows · ${selectedDataSource}`, dataset_id: datasetId });
+      sessionStorage.setItem("preview_params", JSON.stringify({ id: activeDatasetId, name: getActiveTable()?.name ?? "dataset", rows: rowCount, ref: kaggleRef }));
+      pushNotification({ title: getActiveTable()?.name ?? "dataset", message: `${rowCount.toLocaleString()} rows · ${selectedDataSource}`, dataset_id: activeDatasetId });
       localStorage.setItem("last_path", "/schema-builder"); setLocation("/preview");
     } catch (e: any) {
       const msg = e.message ?? "Generation failed. Check the Python service logs.";
@@ -1762,7 +1765,7 @@ export default function SchemaBuilder() {
         setErrorMsg("Generation timed out — the server is taking too long. Please wait 30 seconds and try again.");
       } else if (msg.toLowerCase().includes("dataset not found") || msg.toLowerCase().includes("please download")) {
         setDatasetId("");
-        setErrorMsg("Your dataset session expired — the generation server was restarted. Click \"Re-download Dataset\" to continue.");
+        setErrorMsg("Your dataset session expired — the generation server was restarted. Click \"Regenerate Dataset\" to continue.");
       } else {
         setErrorMsg(msg);
       }
@@ -3467,11 +3470,11 @@ export default function SchemaBuilder() {
                   </button>
                 ) : !datasetId ? (
                   <button onClick={handleRedownload}
-                    className="flex-1 flex items-center justify-center gap-1.5 px-4 py-2 bg-amber-500 text-white rounded-lg text-sm font-medium hover:bg-amber-600 transition-colors">
-                    Re-download Dataset
+                    className="flex-1 flex items-center justify-center gap-1.5 px-4 py-2 bg-purple-600 text-white rounded-lg text-sm font-medium hover:bg-purple-700 transition-colors">
+                    Regenerate Dataset
                   </button>
                 ) : (
-                  <button onClick={handleGenerate}
+                  <button onClick={() => handleGenerate()}
                     className="flex-1 flex items-center justify-center gap-1.5 px-4 py-2 bg-purple-600 text-white rounded-lg text-sm font-medium hover:bg-purple-700 transition-colors">
                     Generate with CTGAN
                   </button>
