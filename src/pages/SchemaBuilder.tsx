@@ -3492,11 +3492,6 @@ export default function SchemaBuilder() {
               </div>
             )}
 
-            {changedCount > 0 && mode === "kaggle" && (
-              <p className="text-xs text-amber-600">
-                {changedCount} field{changedCount !== 1 ? "s" : ""} modified — only those changes will be applied.
-              </p>
-            )}
           </div>
         </div>
         );
