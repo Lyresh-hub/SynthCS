@@ -890,6 +890,15 @@ def gen_col(ftype: str, n: int, c: Any, field_name: str = "", description: str =
         data[null_mask] = None
         return data
 
+    # ── Prefixed sequential ID  e.g. id_prefix="L", id_pad=4 → L-0001 ──────────
+    id_prefix = getattr(c, "id_prefix", None)
+    if id_prefix or ftype == "id":
+        prefix = (id_prefix or "ID").strip()
+        pad    = max(1, int(getattr(c, "id_pad", 4) or 4))
+        data   = np.array([f"{prefix}-{str(i + 1).zfill(pad)}" for i in range(n)], dtype=object)
+        data[null_mask] = None
+        return data
+
     # Apply smart numeric ranges when the user left min/max blank
     if ftype in ("integer", "float"):
         min_val = getattr(c, "min_val", None)

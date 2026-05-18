@@ -22,6 +22,7 @@
 
 from __future__ import annotations
 
+import re
 import random
 from collections import defaultdict
 from typing import Any
@@ -30,6 +31,51 @@ import numpy as np
 import pandas as pd
 
 from smart_gen_data import gen_col, FIRST, LAST, DOMAINS
+
+
+def _eval_condition(expr: str, row: dict) -> bool:
+    """Evaluate a simple boolean expression against a row dict.
+
+    Supported syntax:
+      field_name > value   (also <, >=, <=, ==, !=)
+      expr AND expr        (higher precedence)
+      expr OR  expr
+    Values are compared numerically when both sides parse as float.
+    """
+    or_parts = re.split(r"\bOR\b", expr, flags=re.IGNORECASE)
+    for or_part in or_parts:
+        and_parts = re.split(r"\bAND\b", or_part, flags=re.IGNORECASE)
+        all_true = True
+        for clause in and_parts:
+            m = re.match(r"\s*(\w+)\s*(>=|<=|!=|==|>|<)\s*(.+?)\s*$", clause.strip())
+            if not m:
+                all_true = False
+                break
+            field, op, val_str = m.group(1), m.group(2), m.group(3).strip().strip("\"'")
+            if field not in row:
+                all_true = False
+                break
+            row_val = row[field]
+            try:
+                val     = float(val_str)
+                row_val = float(row_val)
+            except (ValueError, TypeError):
+                val = val_str
+                row_val = str(row_val)
+            result = (
+                row_val > val  if op == ">"  else
+                row_val < val  if op == "<"  else
+                row_val >= val if op == ">=" else
+                row_val <= val if op == "<=" else
+                row_val == val if op == "==" else
+                row_val != val if op == "!=" else False
+            )
+            if not result:
+                all_true = False
+                break
+        if all_true:
+            return True
+    return False
 
 
 # ── Name helpers ──────────────────────────────────────────────────────────────
@@ -712,5 +758,22 @@ def generate_relational_dataset(
     main_df = _apply_schedule_consistency(main_df)
     main_df = _apply_grade_attendance_correlation(main_df)
     main_df = _apply_hr_payroll_consistency(main_df)
+
+    # ── Conditional fields — evaluate after all other columns are set ─────────
+    for f in schema_fields:
+        cond = getattr(f.constraints, "condition", None)
+        if not cond:
+            continue
+        true_val   = getattr(f.constraints, "condition_true_value",  "approved")
+        false_val  = getattr(f.constraints, "condition_false_value", "declined")
+        true_prob  = float(getattr(f.constraints, "condition_true_prob",  0.8))
+        false_prob = float(getattr(f.constraints, "condition_false_prob", 0.8))
+        values = []
+        for _, row in main_df.iterrows():
+            if _eval_condition(cond, row.to_dict()):
+                values.append(true_val  if random.random() < true_prob  else false_val)
+            else:
+                values.append(false_val if random.random() < false_prob else true_val)
+        main_df[f.name] = values
 
     return main_df, entity_tables

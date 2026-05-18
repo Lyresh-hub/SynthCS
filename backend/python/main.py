@@ -418,6 +418,15 @@ class FieldConstraints(BaseModel):
     date_to:      str | None   = None
     true_ratio:   float        = 0.5         # for boolean
     null_rate:    float        = 0.0         # 0–50 %
+    # Prefixed sequential ID — field_type "id" or any field with id_prefix set
+    id_prefix:    str | None   = None        # e.g. "L" → L-0001, L-0002
+    id_pad:       int          = 4           # zero-padding width
+    # Conditional field — value depends on other columns in the same row
+    condition:             str | None = None  # e.g. "credit_score > 680 AND debt_to_income < 0.35"
+    condition_true_value:  str        = "approved"
+    condition_false_value: str        = "declined"
+    condition_true_prob:   float      = 0.8   # probability of true_value when condition is met
+    condition_false_prob:  float      = 0.8   # probability of false_value when condition is NOT met
 
 
 class SchemaField(BaseModel):
