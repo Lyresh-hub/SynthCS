@@ -52,7 +52,7 @@ export default function Downloads() {
       rows: ds.row_count,
       ref:  ds.kaggle_ref ?? "",
     }));
-    setLocation("/preview");
+    localStorage.setItem("last_path", "/schema-builder"); setLocation("/preview");
   };
 
   // Kinukuha ang lahat ng datasets ng user mula sa Node.js backend

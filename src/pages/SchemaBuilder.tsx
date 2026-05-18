@@ -888,7 +888,7 @@ export default function SchemaBuilder() {
         entity_tables: (data.table_names as string[]).filter((n) => n !== data.primary_table),
       }));
       pushNotification({ title: data.primary_table, message: `${data.total_rows.toLocaleString()} rows · ${data.table_names.length} tables`, dataset_id: data.dataset_id });
-      setLocation("/preview");
+      localStorage.setItem("last_path", "/schema-builder"); setLocation("/preview");
     } catch (e: any) {
       setErrorMsg(e.message ?? "Multi-table generation failed.");
       setPhase("error");
@@ -903,7 +903,7 @@ export default function SchemaBuilder() {
       name: getActiveTable()?.name ?? "dataset",
       rows: 200,
     }));
-    setLocation("/preview");
+    localStorage.setItem("last_path", "/schema-builder"); setLocation("/preview");
   };
 
   // ── Import user's own CSV ────────────────────────────────────────────────
@@ -1590,7 +1590,7 @@ export default function SchemaBuilder() {
         entity_tables: entityTables,
       }));
       pushNotification({ title: getActiveTable()?.name ?? "dataset", message: `${rowCount.toLocaleString()} rows · LLM + CTGAN`, dataset_id: data.dataset_id });
-      setLocation("/preview");
+      localStorage.setItem("last_path", "/schema-builder"); setLocation("/preview");
     } catch (e: any) {
       setErrorMsg(e.message ?? "CTGAN expansion failed."); setPhase("error");
     }
@@ -1664,7 +1664,7 @@ export default function SchemaBuilder() {
         ref:           "",
         entity_tables: templateData.entity_tables ?? [],
       }));
-      setLocation("/preview");
+      localStorage.setItem("last_path", "/schema-builder"); setLocation("/preview");
     } catch (e: any) {
       clearTimeout(genTimeout);
       const isAbort = e?.name === "AbortError" || (e?.message ?? "").toLowerCase().includes("aborted");
@@ -1745,7 +1745,7 @@ export default function SchemaBuilder() {
       }
       sessionStorage.setItem("preview_params", JSON.stringify({ id: datasetId, name: getActiveTable()?.name ?? "dataset", rows: rowCount, ref: kaggleRef }));
       pushNotification({ title: getActiveTable()?.name ?? "dataset", message: `${rowCount.toLocaleString()} rows · ${selectedDataSource}`, dataset_id: datasetId });
-      setLocation("/preview");
+      localStorage.setItem("last_path", "/schema-builder"); setLocation("/preview");
     } catch (e: any) {
       const msg = e.message ?? "Generation failed. Check the Python service logs.";
       if (e?.name === "AbortError" || msg.toLowerCase().includes("aborted")) {
