@@ -158,6 +158,17 @@ def kaggle_download(req: DownloadRequest) -> dict[str, Any]:
             detail="Dataset not found or no CSV file in archive."
         )
 
+    # Reject datasets too large for HuggingFace free tier — anything over 50 MB
+    # will likely OOM-kill the server during CTGAN training.
+    _MAX_CSV_BYTES = 50 * 1024 * 1024  # 50 MB
+    if os.path.getsize(csv_path) > _MAX_CSV_BYTES:
+        import shutil
+        shutil.rmtree(dest, ignore_errors=True)
+        raise HTTPException(
+            status_code=413,
+            detail="Dataset is too large (over 50 MB). Please choose a smaller dataset or use the AI generator instead."
+        )
+
     try:
         schema = analyze_dataset(csv_path)
     except Exception as e:

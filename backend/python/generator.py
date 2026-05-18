@@ -21,12 +21,12 @@ from sklearn.model_selection import train_test_split
 # Tuned for HuggingFace free tier — it's not a beefy machine, so we keep
 # training lightweight. Bump these up if you ever move to better hardware.
 
-_MAX_TRAINING_ROWS = 5_000   # Anything above 5k rows gets randomly sampled
+_MAX_TRAINING_ROWS = 3_000   # Anything above 3k rows gets randomly sampled
                               # down to this before CTGAN sees it. HF free tier
                               # will OOM if you throw 100k rows at CTGAN.
 
-_CTGAN_EPOCHS      = 50      # Full passes through the training data.
-                              # Was 75 before — dropped to 50 to cut train time.
+_CTGAN_EPOCHS      = 30      # Full passes through the training data.
+                              # Dropped from 50 → 30 to cut train time for demo.
                               # Quality difference is minimal for most datasets.
 
 _CTGAN_BATCH_SIZE  = 500     # Rows per gradient update step.
