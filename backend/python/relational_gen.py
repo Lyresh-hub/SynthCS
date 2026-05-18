@@ -776,4 +776,17 @@ def generate_relational_dataset(
                 values.append(false_val if random.random() < false_prob else true_val)
         main_df[f.name] = values
 
+    # ── Null injection for entity columns ─────────────────────────────────────
+    # Entity columns (employee_id, passenger_id, etc.) are built by the master
+    # lookup and bypass gen_col, so their null_rate constraint was never applied.
+    # Apply it here after all passes so users can simulate dirty/incomplete data.
+    for f in schema_fields:
+        if f.name not in entity_cols:
+            continue  # independent columns already had null_rate applied in gen_col
+        null_rate = float(getattr(f.constraints, "null_rate", 0) or 0)
+        if null_rate <= 0:
+            continue
+        mask = np.random.random(len(main_df)) < min(null_rate, 50.0) / 100.0
+        main_df.loc[mask, f.name] = None
+
     return main_df, entity_tables
