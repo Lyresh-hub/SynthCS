@@ -179,43 +179,16 @@ def _gaussian_copula_sample(df: pd.DataFrame, n: int) -> pd.DataFrame:
     return synthetic.reindex(columns=df.columns)
 
 
-# ── CTGAN (Future GPU Path) ───────────────────────────────────────────────────
-# This is the real CTGAN implementation using the SDV library by MIT.
-#
-# HOW TO ACTIVATE:
-#   1. Upgrade your HuggingFace Space to a GPU hardware tier (T4 Small or above)
-#   2. Add USE_CTGAN=true to your HF Space Secrets
-#   3. Add ctgan to your requirements.txt  (pip install ctgan)
-#
-# WHY IT'S DISABLED BY DEFAULT:
-#   - Requires PyTorch + GPU to train in reasonable time
-#   - On CPU it can take 10–30 minutes per dataset — too slow for a web app
-#   - The free HF Space tier (CPU Basic) will OOM on anything above ~1k rows
-#
-# WHEN YOU UPGRADE:
-#   - T4 Small GPU (~$0.60/hr on HF) is enough for most datasets
-#   - Training 50 epochs on 5k rows takes ~2–3 minutes on T4
-#   - Output quality is noticeably better than Gaussian Copula on real datasets
-#     because CTGAN learns non-linear relationships (Copula only captures linear)
-#
-# HOW CTGAN DIFFERS FROM GAUSSIAN COPULA:
-#   - Copula: pure math (correlation matrix + Cholesky). Fast, CPU-friendly.
-#     Only captures LINEAR relationships between columns.
-#   - CTGAN: neural network (Generator + Discriminator). Slow, GPU-preferred.
-#     Captures COMPLEX non-linear relationships. Better for messy real data.
+# ── CTGAN ─────────────────────────────────────────────────────────────────────
 
 def _ctgan_sample(train_df: pd.DataFrame, row_count: int) -> pd.DataFrame:
     # Trains a CTGAN model on train_df and generates row_count synthetic rows.
-    # Raises ImportError if ctgan is not installed — caller handles the fallback.
-    #
-    # SDV's CTGANSynthesizer handles:
-    #   - Mode-specific normalization for numeric columns
-    #   - One-hot encoding for categorical columns internally
-    #   - Conditional vector to enforce category distributions
+    # Uses SDV's CTGANSynthesizer — handles mode-specific normalization for
+    # numeric columns, one-hot encoding for categoricals, and conditional
+    # vector sampling to enforce category distributions.
     from sdv.single_table import CTGANSynthesizer
     from sdv.metadata import SingleTableMetadata
 
-    # SDV needs metadata to know column types
     metadata = SingleTableMetadata()
     metadata.detect_from_dataframe(train_df)
 
@@ -227,13 +200,6 @@ def _ctgan_sample(train_df: pd.DataFrame, row_count: int) -> pd.DataFrame:
     )
     synthesizer.fit(train_df)
     return synthesizer.sample(num_rows=row_count)
-
-
-def _should_use_ctgan() -> bool:
-    # Check the USE_CTGAN environment variable set in HF Space Secrets.
-    # Returns True only if explicitly set to "true" (case-insensitive).
-    # Default is False — Gaussian Copula runs unless you opt in.
-    return os.environ.get("USE_CTGAN", "false").lower() == "true"
 
 
 # ── Public API ────────────────────────────────────────────────────────────────
@@ -344,14 +310,13 @@ def generate_synthetic_data(dataset_path: str, changes: list[dict], row_count: i
     # CTGAN is the primary synthesis engine — it trains a Generator and
     # Discriminator network on the real dataset and samples new rows that
     # match the original statistical distribution.
-    # Falls back to Gaussian Copula if CTGAN is unavailable (e.g. no GPU tier).
+    # Falls back to Gaussian Copula if CTGAN is unavailable 
     try:
         from ctgan import CTGAN
         model = CTGAN(epochs=_CTGAN_EPOCHS, batch_size=_CTGAN_BATCH_SIZE, verbose=False)
         model.fit(train_df, discrete_columns=discrete_columns)
         synthetic = model.sample(row_count)
     except Exception:
-        # GPU not available or ctgan not installed — Gaussian Copula fallback
         synthetic = _gaussian_copula_sample(train_df, row_count)
 
     synthetic = _decode_dates(synthetic, date_cols)
