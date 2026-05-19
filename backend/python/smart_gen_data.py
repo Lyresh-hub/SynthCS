@@ -952,7 +952,8 @@ def gen_col(ftype: str, n: int, c: Any, field_name: str = "", description: str =
     cardinality  = getattr(c, "cardinality",  None)
     date_from    = getattr(c, "date_from",    None)
     date_to      = getattr(c, "date_to",      None)
-    true_ratio   = getattr(c, "true_ratio",   0.5)
+    _tr          = getattr(c, "true_ratio",   0.5)
+    true_ratio   = 0.5 if _tr is None else float(_tr)
     min_val      = getattr(c, "min_val",      None)
     max_val      = getattr(c, "max_val",      None)
 

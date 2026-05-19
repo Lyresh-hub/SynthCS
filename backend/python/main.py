@@ -432,22 +432,22 @@ def preview_dataset(dataset_id: str, limit: int = 100):
 class FieldConstraints(BaseModel):
     min_val:      float | None = None
     max_val:      float | None = None
-    distribution: str          = "uniform"   # uniform | normal | skewed
+    distribution: str | None   = "uniform"   # uniform | normal | skewed
     enum_values:  list[str]    = []
     cardinality:  int | None   = None
     date_from:    str | None   = None        # YYYY-MM-DD
     date_to:      str | None   = None
-    true_ratio:   float        = 0.5         # for boolean
-    null_rate:    float        = 0.0         # 0–50 %
+    true_ratio:   float | None = 0.5         # for boolean — None-safe
+    null_rate:    float | None = 0.0         # 0–50 % — None-safe
     # Prefixed sequential ID — field_type "id" or any field with id_prefix set
     id_prefix:    str | None   = None        # e.g. "L" → L-0001, L-0002
-    id_pad:       int          = 4           # zero-padding width
+    id_pad:       int | None   = 4           # zero-padding width — None-safe
     # Conditional field — value depends on other columns in the same row
     condition:             str | None = None  # e.g. "credit_score > 680 AND debt_to_income < 0.35"
-    condition_true_value:  str        = "approved"
-    condition_false_value: str        = "declined"
-    condition_true_prob:   float      = 0.8   # probability of true_value when condition is met
-    condition_false_prob:  float      = 0.8   # probability of false_value when condition is NOT met
+    condition_true_value:  str | None = "approved"
+    condition_false_value: str | None = "declined"
+    condition_true_prob:   float | None = 0.8   # probability of true_value when condition is met
+    condition_false_prob:  float | None = 0.8   # probability of false_value when condition is NOT met
 
 
 class SchemaField(BaseModel):
