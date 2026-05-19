@@ -536,6 +536,7 @@ def generate_from_schema(req: SchemaGenerateRequest):
     email derived from the same entity's name, inventory state tracked.
     Returns dataset_id, JSON preview, and metadata for any entity master tables.
     """
+    import traceback as _tb
     try:
         import pandas as pd
         import uuid as uuid_module
@@ -556,7 +557,25 @@ def generate_from_schema(req: SchemaGenerateRequest):
                 ef.description = f"{ef.description} [{table_ctx}]".strip(" []") if ef.description else f"[{table_ctx}]"
             enriched_fields.append(ef)
 
-        df, entity_tables = generate_relational_dataset(enriched_fields, _TEMPLATE_ROWS, save_dir=dest)
+        # Try relational generation; fall back to simple per-field generation on failure
+        try:
+            df, entity_tables = generate_relational_dataset(enriched_fields, _TEMPLATE_ROWS, save_dir=dest)
+        except Exception as rel_err:
+            _rel_tb = _tb.format_exc()
+            print(f"[generate-from-schema] relational_gen failed for '{req.table_name}': {rel_err}\n{_rel_tb}")
+            # Fallback: generate each field independently with gen_col
+            import numpy as np
+            n = _TEMPLATE_ROWS
+            cols: dict = {}
+            for ef in enriched_fields:
+                try:
+                    cols[ef.name] = list(gen_col(
+                        ef.field_type, n, ef.constraints, ef.name, ef.description or ""
+                    ))
+                except Exception:
+                    cols[ef.name] = [None] * n
+            df = pd.DataFrame(cols)
+            entity_tables = {}
 
         template_path = os.path.join(dest, "template.csv")
         df.to_csv(template_path, index=False)
@@ -585,7 +604,7 @@ def generate_from_schema(req: SchemaGenerateRequest):
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Template generation failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Template generation failed: {e}\n{_tb.format_exc()}")
 
     # ── Dead code below — left here intentionally ──────────────────────────────
     # This was the original inline gen_col() implementation. It was extracted
