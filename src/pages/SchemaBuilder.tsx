@@ -656,7 +656,11 @@ export default function SchemaBuilder() {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(buildPayload(t)),
-          }).then((r) => r.ok ? r.json() : Promise.reject(new Error(`Preview failed for table "${t.name}"`))),
+          }).then(async (r) => {
+            if (r.ok) return r.json();
+            const body = await r.text().catch(() => "");
+            throw new Error(`[${r.status}] ${t.name}: ${body.slice(0, 400)}`);
+          }),
         )
       );
 
