@@ -1765,46 +1765,6 @@ export default function SchemaBuilder() {
               </div>
             )}
 
-            {/* Conditional field */}
-            <div className="space-y-2 pt-1 border-t border-purple-100">
-              <p className={labelClass}>Conditional value (optional)</p>
-              <div className={colClass}>
-                <label className={labelClass}>Condition expression</label>
-                <input type="text" className={inputClass + " w-full"}
-                  value={c.condition ?? ""}
-                  placeholder='e.g. credit_score > 680 AND debt_to_income < 0.35'
-                  onChange={(e) => uc({ condition: e.target.value || undefined })} />
-                <p className="text-[11px] text-gray-400">Supported: &gt; &lt; &gt;= &lt;= == != AND OR</p>
-              </div>
-              {c.condition && (
-                <div className="grid grid-cols-2 gap-3">
-                  <div className={colClass}>
-                    <label className={labelClass}>Value when condition is true</label>
-                    <input type="text" className={inputClass}
-                      value={c.condition_true_value ?? "approved"}
-                      onChange={(e) => uc({ condition_true_value: e.target.value })} />
-                  </div>
-                  <div className={colClass}>
-                    <label className={labelClass}>Value when condition is false</label>
-                    <input type="text" className={inputClass}
-                      value={c.condition_false_value ?? "declined"}
-                      onChange={(e) => uc({ condition_false_value: e.target.value })} />
-                  </div>
-                  <div className={colClass}>
-                    <label className={labelClass}>True probability — {Math.round((c.condition_true_prob ?? 0.8) * 100)}%</label>
-                    <input type="range" min={0} max={1} step={0.05}
-                      value={c.condition_true_prob ?? 0.8} className="accent-purple-600"
-                      onChange={(e) => uc({ condition_true_prob: Number(e.target.value) })} />
-                  </div>
-                  <div className={colClass}>
-                    <label className={labelClass}>False probability — {Math.round((c.condition_false_prob ?? 0.8) * 100)}%</label>
-                    <input type="range" min={0} max={1} step={0.05}
-                      value={c.condition_false_prob ?? 0.8} className="accent-purple-600"
-                      onChange={(e) => uc({ condition_false_prob: Number(e.target.value) })} />
-                  </div>
-                </div>
-              )}
-            </div>
           </div>
         </td>
       </tr>
