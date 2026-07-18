@@ -63,27 +63,27 @@ export default function PendingApproval() {
 
           {/* Message */}
           <div className="space-y-2">
-            <h2 className="text-2xl font-bold text-gray-900">Nothing to see here — yet.</h2>
+            <h2 className="text-2xl font-bold text-gray-900">Nothing to see here.</h2>
             <p className="text-gray-500 text-sm leading-relaxed">
-              Your account is pending your instructor's approval. Once they accept your request,
-              you'll be able to access the dashboard and start generating datasets.
+              Wait for your instructor's approval. You will receive an email notification
+              once your account has been approved and you can start using SynthCS.
             </p>
           </div>
 
           {/* Info box */}
           <div className="bg-purple-50 border border-purple-100 rounded-xl p-4 text-left space-y-1.5 text-sm text-purple-700">
             <p>• Your email has been verified successfully.</p>
-            <p>• Your instructor will be notified to review your account.</p>
-            <p>• Try signing in again after your instructor approves you.</p>
+            <p>• Your instructor will review your registration.</p>
+            <p>• Check your email inbox for an approval notification.</p>
           </div>
 
-          {/* Sign in again button */}
+          {/* Buttons */}
           <div className="space-y-3 pt-2">
             <button
               onClick={() => setLocation("/login")}
               className="w-full bg-purple-600 hover:bg-purple-700 text-white font-semibold py-2.5 rounded-lg text-sm transition-colors"
             >
-              Check again — Sign in
+              Try signing in again
             </button>
             <button
               onClick={handleSignOut}
