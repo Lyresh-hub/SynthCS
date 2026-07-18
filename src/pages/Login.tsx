@@ -323,7 +323,7 @@ export default function Login() {
               </form>
               <p className="mt-5 text-center text-sm text-gray-500">
                 Don't have an account?{" "}
-                <Link href="/" className="text-purple-600 font-medium hover:underline">Sign up</Link>
+                <Link href="/signup" className="text-purple-600 font-medium hover:underline">Sign up</Link>
               </p>
             </>
           )}

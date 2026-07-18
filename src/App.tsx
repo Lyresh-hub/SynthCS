@@ -1,4 +1,5 @@
 // Ini-import natin lahat ng pages na magagamit sa app
+import Landing from "./pages/Landing";
 import Signup from "./pages/signup";
 import Login from "./pages/Login";
 import AuthCallback from "./pages/AuthCallback";
@@ -35,7 +36,7 @@ import ValidationReport from "./pages/ValidationReport";
 function getInitialPath() {
   const params = new URLSearchParams(window.location.search);
   if (params.get("verified"))    return `/login?verified=1`;
-  if (params.get("oauth_error")) return `/?oauth_error=${encodeURIComponent(params.get("oauth_error")!)}`;
+  if (params.get("oauth_error")) return `/signup?oauth_error=${encodeURIComponent(params.get("oauth_error")!)}`;
   if (params.get("error")) {
     const email = params.get("email");
     const base  = `/login?error=${encodeURIComponent(params.get("error")!)}`;
@@ -51,7 +52,7 @@ function getInitialPath() {
 // sa sessionStorage para kapag nag-refresh ang user, mabalik siya sa tamang page.
 // /preview ay hindi sine-save kasi kailangan niya ng live dataset ID na mawawala pagkatapos ng session
 // Ginagamit natin localStorage (hindi sessionStorage) para maalala kahit isara ang browser
-const UNSAVEABLE_PATHS = new Set(["/", "/login", "/auth/callback", "/preview", "/validation-report"]);
+const UNSAVEABLE_PATHS = new Set(["/", "/signup", "/login", "/auth/callback", "/preview", "/validation-report"]);
 function LocationPersist() {
   const [location] = useLocation();
   useEffect(() => {
@@ -96,7 +97,8 @@ export default function App() {
       <LocationPersist />
       <Switch>
         {/* Mga public routes — pwedeng i-access kahit hindi naka-login */}
-        <Route path="/" component={Signup} />
+        <Route path="/" component={Landing} />
+        <Route path="/signup" component={Signup} />
         <Route path="/login" component={Login} />
         {/* Dito napupunta ang browser pagkatapos mag-login sa GitHub o Google */}
         <Route path="/auth/callback" component={AuthCallback} />
