@@ -28,6 +28,7 @@ import PrivacyMode from "./pages/PrivacyMode";
 import UserAccounts from "./pages/UserAccounts";
 import AdminPanel from "./pages/AdminPanel";
 import AdminUsers from "./pages/AdminUsers";
+import AdminClasses from "./pages/AdminClasses";
 import ValidationReport from "./pages/ValidationReport";
 
 // Bago mag-start ang memory router, tignan muna natin kung may espesyal na params sa URL.
@@ -58,7 +59,7 @@ function getInitialPath() {
 // sa sessionStorage para kapag nag-refresh ang user, mabalik siya sa tamang page.
 // /preview ay hindi sine-save kasi kailangan niya ng live dataset ID na mawawala pagkatapos ng session
 // Ginagamit natin localStorage (hindi sessionStorage) para maalala kahit isara ang browser
-const UNSAVEABLE_PATHS = new Set(["/", "/signup", "/login", "/pending-approval", "/instructor/login", "/instructor/register", "/instructor/dashboard", "/auth/callback", "/preview", "/validation-report"]);
+const UNSAVEABLE_PATHS = new Set(["/", "/signup", "/login", "/pending-approval", "/instructor/login", "/instructor/register", "/instructor/dashboard", "/auth/callback", "/preview", "/validation-report", "/admin", "/admin/users", "/admin/classes"]);
 function LocationPersist() {
   const [location] = useLocation();
   useEffect(() => {
@@ -122,6 +123,11 @@ export default function App() {
         <Route path="/admin/users">
           <AdminLayout>
             <AdminUsers />
+          </AdminLayout>
+        </Route>
+        <Route path="/admin/classes">
+          <AdminLayout>
+            <AdminClasses />
           </AdminLayout>
         </Route>
 

@@ -91,6 +91,8 @@ export default function Login() {
       if (!res.ok) {
         if (json.error === "banned") {
           setServerError(json.message ?? "Your account has been permanently banned due to violations of the Terms of Service.");
+        } else if (json.error === "terminated") {
+          setServerError(json.message ?? "Your class access has been terminated. Please contact your instructor.");
         } else if (json.error === "pending_approval") {
           setLocation("/pending-approval");
         } else {

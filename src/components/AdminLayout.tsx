@@ -1,11 +1,11 @@
 import { useLocation, Link, useRoute } from "wouter";
-import { LayoutDashboard, Users, Zap, LogOut, ShieldCheck } from "lucide-react";
+import { LayoutDashboard, Users, Zap, LogOut, ShieldCheck, GraduationCap } from "lucide-react";
 import { cn } from "../lib/utils";
 
-// Mga link na makikita sa sidebar ng admin
 const navItems = [
-  { label: "Overview",        icon: LayoutDashboard, href: "/admin" },
-  { label: "User Management", icon: Users,           href: "/admin/users" },
+  { label: "Overview",          icon: LayoutDashboard, href: "/admin" },
+  { label: "User Management",   icon: Users,           href: "/admin/users" },
+  { label: "Classes",           icon: GraduationCap,   href: "/admin/classes" },
 ];
 
 // Ginagawa natin yung dalawang initials galing sa buong pangalan — halimbawa "John Doe" → "JD"
@@ -17,12 +17,11 @@ function getInitials(name: string) {
 // Nagbibigay ito ng madilim na sidebar at header — yung children ay yung actual na page content.
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   const [location, setLocation] = useLocation();
-  const [isOverview] = useRoute("/admin"); // magiging true kapag nasa /admin overview page
+  const [isOverview] = useRoute("/admin");
+  const [isClasses]  = useRoute("/admin/classes");
 
-  // Kinukuha yung pangalan ng naka-login na admin mula sa localStorage
   const adminName = localStorage.getItem("user_name") ?? "Admin";
 
-  // Kapag nag-logout, burahin ang lahat ng naka-save na user info at pumunta sa login
   function handleLogout() {
     localStorage.removeItem("user_id");
     localStorage.removeItem("user_name");
@@ -32,10 +31,9 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     setLocation("/login");
   }
 
-  // Tinutukoy kung anong page title at description ang ipapakita base sa kasalukuyang route
-  const pageTitle = isOverview ? "Overview" : "User Management";
-  const pageDesc  = isOverview
-    ? "Platform analytics and statistics"
+  const pageTitle = isOverview ? "Overview" : isClasses ? "Classes" : "User Management";
+  const pageDesc  = isOverview ? "Platform analytics and statistics"
+    : isClasses   ? "Class overview, instructor activity, and semester management"
     : "Manage user accounts and permissions";
 
   return (

@@ -394,6 +394,7 @@ async function initDB() {
     await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS instructor      VARCHAR(100)`).catch(() => {});
     await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS approval_status  VARCHAR(20)  DEFAULT 'pending'`).catch(() => {});
     await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS is_instructor    BOOLEAN      DEFAULT FALSE`).catch(() => {});
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS semester         VARCHAR(50)`).catch(() => {});
     // Existing accounts before approval feature get auto-approved so they aren't locked out
     await pool.query(`UPDATE users SET approval_status = 'approved' WHERE approval_status IS NULL`).catch(() => {});
 
@@ -862,6 +863,9 @@ app.post("/login", async (req, res) => {
 
     if (user.is_banned)
       return res.status(403).json({ error: "banned", message: `Your account has been permanently banned. Reason: ${user.ban_reason || "Violation of Terms of Service"}` });
+
+    if (!user.is_admin && user.approval_status === 'terminated')
+      return res.status(403).json({ error: "terminated", message: "Your class access has been terminated by the administrator. Please contact your instructor for assistance." });
 
     if (!user.is_admin && !user.is_instructor && user.approval_status !== 'approved')
       return res.status(403).json({ error: "pending_approval", message: "Your account is awaiting instructor approval." });
@@ -1852,6 +1856,8 @@ app.post("/instructor/approve/:userId", async (req, res) => {
         console.error("Approval email failed:", e.message)
       );
     }
+    const instructorId = req.body?.instructor_id;
+    if (instructorId) logActivity(instructorId, "student_approved", { student_name: full_name, student_email: email });
     res.json({ ok: true });
   } catch (err) {
     console.error("Approve student error:", err.message);
@@ -1864,11 +1870,13 @@ app.post("/instructor/reject/:userId", async (req, res) => {
   try {
     const { userId } = req.params;
     const result = await pool.query(
-      "UPDATE users SET approval_status = 'rejected' WHERE id = $1 RETURNING id",
+      "UPDATE users SET approval_status = 'rejected' WHERE id = $1 RETURNING id, COALESCE(first_name || ' ' || last_name, full_name) AS full_name",
       [userId]
     );
     if (result.rows.length === 0)
       return res.status(404).json({ error: "User not found" });
+    const instructorId = req.body?.instructor_id;
+    if (instructorId) logActivity(instructorId, "student_rejected", { student_name: result.rows[0].full_name });
     res.json({ ok: true });
   } catch (err) {
     console.error("Reject student error:", err.message);
@@ -1921,6 +1929,7 @@ app.post("/instructor/flagged-prompts/:id/approve", async (req, res) => {
       sendPromptApprovedEmail(student.rows[0].email, student.rows[0].full_name, prompt_text)
         .catch((e) => console.error("Prompt approved email failed:", e.message));
     }
+    if (instructor_id) logActivity(instructor_id, "prompt_approved", { student_name: student.rows[0]?.full_name, prompt_text });
     res.json({ ok: true });
   } catch (err) {
     console.error("Approve prompt error:", err.message);
@@ -1948,6 +1957,8 @@ app.post("/instructor/flagged-prompts/:id/reject", async (req, res) => {
        WHERE id = $1 AND strike_count >= 3`,
       [student_id]
     );
+    const { instructor_id } = req.body;
+    if (instructor_id) logActivity(instructor_id, "prompt_rejected", { student_id });
     res.json({ ok: true });
   } catch (err) {
     console.error("Reject prompt error:", err.message);
@@ -2062,6 +2073,86 @@ app.post("/instructor/students/add", async (req, res) => {
     if (!student.rows.length) return res.status(404).json({ error: "Student not found" });
     res.json(student.rows[0]);
   } catch (err) {
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+// ── Admin: class overview ──────────────────────────────────���──────────────────
+app.get("/api/admin/classes", async (req, res) => {
+  const { admin_id } = req.query;
+  if (!admin_id) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const adminCheck = await pool.query("SELECT is_admin FROM users WHERE id = $1", [admin_id]);
+    if (!adminCheck.rows[0]?.is_admin) return res.status(403).json({ error: "Forbidden" });
+
+    const instructors = await pool.query(
+      `SELECT id, COALESCE(first_name || ' ' || last_name, full_name) AS full_name, email
+       FROM users WHERE is_instructor = TRUE ORDER BY full_name`
+    );
+
+    const result = await Promise.all(instructors.rows.map(async (ins) => {
+      const students = await pool.query(
+        `SELECT id, COALESCE(first_name || ' ' || last_name, full_name) AS full_name,
+                email, course, approval_status, semester, created_at
+         FROM users
+         WHERE instructor = $1 AND is_instructor = FALSE AND is_admin = FALSE
+         ORDER BY created_at DESC`,
+        [ins.full_name]
+      );
+      return { ...ins, students: students.rows };
+    }));
+
+    res.json(result);
+  } catch (err) {
+    console.error("Admin classes error:", err.message);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+app.patch("/api/admin/classes/:instructorId/terminate", requireAdmin, async (req, res) => {
+  const { semester } = req.body;
+  try {
+    const ins = await pool.query(
+      "SELECT COALESCE(first_name || ' ' || last_name, full_name) AS full_name FROM users WHERE id = $1",
+      [req.params.instructorId]
+    );
+    if (!ins.rows.length) return res.status(404).json({ error: "Instructor not found" });
+    const instructorName = ins.rows[0].full_name;
+
+    const updated = await pool.query(
+      `UPDATE users
+       SET approval_status = 'terminated', semester = COALESCE($1, semester)
+       WHERE instructor = $2 AND is_instructor = FALSE AND is_admin = FALSE
+         AND approval_status != 'terminated'
+       RETURNING id`,
+      [semester || null, instructorName]
+    );
+    res.json({ terminated: updated.rowCount });
+  } catch (err) {
+    console.error("Terminate class error:", err.message);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+// ── Admin: instructor activity feed ──────────────────────────────────────────
+app.get("/api/admin/activity", async (req, res) => {
+  const { admin_id } = req.query;
+  if (!admin_id) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const adminCheck = await pool.query("SELECT is_admin FROM users WHERE id = $1", [admin_id]);
+    if (!adminCheck.rows[0]?.is_admin) return res.status(403).json({ error: "Forbidden" });
+
+    const result = await pool.query(
+      `SELECT al.*, COALESCE(u.first_name || ' ' || u.last_name, u.full_name) AS instructor_name, u.email AS instructor_email
+       FROM activity_log al
+       JOIN users u ON u.id = al.user_id
+       WHERE u.is_instructor = TRUE
+       ORDER BY al.created_at DESC
+       LIMIT 300`
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error("Admin activity error:", err.message);
     res.status(500).json({ error: "Server error" });
   }
 });
