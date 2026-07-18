@@ -43,23 +43,48 @@ export default function Landing() {
       </nav>
 
       {/* ── Hero ── */}
-      <section className="relative overflow-hidden bg-[#1E1347] pt-32 pb-24 px-6">
+      <section className="relative overflow-hidden bg-[#1E1347] pt-32 pb-28 px-6">
         <div className="absolute top-[-20%] left-[-10%] w-[60%] h-[70%] rounded-full bg-purple-600/20 blur-[130px] pointer-events-none" />
         <div className="absolute bottom-[-15%] right-[-10%] w-[50%] h-[60%] rounded-full bg-violet-500/15 blur-[110px] pointer-events-none" />
+        {/* Subtle radial centre glow behind the logo */}
+        <div className="absolute top-[15%] left-1/2 -translate-x-1/2 w-[420px] h-[420px] rounded-full bg-purple-700/25 blur-[90px] pointer-events-none" />
 
         <div className="relative z-10 max-w-4xl mx-auto text-center">
-          <div className="inline-flex items-center gap-2 bg-purple-500/20 border border-purple-400/30 rounded-full px-4 py-1.5 text-purple-300 text-sm font-medium mb-8">
+          {/* Logo lockup */}
+          <div className="flex flex-col items-center mb-10">
+            <div className="relative">
+              {/* Outer halo ring */}
+              <div className="absolute inset-0 rounded-full bg-gradient-to-br from-violet-500/40 to-purple-600/40 blur-2xl scale-125" />
+              {/* Inner glow ring */}
+              <div className="absolute inset-0 rounded-full border border-purple-400/30 scale-110" />
+              <img
+                src="/synthcs-logo.png"
+                alt="SynthCS logo"
+                className="relative w-28 h-28 drop-shadow-[0_0_40px_rgba(139,92,246,0.7)]"
+              />
+            </div>
+            <h1 className="mt-5 text-3xl font-bold tracking-tight">
+              <span className="text-transparent bg-clip-text bg-gradient-to-r from-cyan-300 via-violet-300 to-purple-400">
+                SynthCS
+              </span>
+            </h1>
+            <p className="text-purple-300/50 text-[11px] tracking-[0.3em] uppercase mt-1">
+              Synthetic Data Generator
+            </p>
+          </div>
+
+          <div className="inline-flex items-center gap-2 bg-purple-500/20 border border-purple-400/30 rounded-full px-4 py-1.5 text-purple-300 text-sm font-medium mb-7">
             <Sparkles className="w-3.5 h-3.5" />
             CTGAN-powered synthetic data generation
           </div>
 
-          <h1 className="text-5xl sm:text-6xl font-bold text-white leading-[1.1] tracking-tight mb-6">
+          <h2 className="text-5xl sm:text-6xl font-bold text-white leading-[1.1] tracking-tight mb-6">
             Generate realistic{" "}
             <span className="text-transparent bg-clip-text bg-gradient-to-r from-cyan-300 via-violet-300 to-purple-400">
               synthetic datasets
             </span>{" "}
             in minutes
-          </h1>
+          </h2>
 
           <p className="text-lg text-purple-200/70 max-w-2xl mx-auto mb-10 leading-relaxed">
             SynthCS uses deep learning and LLM-powered schema generation to produce high-fidelity
@@ -82,23 +107,6 @@ export default function Landing() {
               Sign in to your account
             </button>
           </div>
-        </div>
-      </section>
-
-      {/* ── Stats bar ── */}
-      <section className="bg-gray-50 border-y border-gray-100 py-8 px-6">
-        <div className="max-w-4xl mx-auto grid grid-cols-2 md:grid-cols-4 gap-6 text-center">
-          {[
-            { label: "Data Sources",         value: "6+" },
-            { label: "Generation Methods",   value: "2"  },
-            { label: "Dataset Formats",      value: "CSV" },
-            { label: "Avg. Generation Time", value: "~90s" },
-          ].map((stat) => (
-            <div key={stat.label}>
-              <div className="text-2xl font-bold text-gray-900">{stat.value}</div>
-              <div className="text-xs text-gray-500 mt-0.5">{stat.label}</div>
-            </div>
-          ))}
         </div>
       </section>
 
