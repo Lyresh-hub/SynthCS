@@ -19,22 +19,22 @@ export default function Landing() {
   return (
     <div className="min-h-screen bg-white" style={{ fontFamily: "Inter, sans-serif" }}>
       {/* ── Navbar ── */}
-      <nav className="fixed top-0 left-0 right-0 z-50 bg-white/80 backdrop-blur-md border-b border-gray-100">
+      <nav className="fixed top-0 left-0 right-0 z-50 bg-[#1E1347]/70 backdrop-blur-md border-b border-white/10">
         <div className="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
           <div className="flex items-center gap-2.5">
-            <img src="/synthcs-logo.png" alt="SynthCS" className="w-8 h-8" />
-            <span className="font-bold text-gray-900 text-lg">SynthCS</span>
+            <img src="/synthcs-logo.png" alt="SynthCS" className="w-7 h-7 drop-shadow-[0_0_8px_rgba(139,92,246,0.6)]" />
+            <span className="font-bold text-white text-base tracking-tight">SynthCS</span>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
             <button
               onClick={() => setLocation("/login")}
-              className="text-sm font-medium text-gray-600 hover:text-gray-900 px-4 py-2 rounded-lg hover:bg-gray-100 transition-colors"
+              className="text-sm font-medium text-purple-200/80 hover:text-white px-4 py-2 rounded-lg hover:bg-white/10 transition-colors"
             >
               Sign in
             </button>
             <button
               onClick={() => setLocation("/signup")}
-              className="text-sm font-semibold text-white bg-purple-600 hover:bg-purple-700 px-4 py-2 rounded-lg transition-colors"
+              className="text-sm font-semibold text-white bg-purple-600 hover:bg-purple-500 px-4 py-2 rounded-lg transition-colors shadow-md shadow-purple-900/40"
             >
               Get started
             </button>
