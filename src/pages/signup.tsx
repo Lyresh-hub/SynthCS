@@ -56,17 +56,32 @@ export default function Signup() {
   const [modalOpen, setModalOpen] = useState<"tos" | "privacy" | null>(null);
   const [resendStatus, setResendStatus] = useState<"idle"|"sending"|"sent">("idle");
 
-  // Show error message if redirected back from a failed OAuth attempt
+  const [inviteToken, setInviteToken] = useState("");
+
+  // Handle invite token and OAuth error from URL params
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const oauthError = params.get("oauth_error");
     if (oauthError) setServerError(decodeURIComponent(oauthError));
+
+    const token = params.get("invite");
+    if (token) {
+      setInviteToken(token);
+      fetch(`${BACKEND}/invite/${token}`)
+        .then((r) => r.json())
+        .then((data) => {
+          if (data.course)           setValue("course",     data.course);
+          if (data.instructor_name)  setValue("instructor", data.instructor_name);
+        })
+        .catch(() => {});
+    }
   }, []);
 
   const {
     register,
     handleSubmit,
     setError,
+    setValue,
     watch,
     formState: { errors },
   } = useForm<SignupFormValues>({
@@ -97,6 +112,7 @@ export default function Signup() {
           password: data.password,
           course: data.course,
           instructor: data.instructor,
+          invite_token: inviteToken || undefined,
         }),
       });
       const json = await res.json();

@@ -41,6 +41,7 @@ function getInitialPath() {
   const params = new URLSearchParams(window.location.search);
   if (params.get("verified"))    return `/login?verified=1`;
   if (params.get("role") === "instructor") return `/instructor/register`;
+  if (params.get("invite"))      return `/signup?invite=${encodeURIComponent(params.get("invite")!)}`;
   if (params.get("oauth_error")) return `/signup?oauth_error=${encodeURIComponent(params.get("oauth_error")!)}`;
   if (params.get("error")) {
     const email = params.get("email");

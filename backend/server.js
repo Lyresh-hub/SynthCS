@@ -259,6 +259,80 @@ async function sendApprovalEmail(to, fullName) {
   }
 }
 
+async function sendFlaggedPromptEmail(to, instructorName, studentName, promptText) {
+  if (!EMAIL_READY) return;
+  const sender = process.env.GMAIL_SENDER || "christianboluntate5@gmail.com";
+  const frontendUrl = process.env.FRONTEND_URL || "http://localhost:5173";
+  const htmlBody = `
+    <div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:32px 24px">
+      <h2 style="color:#d97706;margin-bottom:8px">Flagged Prompt Needs Review</h2>
+      <p style="color:#374151;font-size:15px;line-height:1.6">
+        Hi <strong>${instructorName}</strong>, a prompt from one of your students has been flagged for review.
+      </p>
+      <p style="color:#374151;font-size:14px"><strong>Student:</strong> ${studentName}</p>
+      <div style="background:#fef3c7;border:1px solid #fde68a;border-radius:8px;padding:16px;margin:16px 0;font-size:14px;color:#92400e">
+        ${promptText}
+      </div>
+      <a href="${frontendUrl}"
+         style="display:inline-block;margin:16px 0;padding:12px 28px;background:#7c3aed;color:#fff;
+                border-radius:8px;text-decoration:none;font-weight:600;font-size:14px">
+        Review in Instructor Dashboard
+      </a>
+    </div>`;
+  const rawEmail = [
+    `From: SynthCS <${sender}>`, `To: ${to}`,
+    `Subject: [SynthCS] Flagged prompt from ${studentName} needs your review`,
+    `MIME-Version: 1.0`, `Content-Type: text/html; charset=UTF-8`, ``, htmlBody,
+  ].join("\r\n");
+  const encoded = Buffer.from(rawEmail).toString("base64").replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,"");
+  const accessToken = await getGmailAccessToken();
+  await fetch("https://gmail.googleapis.com/gmail/v1/users/me/messages/send", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ raw: encoded }),
+  });
+}
+
+async function sendPromptApprovedEmail(to, studentName, promptText) {
+  if (!EMAIL_READY) return;
+  const sender = process.env.GMAIL_SENDER || "christianboluntate5@gmail.com";
+  const htmlBody = `
+    <div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:32px 24px">
+      <h2 style="color:#059669;margin-bottom:8px">Your prompt has been approved!</h2>
+      <p style="color:#374151;font-size:15px;line-height:1.6">
+        Hi <strong>${studentName}</strong>, your instructor has approved your flagged prompt.
+        You can now resubmit it in SynthCS to generate your dataset.
+      </p>
+      <div style="background:#d1fae5;border:1px solid #a7f3d0;border-radius:8px;padding:16px;margin:16px 0;font-size:14px;color:#065f46">
+        ${promptText}
+      </div>
+      <p style="color:#9ca3af;font-size:12px">Sign in and paste the same prompt to proceed.</p>
+    </div>`;
+  const rawEmail = [
+    `From: SynthCS <${sender}>`, `To: ${to}`,
+    `Subject: [SynthCS] Your prompt has been approved — you can now resubmit`,
+    `MIME-Version: 1.0`, `Content-Type: text/html; charset=UTF-8`, ``, htmlBody,
+  ].join("\r\n");
+  const encoded = Buffer.from(rawEmail).toString("base64").replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,"");
+  const accessToken = await getGmailAccessToken();
+  await fetch("https://gmail.googleapis.com/gmail/v1/users/me/messages/send", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ raw: encoded }),
+  });
+}
+
+async function logActivity(userId, actionType, details = {}) {
+  try {
+    await pool.query(
+      "INSERT INTO activity_log (user_id, action_type, details) VALUES ($1, $2, $3)",
+      [userId, actionType, JSON.stringify(details)]
+    );
+  } catch (e) {
+    console.error("Activity log error:", e.message);
+  }
+}
+
 const app = express();
 app.use(cors({
   origin: (origin, cb) => cb(null, isAllowedOrigin(origin)),
@@ -413,6 +487,44 @@ async function initDB() {
       )
     `);
     await pool.query(`ALTER TABLE datasets ADD COLUMN IF NOT EXISTS source VARCHAR(20) DEFAULT 'llm'`).catch(() => {});
+
+    // Flagged prompts — instructor review queue
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS flagged_prompts (
+        id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        student_id   UUID NOT NULL,
+        instructor_id UUID,
+        prompt_text  TEXT NOT NULL,
+        flag_reason  TEXT,
+        status       VARCHAR(20) DEFAULT 'pending',
+        reviewed_at  TIMESTAMPTZ,
+        reviewed_by  UUID,
+        created_at   TIMESTAMPTZ DEFAULT NOW()
+      )
+    `).catch(() => {});
+
+    // Class invitation links — per instructor + course
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS class_invitations (
+        id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        instructor_id UUID NOT NULL,
+        course        VARCHAR(100) NOT NULL,
+        token         VARCHAR(64) UNIQUE NOT NULL,
+        active        BOOLEAN DEFAULT TRUE,
+        created_at    TIMESTAMPTZ DEFAULT NOW()
+      )
+    `).catch(() => {});
+
+    // Activity log — schema saves, generations, downloads
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS activity_log (
+        id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        user_id     UUID NOT NULL,
+        action_type VARCHAR(50) NOT NULL,
+        details     JSONB DEFAULT '{}',
+        created_at  TIMESTAMPTZ DEFAULT NOW()
+      )
+    `).catch(() => {});
 
     console.log("✅ Database connected — all tables ready.");
   } catch (err) {
@@ -856,6 +968,7 @@ app.post("/api/schemas", async (req, res) => {
       "INSERT INTO schemas (user_id, name, table_name, fields) VALUES ($1, $2, $3, $4) RETURNING *",
       [user_id, name, table_name || name, JSON.stringify(fields)]
     );
+    logActivity(user_id, "schema_saved", { schema_name: name, schema_id: result.rows[0].id });
     res.status(201).json(result.rows[0]);
   } catch (err) {
     console.error("Save schema error:", err.message);
@@ -1225,37 +1338,93 @@ app.post("/api/llm/generate-schema", async (req, res) => {
   const { prompt, user_id } = req.body;
   if (!prompt?.trim()) return res.status(400).json({ error: "prompt is required" });
 
-  // Moderation — block inappropriate prompts and apply strike system
-  if (isInappropriatePrompt(prompt)) {
-    if (user_id) {
-      try {
-        const updated = await pool.query(
-          "UPDATE users SET strike_count = COALESCE(strike_count, 0) + 1 WHERE id = $1 RETURNING strike_count",
+  // ── Moderation: keyword check + Claude AI safety check ───────────────────────
+  const keywordFlagged = isInappropriatePrompt(prompt);
+  let aiFlagReason = null;
+
+  if (!keywordFlagged) {
+    // Second-pass: ask Claude to classify the prompt
+    try {
+      const safetyClient = new Anthropic({ apiKey });
+      const safetyMsg = await safetyClient.messages.create({
+        model: "claude-haiku-4-5-20251001",
+        max_tokens: 128,
+        messages: [{
+          role: "user",
+          content: `You are a content moderator for an academic synthetic data generator used by college students.
+Classify this dataset schema prompt as SAFE or UNSAFE.
+
+UNSAFE means: requests for real personal data, fraud/scam datasets, weapon/drug/terrorism data,
+fake government IDs/transcripts/credentials, data designed to harm, harass, or deceive real people.
+
+Academic prompts about healthcare, finance, education, retail, etc. are SAFE.
+
+Respond with ONLY valid JSON: {"safe": true} or {"safe": false, "reason": "one sentence"}
+
+Prompt: ${prompt.trim()}`
+        }],
+      });
+      const raw = safetyMsg.content[0].text.trim().replace(/^```(?:json)?\s*/i,"").replace(/\s*```$/,"");
+      const classification = JSON.parse(raw);
+      if (classification.safe === false) aiFlagReason = classification.reason || "Flagged by AI safety check";
+    } catch (e) {
+      console.error("AI safety check error:", e.message);
+      // Don't block if safety check fails — allow generation to proceed
+    }
+  }
+
+  const shouldFlag = keywordFlagged || !!aiFlagReason;
+
+  if (shouldFlag && user_id) {
+    try {
+      // Check if this exact prompt was already approved by instructor
+      const approved = await pool.query(
+        "SELECT id FROM flagged_prompts WHERE student_id = $1 AND prompt_text = $2 AND status = 'approved'",
+        [user_id, prompt.trim()]
+      );
+      if (approved.rows.length > 0) {
+        // Whitelisted — instructor approved it, allow generation to proceed
+      } else {
+        // Fetch student's instructor to route the review
+        const student = await pool.query(
+          "SELECT full_name, email, instructor FROM users WHERE id = $1",
           [user_id]
         );
-        if (updated.rows.length > 0) {
-          const strikes = updated.rows[0].strike_count;
-          if (strikes >= 3) {
-            await pool.query(
-              "UPDATE users SET is_banned = TRUE, ban_reason = $1 WHERE id = $2",
-              ["Repeated inappropriate dataset generation attempts (3 strikes)", user_id]
-            );
-            return res.status(403).json({
-              error: "banned",
-              message: "Your account has been permanently banned due to repeated violations of the Terms of Service.",
-              strikes,
-            });
+        const instructorName = student.rows[0]?.instructor;
+        let instructorId = null;
+        let instructorEmail = null;
+        if (instructorName) {
+          const ins = await pool.query(
+            "SELECT id, email FROM users WHERE is_instructor = TRUE AND full_name = $1 LIMIT 1",
+            [instructorName]
+          );
+          if (ins.rows.length > 0) {
+            instructorId = ins.rows[0].id;
+            instructorEmail = ins.rows[0].email;
           }
-          return res.status(403).json({
-            error: "inappropriate_prompt",
-            message: `Your prompt was flagged as inappropriate. Strike ${strikes} of 3 — your account will be permanently banned after 3 strikes.`,
-            strikes,
-          });
         }
-      } catch (e) {
-        console.error("Strike update error:", e.message);
+
+        const flagReason = aiFlagReason || "Matched inappropriate keyword list";
+        await pool.query(
+          "INSERT INTO flagged_prompts (student_id, instructor_id, prompt_text, flag_reason) VALUES ($1, $2, $3, $4)",
+          [user_id, instructorId, prompt.trim(), flagReason]
+        );
+        logActivity(user_id, "prompt_flagged", { prompt_text: prompt.trim(), flag_reason: flagReason });
+
+        if (instructorEmail) {
+          sendFlaggedPromptEmail(instructorEmail, instructorName, student.rows[0].full_name, prompt.trim())
+            .catch((e) => console.error("Flagged prompt email failed:", e.message));
+        }
+
+        return res.status(403).json({
+          error: "pending_review",
+          message: "Your prompt has been flagged and sent to your instructor for review. You will receive an email once it is approved.",
+        });
       }
+    } catch (e) {
+      console.error("Flagging error:", e.message);
     }
+  } else if (shouldFlag) {
     return res.status(403).json({
       error: "inappropriate_prompt",
       message: "Your prompt was flagged as inappropriate and cannot be processed.",
@@ -1345,6 +1514,7 @@ Description: ${prompt.trim()}`;
     // raw = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
     const schema = JSON.parse(raw);
     if (!schema.table_name || !Array.isArray(schema.fields)) throw new Error("Invalid schema shape");
+    if (user_id) logActivity(user_id, "schema_generated", { prompt_text: prompt.trim(), table_name: schema.table_name });
 
     schema.fields = schema.fields.map((f) => {
       const c = f.constraints ?? {};
@@ -1702,6 +1872,196 @@ app.post("/instructor/reject/:userId", async (req, res) => {
     res.json({ ok: true });
   } catch (err) {
     console.error("Reject student error:", err.message);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+// ── Activity log (frontend calls this for downloads) ─────────────────────────
+app.post("/api/activity/log", async (req, res) => {
+  const { user_id, action_type, details } = req.body;
+  if (!user_id || !action_type) return res.status(400).json({ error: "user_id and action_type required" });
+  await logActivity(user_id, action_type, details || {});
+  res.json({ ok: true });
+});
+
+// ── Instructor: flagged prompts ───────────────────────────────────────────────
+app.get("/instructor/flagged-prompts", async (req, res) => {
+  const { instructor_id } = req.query;
+  if (!instructor_id) return res.status(400).json({ error: "instructor_id required" });
+  try {
+    const ins = await pool.query("SELECT full_name FROM users WHERE id = $1", [instructor_id]);
+    if (!ins.rows.length) return res.status(404).json({ error: "Instructor not found" });
+    const result = await pool.query(
+      `SELECT fp.*, u.full_name AS student_name, u.email AS student_email
+       FROM flagged_prompts fp
+       JOIN users u ON u.id = fp.student_id
+       WHERE fp.instructor_id = $1
+       ORDER BY fp.created_at DESC`,
+      [instructor_id]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error("Get flagged prompts error:", err.message);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+app.post("/instructor/flagged-prompts/:id/approve", async (req, res) => {
+  const { instructor_id } = req.body;
+  try {
+    const result = await pool.query(
+      `UPDATE flagged_prompts SET status = 'approved', reviewed_at = NOW(), reviewed_by = $1
+       WHERE id = $2 RETURNING student_id, prompt_text`,
+      [instructor_id, req.params.id]
+    );
+    if (!result.rows.length) return res.status(404).json({ error: "Not found" });
+    const { student_id, prompt_text } = result.rows[0];
+    const student = await pool.query("SELECT email, full_name FROM users WHERE id = $1", [student_id]);
+    if (student.rows.length && EMAIL_READY) {
+      sendPromptApprovedEmail(student.rows[0].email, student.rows[0].full_name, prompt_text)
+        .catch((e) => console.error("Prompt approved email failed:", e.message));
+    }
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("Approve prompt error:", err.message);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+app.post("/instructor/flagged-prompts/:id/reject", async (req, res) => {
+  const { instructor_id } = req.body;
+  try {
+    const result = await pool.query(
+      `UPDATE flagged_prompts SET status = 'rejected', reviewed_at = NOW(), reviewed_by = $1
+       WHERE id = $2 RETURNING student_id`,
+      [instructor_id, req.params.id]
+    );
+    if (!result.rows.length) return res.status(404).json({ error: "Not found" });
+    // Apply a strike to the student
+    const { student_id } = result.rows[0];
+    await pool.query(
+      "UPDATE users SET strike_count = COALESCE(strike_count, 0) + 1 WHERE id = $1",
+      [student_id]
+    );
+    await pool.query(
+      `UPDATE users SET is_banned = TRUE, ban_reason = 'Repeated inappropriate dataset generation attempts (3 strikes)'
+       WHERE id = $1 AND strike_count >= 3`,
+      [student_id]
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("Reject prompt error:", err.message);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+// ── Instructor: activity feed ─────────────────────────────────────────────────
+app.get("/instructor/activity", async (req, res) => {
+  const { instructor_id } = req.query;
+  if (!instructor_id) return res.status(400).json({ error: "instructor_id required" });
+  try {
+    const ins = await pool.query("SELECT full_name FROM users WHERE id = $1", [instructor_id]);
+    if (!ins.rows.length) return res.status(404).json({ error: "Instructor not found" });
+    const instructorName = ins.rows[0].full_name;
+    const result = await pool.query(
+      `SELECT al.*, u.full_name AS student_name, u.email AS student_email
+       FROM activity_log al
+       JOIN users u ON u.id = al.user_id
+       WHERE u.instructor = $1 AND u.is_instructor = FALSE
+       ORDER BY al.created_at DESC
+       LIMIT 200`,
+      [instructorName]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error("Activity feed error:", err.message);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+// ── Instructor: invite links ──────────────────────────────────────────────────
+app.post("/instructor/invite", async (req, res) => {
+  const { instructor_id, course } = req.body;
+  if (!instructor_id || !course) return res.status(400).json({ error: "instructor_id and course required" });
+  try {
+    const token = crypto.randomBytes(24).toString("hex");
+    const result = await pool.query(
+      "INSERT INTO class_invitations (instructor_id, course, token) VALUES ($1, $2, $3) RETURNING *",
+      [instructor_id, course, token]
+    );
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    console.error("Create invite error:", err.message);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+app.get("/instructor/invites", async (req, res) => {
+  const { instructor_id } = req.query;
+  if (!instructor_id) return res.status(400).json({ error: "instructor_id required" });
+  try {
+    const result = await pool.query(
+      "SELECT * FROM class_invitations WHERE instructor_id = $1 ORDER BY created_at DESC",
+      [instructor_id]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+app.delete("/instructor/invites/:id", async (req, res) => {
+  try {
+    await pool.query("DELETE FROM class_invitations WHERE id = $1", [req.params.id]);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+app.get("/invite/:token", async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT ci.*, u.full_name AS instructor_name
+       FROM class_invitations ci
+       JOIN users u ON u.id = ci.instructor_id
+       WHERE ci.token = $1 AND ci.active = TRUE`,
+      [req.params.token]
+    );
+    if (!result.rows.length) return res.status(404).json({ error: "Invalid or expired invitation" });
+    res.json(result.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+// ── Instructor: manual student management ─────────────────────────────────────
+app.patch("/instructor/students/:studentId/remove", async (req, res) => {
+  try {
+    await pool.query(
+      "UPDATE users SET instructor = NULL, course = NULL, approval_status = 'pending' WHERE id = $1",
+      [req.params.studentId]
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+app.post("/instructor/students/add", async (req, res) => {
+  const { instructor_id, email } = req.body;
+  if (!instructor_id || !email) return res.status(400).json({ error: "instructor_id and email required" });
+  try {
+    const ins = await pool.query("SELECT full_name FROM users WHERE id = $1 AND is_instructor = TRUE", [instructor_id]);
+    if (!ins.rows.length) return res.status(403).json({ error: "Instructor not found" });
+    const instructorName = ins.rows[0].full_name;
+    const student = await pool.query(
+      "UPDATE users SET instructor = $1, approval_status = 'approved' WHERE email = $2 AND is_instructor = FALSE RETURNING id, full_name, email, course",
+      [instructorName, email]
+    );
+    if (!student.rows.length) return res.status(404).json({ error: "Student not found" });
+    res.json(student.rows[0]);
+  } catch (err) {
     res.status(500).json({ error: "Server error" });
   }
 });

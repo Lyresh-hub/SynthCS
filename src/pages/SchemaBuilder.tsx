@@ -425,6 +425,7 @@ export default function SchemaBuilder() {
   const [selectedSmartIds, setSelectedSmartIds] = useState<Set<string>>(new Set());
   const [detectedExtras, setDetectedExtras]     = useState<string[]>([]);
   const [strikeWarning, setStrikeWarning] = useState<{ strikes: number; banned: boolean } | null>(null);
+  const [pendingReview, setPendingReview] = useState(false);
 
   const [templateDatasetId,   setTemplateDatasetId]   = useState("");
   const [templateColumns,     setTemplateColumns]     = useState<string[]>([]);
@@ -719,6 +720,8 @@ export default function SchemaBuilder() {
         entity_tables: (data.table_names as string[]).filter((n) => n !== data.primary_table),
       }));
       pushNotification({ title: data.primary_table, message: `${data.total_rows.toLocaleString()} rows · ${data.table_names.length} tables`, dataset_id: data.dataset_id });
+      const userId = localStorage.getItem("user_id");
+      if (userId) fetch(`${NODE_API}/api/activity/log`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ user_id: userId, action_type: "dataset_downloaded", details: { table_name: data.primary_table, rows: data.total_rows, tables: data.table_names.length } }) }).catch(() => {});
       localStorage.setItem("last_path", "/schema-builder"); setLocation("/preview");
     } catch (e: any) {
       setErrorMsg(e.message ?? "Multi-table generation failed.");
@@ -795,8 +798,10 @@ export default function SchemaBuilder() {
       if (!res.ok) {
         if (data.error === "banned") { setStrikeWarning({ strikes: data.strikes ?? 3, banned: true }); return; }
         if (data.error === "inappropriate_prompt") { setStrikeWarning({ strikes: data.strikes ?? 1, banned: false }); return; }
+        if (data.error === "pending_review") { setPendingReview(true); return; }
         throw new Error(data.error || "LLM request failed");
       }
+      setPendingReview(false);
       const fields: Field[] = data.fields.map((f: any, i: number) =>
         makeField({
           id: `llm${i}`, name: f.name, type: f.type,
@@ -840,6 +845,7 @@ export default function SchemaBuilder() {
     if (!llmPrompt.trim()) return;
     setLlmError("");
     setStrikeWarning(null);
+    setPendingReview(false);
     setSortBy("downloads");
     setSizeFilter("any");
     setPhase("smart_searching");
@@ -1855,6 +1861,17 @@ export default function SchemaBuilder() {
             <div className="mx-4 mb-3 flex items-start gap-2.5 bg-red-50 border border-red-200 rounded-lg px-3 py-2.5">
               <AlertCircle className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5" />
               <p className="text-xs text-red-700 leading-relaxed">{sanitizeErrorMsg(llmError)}</p>
+            </div>
+          )}
+          {pendingReview && (
+            <div className="mx-4 mb-3 flex items-start gap-2.5 bg-blue-50 border border-blue-300 rounded-lg px-3 py-2.5">
+              <AlertCircle className="w-4 h-4 text-blue-600 flex-shrink-0 mt-0.5" />
+              <div>
+                <p className="text-xs font-semibold text-blue-800">Prompt sent for instructor review</p>
+                <p className="text-xs text-blue-700 mt-0.5 leading-relaxed">
+                  Your prompt was flagged and has been sent to your instructor for review. You will receive an email once it is approved, after which you can resubmit it.
+                </p>
+              </div>
             </div>
           )}
           {strikeWarning && !strikeWarning.banned && (
