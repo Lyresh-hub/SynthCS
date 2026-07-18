@@ -207,6 +207,58 @@ async function sendDeletionWarningEmail(to, fullName, deletionDate, reason) {
   }
 }
 
+async function sendApprovalEmail(to, fullName) {
+  const sender = process.env.GMAIL_SENDER || "christianboluntate5@gmail.com";
+  const frontendUrl = process.env.FRONTEND_URL || "http://localhost:5173";
+
+  const htmlBody = `
+    <div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:32px 24px">
+      <h2 style="color:#6d28d9;margin-bottom:8px">Your account has been approved!</h2>
+      <p style="color:#374151;font-size:15px;line-height:1.6">
+        Hi <strong>${fullName}</strong>,
+      </p>
+      <p style="color:#374151;font-size:15px;line-height:1.6">
+        Great news! Your instructor has approved your <strong>SynthCS</strong> account.
+        You can now sign in and start generating synthetic datasets.
+      </p>
+      <a href="${frontendUrl}/login"
+         style="display:inline-block;margin:24px 0;padding:12px 28px;background:#7c3aed;color:#fff;
+                border-radius:8px;text-decoration:none;font-weight:600;font-size:14px">
+        Sign in to SynthCS
+      </a>
+      <p style="color:#9ca3af;font-size:12px">
+        If you did not sign up for SynthCS, you can safely ignore this email.
+      </p>
+    </div>`;
+
+  const rawEmail = [
+    `From: SynthCS <${sender}>`,
+    `To: ${to}`,
+    `Subject: Your SynthCS account has been approved`,
+    `MIME-Version: 1.0`,
+    `Content-Type: text/html; charset=UTF-8`,
+    ``,
+    htmlBody,
+  ].join("\r\n");
+
+  const encoded = Buffer.from(rawEmail)
+    .toString("base64")
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
+
+  const accessToken = await getGmailAccessToken();
+  const gmailRes = await fetch("https://gmail.googleapis.com/gmail/v1/users/me/messages/send", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ raw: encoded }),
+  });
+  if (!gmailRes.ok) {
+    const body = await gmailRes.text();
+    throw new Error(`Gmail API error ${gmailRes.status}: ${body}`);
+  }
+}
+
 const app = express();
 app.use(cors({
   origin: (origin, cb) => cb(null, isAllowedOrigin(origin)),
@@ -269,6 +321,33 @@ async function initDB() {
     await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS approval_status VARCHAR(20) DEFAULT 'pending'`).catch(() => {});
     // Existing accounts before this feature was added get auto-approved so they aren't locked out
     await pool.query(`UPDATE users SET approval_status = 'approved' WHERE approval_status IS NULL`).catch(() => {});
+
+    // Instructors table
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS instructors (
+        id         UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
+        name       VARCHAR(255) NOT NULL,
+        email      VARCHAR(255) UNIQUE NOT NULL,
+        password   VARCHAR(255) NOT NULL,
+        created_at TIMESTAMPTZ  DEFAULT NOW()
+      )
+    `).catch(() => {});
+
+    // Seed the two instructors with a default password if they don't exist yet
+    const instructorSeeds = [
+      { name: 'Erlinda Casiela Abarintos', email: 'eabarintos@gordoncollege.edu.ph' },
+      { name: 'Arnie Armada',              email: 'aarmada@gordoncollege.edu.ph'    },
+    ];
+    for (const ins of instructorSeeds) {
+      const exists = await pool.query('SELECT id FROM instructors WHERE email = $1', [ins.email]);
+      if (exists.rows.length === 0) {
+        const hashed = await bcrypt.hash('SynthCS@2025', 10);
+        await pool.query(
+          'INSERT INTO instructors (name, email, password) VALUES ($1, $2, $3)',
+          [ins.name, ins.email, hashed]
+        );
+      }
+    }
 
     await pool.query(`
       CREATE TABLE IF NOT EXISTS user_archive (
@@ -1481,6 +1560,94 @@ Example: ["term1", "term two", "term3"]`,
 
 // ── Start ─────────────────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 5000;
+
+// ── Instructor routes ─────────────────────────────────────────────────────────
+
+app.post("/instructor/login", async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    if (!email || !password)
+      return res.status(400).json({ error: "email and password are required" });
+
+    const result = await pool.query("SELECT * FROM instructors WHERE email = $1", [email]);
+    if (result.rows.length === 0)
+      return res.status(401).json({ error: "Invalid email or password" });
+
+    const instructor = result.rows[0];
+    if (!(await bcrypt.compare(password, instructor.password)))
+      return res.status(401).json({ error: "Invalid email or password" });
+
+    res.json({ id: instructor.id, name: instructor.name, email: instructor.email });
+  } catch (err) {
+    console.error("Instructor login error:", err.message);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+// Get all students under this instructor (pending + approved)
+app.get("/instructor/students", async (req, res) => {
+  try {
+    const { instructor_name } = req.query;
+    if (!instructor_name)
+      return res.status(400).json({ error: "instructor_name is required" });
+
+    const result = await pool.query(
+      `SELECT id, first_name, last_name, COALESCE(first_name || ' ' || last_name, full_name) AS full_name,
+              email, course, instructor, approval_status, created_at
+       FROM users
+       WHERE instructor = $1 AND is_admin = FALSE
+       ORDER BY
+         CASE WHEN approval_status = 'pending' THEN 0 ELSE 1 END,
+         created_at DESC`,
+      [instructor_name]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error("Instructor students error:", err.message);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+// Approve a student
+app.post("/instructor/approve/:userId", async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const result = await pool.query(
+      "UPDATE users SET approval_status = 'approved' WHERE id = $1 RETURNING email, COALESCE(first_name || ' ' || last_name, full_name) AS full_name",
+      [userId]
+    );
+    if (result.rows.length === 0)
+      return res.status(404).json({ error: "User not found" });
+
+    const { email, full_name } = result.rows[0];
+    if (EMAIL_READY) {
+      sendApprovalEmail(email, full_name).catch((e) =>
+        console.error("Approval email failed:", e.message)
+      );
+    }
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("Approve student error:", err.message);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+// Reject a student
+app.post("/instructor/reject/:userId", async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const result = await pool.query(
+      "UPDATE users SET approval_status = 'rejected' WHERE id = $1 RETURNING id",
+      [userId]
+    );
+    if (result.rows.length === 0)
+      return res.status(404).json({ error: "User not found" });
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("Reject student error:", err.message);
+    res.status(500).json({ error: "Server error" });
+  }
+});
 
 initDB().then(() => {
   cleanupExpiredDatasets();

@@ -3,6 +3,8 @@ import Landing from "./pages/Landing";
 import Signup from "./pages/signup";
 import Login from "./pages/Login";
 import PendingApproval from "./pages/PendingApproval";
+import InstructorLogin from "./pages/InstructorLogin";
+import InstructorDashboard from "./pages/InstructorDashboard";
 import AuthCallback from "./pages/AuthCallback";
 import { Switch, Route, Router, useLocation } from "wouter";
 // memoryLocation — ito yung puso ng URL hiding feature natin.
@@ -53,7 +55,7 @@ function getInitialPath() {
 // sa sessionStorage para kapag nag-refresh ang user, mabalik siya sa tamang page.
 // /preview ay hindi sine-save kasi kailangan niya ng live dataset ID na mawawala pagkatapos ng session
 // Ginagamit natin localStorage (hindi sessionStorage) para maalala kahit isara ang browser
-const UNSAVEABLE_PATHS = new Set(["/", "/signup", "/login", "/pending-approval", "/auth/callback", "/preview", "/validation-report"]);
+const UNSAVEABLE_PATHS = new Set(["/", "/signup", "/login", "/pending-approval", "/instructor/login", "/instructor/dashboard", "/auth/callback", "/preview", "/validation-report"]);
 function LocationPersist() {
   const [location] = useLocation();
   useEffect(() => {
@@ -102,6 +104,8 @@ export default function App() {
         <Route path="/signup" component={Signup} />
         <Route path="/login" component={Login} />
         <Route path="/pending-approval" component={PendingApproval} />
+        <Route path="/instructor/login" component={InstructorLogin} />
+        <Route path="/instructor/dashboard" component={InstructorDashboard} />
         {/* Dito napupunta ang browser pagkatapos mag-login sa GitHub o Google */}
         <Route path="/auth/callback" component={AuthCallback} />
 
