@@ -4,6 +4,7 @@ import Signup from "./pages/signup";
 import Login from "./pages/Login";
 import PendingApproval from "./pages/PendingApproval";
 import InstructorLogin from "./pages/InstructorLogin";
+import InstructorSignup from "./pages/InstructorSignup";
 import InstructorDashboard from "./pages/InstructorDashboard";
 import AuthCallback from "./pages/AuthCallback";
 import { Switch, Route, Router, useLocation } from "wouter";
@@ -39,6 +40,7 @@ import ValidationReport from "./pages/ValidationReport";
 function getInitialPath() {
   const params = new URLSearchParams(window.location.search);
   if (params.get("verified"))    return `/login?verified=1`;
+  if (params.get("role") === "instructor") return `/instructor/register`;
   if (params.get("oauth_error")) return `/signup?oauth_error=${encodeURIComponent(params.get("oauth_error")!)}`;
   if (params.get("error")) {
     const email = params.get("email");
@@ -55,7 +57,7 @@ function getInitialPath() {
 // sa sessionStorage para kapag nag-refresh ang user, mabalik siya sa tamang page.
 // /preview ay hindi sine-save kasi kailangan niya ng live dataset ID na mawawala pagkatapos ng session
 // Ginagamit natin localStorage (hindi sessionStorage) para maalala kahit isara ang browser
-const UNSAVEABLE_PATHS = new Set(["/", "/signup", "/login", "/pending-approval", "/instructor/login", "/instructor/dashboard", "/auth/callback", "/preview", "/validation-report"]);
+const UNSAVEABLE_PATHS = new Set(["/", "/signup", "/login", "/pending-approval", "/instructor/login", "/instructor/register", "/instructor/dashboard", "/auth/callback", "/preview", "/validation-report"]);
 function LocationPersist() {
   const [location] = useLocation();
   useEffect(() => {
@@ -105,6 +107,7 @@ export default function App() {
         <Route path="/login" component={Login} />
         <Route path="/pending-approval" component={PendingApproval} />
         <Route path="/instructor/login" component={InstructorLogin} />
+        <Route path="/instructor/register" component={InstructorSignup} />
         <Route path="/instructor/dashboard" component={InstructorDashboard} />
         {/* Dito napupunta ang browser pagkatapos mag-login sa GitHub o Google */}
         <Route path="/auth/callback" component={AuthCallback} />

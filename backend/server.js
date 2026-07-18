@@ -569,6 +569,39 @@ app.post("/signup", async (req, res) => {
   }
 });
 
+// INSTRUCTOR SIGNUP
+app.post("/instructor/signup", async (req, res) => {
+  try {
+    const { first_name, last_name, email, password } = req.body;
+    if (!first_name || !last_name || !email || !password)
+      return res.status(400).json({ error: "first_name, last_name, email, and password are required" });
+    if (!isAllowedEmail(email))
+      return res.status(403).json({ error: "Only Gordon College email addresses (@gordoncollege.edu.ph) are allowed." });
+
+    const full_name = `${first_name} ${last_name}`.trim();
+    const hashed = await bcrypt.hash(password, 10);
+    const token  = crypto.randomUUID();
+
+    await pool.query(
+      `INSERT INTO users (first_name, last_name, full_name, email, password, email_verified, verification_token, verification_token_expires, is_instructor, approval_status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, TRUE, 'approved')`,
+      [first_name, last_name, full_name, email, hashed, !EMAIL_READY, EMAIL_READY ? token : null,
+       EMAIL_READY ? new Date(Date.now() + 24 * 60 * 60 * 1000) : null]
+    );
+
+    if (EMAIL_READY) {
+      res.status(201).json({ pending_verification: true, email });
+      sendVerificationEmail(email, token).catch((e) => console.error("Email send failed:", e.message));
+      return;
+    }
+    res.status(201).json({ pending_verification: false, email });
+  } catch (err) {
+    if (err.code === "23505") return res.status(400).json({ error: "Email already exists" });
+    console.error("Instructor signup error:", err.message);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
 // VERIFY EMAIL
 app.get("/verify-email", async (req, res) => {
   const { token } = req.query;
