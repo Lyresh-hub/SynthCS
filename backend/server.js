@@ -264,6 +264,8 @@ async function initDB() {
     await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS pending_deletion       BOOLEAN DEFAULT FALSE`).catch(() => {});
     await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS deletion_scheduled_at TIMESTAMPTZ`).catch(() => {});
     await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS deletion_reason       TEXT`).catch(() => {});
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS course     VARCHAR(100)`).catch(() => {});
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS instructor VARCHAR(100)`).catch(() => {});
 
     await pool.query(`
       CREATE TABLE IF NOT EXISTS user_archive (
@@ -451,7 +453,7 @@ app.get("/", (_req, res) => res.json({ status: "Backend running" }));
 // SIGNUP (email + password)
 app.post("/signup", async (req, res) => {
   try {
-    const { first_name, last_name, email, password } = req.body;
+    const { first_name, last_name, email, password, course, instructor } = req.body;
     if (!first_name || !last_name || !email || !password)
       return res.status(400).json({ error: "first_name, last_name, email, and password are required" });
     if (!isAllowedEmail(email))
@@ -462,9 +464,9 @@ app.post("/signup", async (req, res) => {
     const token  = crypto.randomUUID();
 
     const result = await pool.query(
-      `INSERT INTO users (first_name, last_name, full_name, email, password, email_verified, verification_token, verification_token_expires)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id, first_name, last_name, full_name, email, created_at`,
-      [first_name, last_name, full_name, email, hashed, !EMAIL_READY, EMAIL_READY ? token : null, EMAIL_READY ? new Date(Date.now() + 24 * 60 * 60 * 1000) : null]
+      `INSERT INTO users (first_name, last_name, full_name, email, password, email_verified, verification_token, verification_token_expires, course, instructor)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id, first_name, last_name, full_name, email, created_at`,
+      [first_name, last_name, full_name, email, hashed, !EMAIL_READY, EMAIL_READY ? token : null, EMAIL_READY ? new Date(Date.now() + 24 * 60 * 60 * 1000) : null, course || null, instructor || null]
     );
     const user = result.rows[0];
 

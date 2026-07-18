@@ -30,6 +30,8 @@ const signupSchema = z
       .regex(/[0-9]/,  "Password must contain at least one number")
       .regex(/[^A-Za-z0-9]/, "Password must contain at least one special character"),
     confirmPassword: z.string(),
+    course:     z.string().min(1, "Please select a course"),
+    instructor: z.string().min(1, "Please select an instructor"),
     agreeTerms: z.boolean().refine((v) => v === true, {
       message: "You must agree to the Terms of Service",
     }),
@@ -75,6 +77,8 @@ export default function Signup() {
       email: "",
       password: "",
       confirmPassword: "",
+      course: "",
+      instructor: "",
       agreeTerms: false,
     },
   });
@@ -91,6 +95,8 @@ export default function Signup() {
           last_name:  data.lastName,
           email: data.email,
           password: data.password,
+          course: data.course,
+          instructor: data.instructor,
         }),
       });
       const json = await res.json();
@@ -302,6 +308,34 @@ export default function Signup() {
                 </button>
               </div>
               {errors.confirmPassword && <p className="mt-1 text-xs text-red-500">{errors.confirmPassword.message}</p>}
+            </div>
+
+            {/* Course + Instructor */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Course</label>
+                <select
+                  {...register("course")}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500 bg-white text-gray-700"
+                >
+                  <option value="">Select a course</option>
+                  <option value="Data Science">Data Science</option>
+                  <option value="Thesis Writing">Thesis Writing</option>
+                </select>
+                {errors.course && <p className="mt-1 text-xs text-red-500">{errors.course.message}</p>}
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Instructor</label>
+                <select
+                  {...register("instructor")}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500 bg-white text-gray-700"
+                >
+                  <option value="">Select an instructor</option>
+                  <option value="Erlinda Casiela Abarintos">Erlinda Casiela Abarintos</option>
+                  <option value="Arnie Armada">Arnie Armada</option>
+                </select>
+                {errors.instructor && <p className="mt-1 text-xs text-red-500">{errors.instructor.message}</p>}
+              </div>
             </div>
 
             {/* Agree Terms */}
