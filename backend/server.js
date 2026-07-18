@@ -318,8 +318,9 @@ async function initDB() {
     await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS deletion_reason       TEXT`).catch(() => {});
     await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS course          VARCHAR(100)`).catch(() => {});
     await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS instructor      VARCHAR(100)`).catch(() => {});
-    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS approval_status VARCHAR(20) DEFAULT 'pending'`).catch(() => {});
-    // Existing accounts before this feature was added get auto-approved so they aren't locked out
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS approval_status  VARCHAR(20)  DEFAULT 'pending'`).catch(() => {});
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS is_instructor    BOOLEAN      DEFAULT FALSE`).catch(() => {});
+    // Existing accounts before approval feature get auto-approved so they aren't locked out
     await pool.query(`UPDATE users SET approval_status = 'approved' WHERE approval_status IS NULL`).catch(() => {});
 
     // Instructors table
@@ -717,10 +718,10 @@ app.post("/login", async (req, res) => {
     if (user.is_banned)
       return res.status(403).json({ error: "banned", message: `Your account has been permanently banned. Reason: ${user.ban_reason || "Violation of Terms of Service"}` });
 
-    if (!user.is_admin && user.approval_status !== 'approved')
+    if (!user.is_admin && !user.is_instructor && user.approval_status !== 'approved')
       return res.status(403).json({ error: "pending_approval", message: "Your account is awaiting instructor approval." });
 
-    res.json({ id: user.id, first_name: user.first_name, last_name: user.last_name, full_name: user.full_name, email: user.email, is_admin: user.is_admin || false });
+    res.json({ id: user.id, first_name: user.first_name, last_name: user.last_name, full_name: user.full_name, email: user.email, is_admin: user.is_admin || false, is_instructor: user.is_instructor || false });
   } catch (err) {
     console.error("Login error:", err.message);
     res.status(500).json({ error: "Server error" });
@@ -1093,6 +1094,19 @@ app.patch("/api/admin/users/:id/toggle-admin", requireAdmin, async (req, res) =>
     res.json({ is_admin: result.rows[0].is_admin });
   } catch (err) {
     console.error("Admin toggle admin error:", err.message);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+app.patch("/api/admin/users/:id/toggle-instructor", requireAdmin, async (req, res) => {
+  try {
+    const result = await pool.query(
+      "UPDATE users SET is_instructor = NOT is_instructor, approval_status = 'approved' WHERE id = $1 RETURNING is_instructor",
+      [req.params.id]
+    );
+    res.json({ is_instructor: result.rows[0].is_instructor });
+  } catch (err) {
+    console.error("Admin toggle instructor error:", err.message);
     res.status(500).json({ error: "Server error" });
   }
 });
@@ -1587,19 +1601,29 @@ app.post("/instructor/login", async (req, res) => {
 // Get all students under this instructor (pending + approved)
 app.get("/instructor/students", async (req, res) => {
   try {
-    const { instructor_name } = req.query;
-    if (!instructor_name)
-      return res.status(400).json({ error: "instructor_name is required" });
+    const { instructor_id } = req.query;
+    if (!instructor_id)
+      return res.status(400).json({ error: "instructor_id is required" });
+
+    // Look up this instructor's full name, then match against students' instructor field
+    const instructorRow = await pool.query(
+      "SELECT COALESCE(first_name || ' ' || last_name, full_name) AS full_name FROM users WHERE id = $1 AND is_instructor = TRUE",
+      [instructor_id]
+    );
+    if (instructorRow.rows.length === 0)
+      return res.status(403).json({ error: "Not an instructor" });
+
+    const instructorName = instructorRow.rows[0].full_name;
 
     const result = await pool.query(
-      `SELECT id, first_name, last_name, COALESCE(first_name || ' ' || last_name, full_name) AS full_name,
+      `SELECT id, COALESCE(first_name || ' ' || last_name, full_name) AS full_name,
               email, course, instructor, approval_status, created_at
        FROM users
-       WHERE instructor = $1 AND is_admin = FALSE
+       WHERE instructor = $1 AND is_admin = FALSE AND is_instructor = FALSE
        ORDER BY
          CASE WHEN approval_status = 'pending' THEN 0 ELSE 1 END,
          created_at DESC`,
-      [instructor_name]
+      [instructorName]
     );
     res.json(result.rows);
   } catch (err) {

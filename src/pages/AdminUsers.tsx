@@ -13,6 +13,7 @@ interface AdminUser {
   username: string | null;
   email_verified: boolean;
   is_admin: boolean;
+  is_instructor: boolean;
   created_at: string;
   schema_count: number;
   strike_count: number;
@@ -231,6 +232,12 @@ export default function AdminUsers() {
     const res  = await fetch(`${NODE_API}/api/admin/users/${user.id}/toggle-admin?admin_id=${adminId}`, { method: "PATCH" });
     const data = await res.json();
     setUsers((p) => p.map((u) => u.id === user.id ? { ...u, is_admin: data.is_admin } : u));
+  }
+
+  async function handleToggleInstructor(user: AdminUser) {
+    const res  = await fetch(`${NODE_API}/api/admin/users/${user.id}/toggle-instructor?admin_id=${adminId}`, { method: "PATCH" });
+    const data = await res.json();
+    setUsers((p) => p.map((u) => u.id === user.id ? { ...u, is_instructor: data.is_instructor } : u));
   }
 
   async function handleBan(user: AdminUser) {
@@ -524,6 +531,12 @@ export default function AdminUsers() {
                           <button onClick={() => handleToggleAdmin(user)}
                             className="text-xs px-2.5 py-1 rounded-md bg-purple-50 text-purple-700 hover:bg-purple-100 transition-colors font-medium whitespace-nowrap">
                             {user.is_admin ? "Revoke Admin" : "Make Admin"}
+                          </button>
+                        )}
+                        {user.id !== adminId && !user.is_admin && (
+                          <button onClick={() => handleToggleInstructor(user)}
+                            className="text-xs px-2.5 py-1 rounded-md bg-blue-50 text-blue-700 hover:bg-blue-100 transition-colors font-medium whitespace-nowrap">
+                            {user.is_instructor ? "Revoke Instructor" : "Make Instructor"}
                           </button>
                         )}
                         {user.id !== adminId && !user.is_banned && (

@@ -17,7 +17,8 @@ type Tab = "pending" | "all";
 
 export default function InstructorDashboard() {
   const [, setLocation] = useLocation();
-  const instructorName = localStorage.getItem("instructor_name") ?? "";
+  const instructorId   = localStorage.getItem("user_id")   ?? "";
+  const instructorName = localStorage.getItem("user_name") ?? "";
 
   const [students, setStudents] = useState<Student[]>([]);
   const [tab, setTab]           = useState<Tab>("pending");
@@ -25,8 +26,8 @@ export default function InstructorDashboard() {
   const [actionId, setActionId] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!localStorage.getItem("instructor_id")) {
-      setLocation("/instructor/login");
+    if (!instructorId || localStorage.getItem("is_instructor") !== "true") {
+      setLocation("/login");
       return;
     }
     fetchStudents();
@@ -35,7 +36,7 @@ export default function InstructorDashboard() {
   const fetchStudents = async () => {
     setLoading(true);
     try {
-      const res  = await fetch(`${BACKEND}/instructor/students?instructor_name=${encodeURIComponent(instructorName)}`);
+      const res  = await fetch(`${BACKEND}/instructor/students?instructor_id=${encodeURIComponent(instructorId)}`);
       const json = await res.json();
       if (res.ok) setStudents(json);
     } catch {
@@ -74,9 +75,12 @@ export default function InstructorDashboard() {
   };
 
   const handleSignOut = () => {
-    localStorage.removeItem("instructor_id");
-    localStorage.removeItem("instructor_name");
-    setLocation("/instructor/login");
+    localStorage.removeItem("user_id");
+    localStorage.removeItem("user_name");
+    localStorage.removeItem("is_admin");
+    localStorage.removeItem("is_instructor");
+    localStorage.removeItem("last_path");
+    setLocation("/login");
   };
 
   const displayed = tab === "pending"
