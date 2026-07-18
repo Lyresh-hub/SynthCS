@@ -264,8 +264,11 @@ async function initDB() {
     await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS pending_deletion       BOOLEAN DEFAULT FALSE`).catch(() => {});
     await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS deletion_scheduled_at TIMESTAMPTZ`).catch(() => {});
     await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS deletion_reason       TEXT`).catch(() => {});
-    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS course     VARCHAR(100)`).catch(() => {});
-    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS instructor VARCHAR(100)`).catch(() => {});
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS course          VARCHAR(100)`).catch(() => {});
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS instructor      VARCHAR(100)`).catch(() => {});
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS approval_status VARCHAR(20) DEFAULT 'pending'`).catch(() => {});
+    // Existing accounts before this feature was added get auto-approved so they aren't locked out
+    await pool.query(`UPDATE users SET approval_status = 'approved' WHERE approval_status IS NULL`).catch(() => {});
 
     await pool.query(`
       CREATE TABLE IF NOT EXISTS user_archive (
@@ -634,6 +637,9 @@ app.post("/login", async (req, res) => {
 
     if (user.is_banned)
       return res.status(403).json({ error: "banned", message: `Your account has been permanently banned. Reason: ${user.ban_reason || "Violation of Terms of Service"}` });
+
+    if (!user.is_admin && user.approval_status !== 'approved')
+      return res.status(403).json({ error: "pending_approval", message: "Your account is awaiting instructor approval." });
 
     res.json({ id: user.id, first_name: user.first_name, last_name: user.last_name, full_name: user.full_name, email: user.email, is_admin: user.is_admin || false });
   } catch (err) {
