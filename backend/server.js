@@ -693,20 +693,14 @@ app.post("/instructor/signup", async (req, res) => {
 
     const full_name = `${first_name} ${last_name}`.trim();
     const hashed = await bcrypt.hash(password, 10);
-    const token  = crypto.randomUUID();
 
+    // Instructors skip email verification — account is immediately active
     await pool.query(
-      `INSERT INTO users (first_name, last_name, full_name, email, password, email_verified, verification_token, verification_token_expires, is_instructor, approval_status)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, TRUE, 'approved')`,
-      [first_name, last_name, full_name, email, hashed, !EMAIL_READY, EMAIL_READY ? token : null,
-       EMAIL_READY ? new Date(Date.now() + 24 * 60 * 60 * 1000) : null]
+      `INSERT INTO users (first_name, last_name, full_name, email, password, email_verified, is_instructor, approval_status)
+       VALUES ($1, $2, $3, $4, $5, TRUE, TRUE, 'approved')`,
+      [first_name, last_name, full_name, email, hashed]
     );
 
-    if (EMAIL_READY) {
-      res.status(201).json({ pending_verification: true, email });
-      sendVerificationEmail(email, token).catch((e) => console.error("Email send failed:", e.message));
-      return;
-    }
     res.status(201).json({ pending_verification: false, email });
   } catch (err) {
     if (err.code === "23505") return res.status(400).json({ error: "Email already exists" });
@@ -1880,6 +1874,21 @@ app.post("/instructor/reject/:userId", async (req, res) => {
     res.json({ ok: true });
   } catch (err) {
     console.error("Reject student error:", err.message);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+// ── Public: list all active instructors ──────────────────────────────────────
+app.get("/api/instructors", async (_req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT id, COALESCE(first_name || ' ' || last_name, full_name) AS full_name
+       FROM users WHERE is_instructor = TRUE AND is_banned = FALSE
+       ORDER BY full_name`
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error("Get instructors error:", err.message);
     res.status(500).json({ error: "Server error" });
   }
 });

@@ -56,7 +56,24 @@ export default function Signup() {
   const [modalOpen, setModalOpen] = useState<"tos" | "privacy" | null>(null);
   const [resendStatus, setResendStatus] = useState<"idle"|"sending"|"sent">("idle");
 
-  const [inviteToken, setInviteToken] = useState("");
+  const [inviteToken,   setInviteToken]   = useState("");
+  const [instructors,   setInstructors]   = useState<{ id: string; full_name: string }[]>([]);
+  const [invitePrefill, setInvitePrefill] = useState<{ course?: string; instructor_name?: string } | null>(null);
+
+  // Fetch instructors from DB (replaces hardcoded list)
+  useEffect(() => {
+    fetch(`${BACKEND}/api/instructors`)
+      .then((r) => r.json())
+      .then((data) => Array.isArray(data) ? setInstructors(data) : [])
+      .catch(() => {});
+  }, []);
+
+  // Apply invite pre-fills once instructors have loaded
+  useEffect(() => {
+    if (!invitePrefill || instructors.length === 0) return;
+    if (invitePrefill.course)           setValue("course",     invitePrefill.course);
+    if (invitePrefill.instructor_name)  setValue("instructor", invitePrefill.instructor_name);
+  }, [invitePrefill, instructors]);
 
   // Handle invite token and OAuth error from URL params
   useEffect(() => {
@@ -69,10 +86,7 @@ export default function Signup() {
       setInviteToken(token);
       fetch(`${BACKEND}/invite/${token}`)
         .then((r) => r.json())
-        .then((data) => {
-          if (data.course)           setValue("course",     data.course);
-          if (data.instructor_name)  setValue("instructor", data.instructor_name);
-        })
+        .then((data) => setInvitePrefill(data))
         .catch(() => {});
     }
   }, []);
@@ -353,8 +367,9 @@ export default function Signup() {
                   className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500 bg-white text-gray-700"
                 >
                   <option value="">Select an instructor</option>
-                  <option value="Erlinda Casiela Abarintos">Erlinda Casiela Abarintos</option>
-                  <option value="Arnie Armada">Arnie Armada</option>
+                  {instructors.map((ins) => (
+                    <option key={ins.id} value={ins.full_name}>{ins.full_name}</option>
+                  ))}
                 </select>
                 {errors.instructor && <p className="mt-1 text-xs text-red-500">{errors.instructor.message}</p>}
               </div>
