@@ -10,6 +10,7 @@ import {
   subscribeNotifications, type AppNotification,
 } from "../lib/notifications";
 import OnboardingTour from "./OnboardingTour";
+import { NODE_API } from "../lib/config";
 
 // Mga link na lalabas sa sidebar para sa regular na users
 const navItems = [
@@ -61,13 +62,22 @@ export default function Layout({ children }: { children: React.ReactNode }) {
 
   const userInitials = getInitials(userName);
 
-  // ── Onboarding tour — keyed per user so each new account sees it once ───────
-  const userId = localStorage.getItem("user_id") ?? "";
-  const tourKey = `synthcs_tour_done_${userId}`;
-  const [showTour, setShowTour] = useState(() => localStorage.getItem(tourKey) !== "true");
-  function startTour()  { setShowTour(true); }
-  function endTour()    { localStorage.setItem(tourKey, "true"); setShowTour(false); }
-  function finishTour() { localStorage.setItem(tourKey, "true"); setShowTour(false); setLocation("/schema-builder"); }
+  // ── Onboarding tour — show only once per user, tracked server-side ──────────
+  const [showTour, setShowTour] = useState(() => localStorage.getItem("tour_done") !== "true");
+  function startTour() { setShowTour(true); }
+  function markTourDone() {
+    localStorage.setItem("tour_done", "true");
+    const userId = localStorage.getItem("user_id");
+    if (userId) {
+      fetch(`${NODE_API}/api/user/tour-done`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user_id: userId }),
+      }).catch(() => {});
+    }
+  }
+  function endTour()    { markTourDone(); setShowTour(false); }
+  function finishTour() { markTourDone(); setShowTour(false); setLocation("/schema-builder"); }
 
   // ── Mobile sidebar ─────────────────────────────────────────────────────────
   const [sidebarOpen, setSidebarOpen] = useState(false);

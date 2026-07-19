@@ -439,6 +439,7 @@ async function initDB() {
     await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS approval_status  VARCHAR(20)  DEFAULT 'pending'`).catch(() => {});
     await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS is_instructor    BOOLEAN      DEFAULT FALSE`).catch(() => {});
     await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS semester         VARCHAR(50)`).catch(() => {});
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS tour_done        BOOLEAN DEFAULT FALSE`).catch(() => {});
     // Existing accounts before approval feature get auto-approved so they aren't locked out
     await pool.query(`UPDATE users SET approval_status = 'approved' WHERE approval_status IS NULL`).catch(() => {});
 
@@ -916,7 +917,7 @@ app.post("/login", async (req, res) => {
     if (!user.is_admin && !user.is_instructor && user.approval_status !== 'approved')
       return res.status(403).json({ error: "pending_approval", message: "Your account is awaiting instructor approval." });
 
-    res.json({ id: user.id, first_name: user.first_name, last_name: user.last_name, full_name: user.full_name, email: user.email, is_admin: user.is_admin || false, is_instructor: user.is_instructor || false });
+    res.json({ id: user.id, first_name: user.first_name, last_name: user.last_name, full_name: user.full_name, email: user.email, is_admin: user.is_admin || false, is_instructor: user.is_instructor || false, tour_done: user.tour_done || false });
   } catch (err) {
     console.error("Login error:", err.message);
     res.status(500).json({ error: "Server error" });
@@ -1960,6 +1961,19 @@ app.get("/api/instructors", async (_req, res) => {
     res.json(result.rows);
   } catch (err) {
     console.error("Get instructors error:", err.message);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+// ── Mark onboarding tour as done ─────────────────────────────────────────────
+app.patch("/api/user/tour-done", async (req, res) => {
+  const { user_id } = req.body;
+  if (!user_id) return res.status(400).json({ error: "user_id required" });
+  try {
+    await pool.query("UPDATE users SET tour_done = TRUE WHERE id = $1", [user_id]);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("Tour done error:", err.message);
     res.status(500).json({ error: "Server error" });
   }
 });
