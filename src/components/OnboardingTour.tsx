@@ -202,6 +202,14 @@ export default function OnboardingTour({ onDone, onFinish }: Props) {
                   <ChevronLeft className="w-3.5 h-3.5" /> Back
                 </button>
               )}
+              {!isLast && (
+                <button
+                  onClick={onDone}
+                  className="px-3 py-1.5 text-xs text-gray-400 hover:text-gray-600 rounded-lg hover:bg-gray-100 transition-colors"
+                >
+                  Skip
+                </button>
+              )}
               <button
                 onClick={next}
                 className="flex items-center gap-1 px-4 py-1.5 bg-purple-600 hover:bg-purple-700 text-white text-xs font-semibold rounded-lg transition-colors"
