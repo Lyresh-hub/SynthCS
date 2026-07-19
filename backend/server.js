@@ -2001,7 +2001,6 @@ app.post("/instructor/flagged-prompts/:id/reject", async (req, res) => {
        WHERE id = $1 AND strike_count >= 3`,
       [student_id]
     );
-    const { instructor_id } = req.body;
     if (instructor_id) logActivity(instructor_id, "prompt_rejected", { student_id });
     res.json({ ok: true });
   } catch (err) {
