@@ -273,14 +273,14 @@ export default function UserAccounts() {
               <button
                 onClick={() => item.set(!item.value)}
                 className={cn(
-                  "relative w-10 h-5 rounded-full transition-colors flex-shrink-0 mt-0.5",
+                  "relative w-10 h-5 flex-shrink-0 rounded-full transition-colors duration-200 mt-0.5",
                   item.value ? "bg-purple-600" : "bg-gray-200"
                 )}
               >
-                <span className={cn(
-                  "absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform",
-                  item.value ? "translate-x-5" : "translate-x-0.5"
-                )} />
+                <span
+                  className="absolute top-[2px] w-4 h-4 rounded-full bg-white shadow transition-all duration-200"
+                  style={{ left: item.value ? "22px" : "2px" }}
+                />
               </button>
             </div>
           ))}

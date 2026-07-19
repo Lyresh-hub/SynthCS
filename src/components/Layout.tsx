@@ -64,6 +64,22 @@ export default function Layout({ children }: { children: React.ReactNode }) {
 
   // ── Onboarding tour — show only once per user, tracked server-side ──────────
   const [showTour, setShowTour] = useState(() => localStorage.getItem("tour_done") !== "true");
+
+  // On mount, sync tour_done from server in case localStorage is stale (e.g. after a reload without re-login)
+  useEffect(() => {
+    const userId = localStorage.getItem("user_id");
+    if (!userId || localStorage.getItem("tour_done") === "true") return;
+    fetch(`${NODE_API}/api/users/${userId}`)
+      .then((r) => r.json())
+      .then((u) => {
+        if (u?.tour_done) {
+          localStorage.setItem("tour_done", "true");
+          setShowTour(false);
+        }
+      })
+      .catch(() => {});
+  }, []);
+
   function startTour() { setShowTour(true); }
   function markTourDone() {
     localStorage.setItem("tour_done", "true");

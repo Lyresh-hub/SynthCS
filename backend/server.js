@@ -440,6 +440,8 @@ async function initDB() {
     await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS is_instructor    BOOLEAN      DEFAULT FALSE`).catch(() => {});
     await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS semester         VARCHAR(50)`).catch(() => {});
     await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS tour_done        BOOLEAN DEFAULT FALSE`).catch(() => {});
+    // Mark all pre-existing users as having seen the tour so it doesn't repeat for them
+    await pool.query(`UPDATE users SET tour_done = TRUE WHERE tour_done = FALSE AND created_at < NOW() - INTERVAL '5 minutes'`).catch(() => {});
     // Existing accounts before approval feature get auto-approved so they aren't locked out
     await pool.query(`UPDATE users SET approval_status = 'approved' WHERE approval_status IS NULL`).catch(() => {});
 
