@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { useLocation } from "wouter";
 import {
   Trash2, BadgeCheck, ShieldAlert, Search, RefreshCw, Ban, ShieldCheck,
-  Archive, RotateCcw, AlertTriangle, Clock, Mail, Users,
+  Archive, RotateCcw, AlertTriangle, Clock, Mail, Users, GraduationCap, UserCheck, Zap,
 } from "lucide-react";
 import { NODE_API } from "../lib/config";
 
@@ -14,6 +14,9 @@ interface AdminUser {
   email_verified: boolean;
   is_admin: boolean;
   is_instructor: boolean;
+  course: string | null;
+  instructor: string | null;
+  approval_status: string | null;
   created_at: string;
   schema_count: number;
   strike_count: number;
@@ -194,7 +197,7 @@ export default function AdminUsers() {
   const adminId     = localStorage.getItem("user_id") ?? "";
   const isAdminUser = localStorage.getItem("is_admin") === "true";
 
-  const [tab, setTab] = useState<"users" | "archive">("users");
+  const [tab, setTab] = useState<"all" | "instructors" | "students" | "archive">("all");
 
   const [users,    setUsers]    = useState<AdminUser[]>([]);
   const [archived, setArchived] = useState<ArchivedUser[]>([]);
@@ -250,6 +253,11 @@ export default function AdminUsers() {
     setUsers((p) => p.map((u) => u.id === user.id ? { ...u, is_banned: false, strike_count: 0, ban_reason: null } : u));
   }
 
+  async function handleRemoveStrikes(user: AdminUser) {
+    await fetch(`${NODE_API}/api/admin/users/${user.id}/remove-strikes?admin_id=${adminId}`, { method: "PATCH" });
+    setUsers((p) => p.map((u) => u.id === user.id ? { ...u, strike_count: 0, is_banned: false, ban_reason: null } : u));
+  }
+
   async function handleScheduleDeletion(user: AdminUser, reason: string, graceDays: number) {
     setScheduleTarget(null);
     const res = await fetch(`${NODE_API}/api/admin/users/${user.id}/schedule-deletion?admin_id=${adminId}`, {
@@ -283,13 +291,20 @@ export default function AdminUsers() {
     setArchived((p) => p.filter((a) => a.user_id !== archiveEntry.user_id));
   }
 
-  const filtered = users.filter((u) =>
+  const matchesSearch = (u: AdminUser) =>
     u.full_name.toLowerCase().includes(search.toLowerCase()) ||
-    (u.email ?? "").toLowerCase().includes(search.toLowerCase())
-  );
+    (u.email ?? "").toLowerCase().includes(search.toLowerCase());
 
-  const activeUsers  = filtered.filter((u) => !u.pending_deletion);
-  const pendingUsers = filtered.filter((u) => u.pending_deletion);
+  const filtered = users.filter(matchesSearch);
+  const filteredInstructors = users.filter((u) => u.is_instructor && matchesSearch(u));
+  const filteredStudents    = users.filter((u) => !u.is_instructor && !u.is_admin && matchesSearch(u));
+
+  const displayedUsers = tab === "instructors" ? filteredInstructors
+    : tab === "students" ? filteredStudents
+    : filtered;
+
+  const activeUsers  = displayedUsers.filter((u) => !u.pending_deletion);
+  const pendingUsers = displayedUsers.filter((u) => u.pending_deletion);
 
   if (loading) return (
     <div className="space-y-5 animate-pulse">
@@ -336,20 +351,20 @@ export default function AdminUsers() {
       {/* Summary bar */}
       <div className="flex items-center flex-wrap gap-3">
         <div className="bg-white rounded-xl border border-gray-100 shadow-sm px-4 py-3 flex items-center gap-3">
-          <span className="text-2xl font-bold text-gray-900">{users.length}</span>
-          <span className="text-xs text-gray-500">Total Users</span>
+          <Users className="w-5 h-5 text-gray-400" />
+          <div><div className="text-2xl font-bold text-gray-900">{users.length}</div><div className="text-xs text-gray-500">Total Users</div></div>
         </div>
         <div className="bg-white rounded-xl border border-gray-100 shadow-sm px-4 py-3 flex items-center gap-3">
-          <span className="text-2xl font-bold text-green-600">{users.filter(u => u.email_verified).length}</span>
-          <span className="text-xs text-gray-500">Verified</span>
+          <GraduationCap className="w-5 h-5 text-purple-400" />
+          <div><div className="text-2xl font-bold text-purple-600">{users.filter(u => u.is_instructor).length}</div><div className="text-xs text-gray-500">Instructors</div></div>
         </div>
         <div className="bg-white rounded-xl border border-gray-100 shadow-sm px-4 py-3 flex items-center gap-3">
-          <span className="text-2xl font-bold text-amber-500">{users.filter(u => !u.email_verified).length}</span>
-          <span className="text-xs text-gray-500">Unverified</span>
+          <UserCheck className="w-5 h-5 text-blue-400" />
+          <div><div className="text-2xl font-bold text-blue-600">{users.filter(u => !u.is_instructor && !u.is_admin).length}</div><div className="text-xs text-gray-500">Students</div></div>
         </div>
         <div className="bg-white rounded-xl border border-gray-100 shadow-sm px-4 py-3 flex items-center gap-3">
-          <span className="text-2xl font-bold text-purple-600">{users.filter(u => u.is_admin).length}</span>
-          <span className="text-xs text-gray-500">Admins</span>
+          <Zap className="w-5 h-5 text-amber-400" />
+          <div><div className="text-2xl font-bold text-amber-600">{users.filter(u => u.is_admin).length}</div><div className="text-xs text-gray-500">Admins</div></div>
         </div>
         {archived.length > 0 && (
           <div className="bg-white rounded-xl border border-red-100 shadow-sm px-4 py-3 flex items-center gap-3">
@@ -361,34 +376,31 @@ export default function AdminUsers() {
 
       {/* Tabs */}
       <div className="flex items-center gap-1 bg-gray-100 rounded-xl p-1 w-fit">
-        <button
-          onClick={() => setTab("users")}
-          className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-            tab === "users" ? "bg-white shadow-sm text-gray-800" : "text-gray-500 hover:text-gray-700"
-          }`}
-        >
-          <Users className="w-4 h-4" /> All Users
-        </button>
-        <button
-          onClick={() => setTab("archive")}
-          className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-            tab === "archive" ? "bg-white shadow-sm text-gray-800" : "text-gray-500 hover:text-gray-700"
-          }`}
-        >
-          <Archive className="w-4 h-4" /> Archive
-          {archived.length > 0 && (
-            <span className="ml-0.5 text-[10px] font-bold bg-red-500 text-white rounded-full px-1.5 py-0.5 leading-none">
-              {archived.length}
-            </span>
-          )}
-        </button>
+        {(["all", "instructors", "students", "archive"] as const).map((t) => (
+          <button key={t} onClick={() => setTab(t)}
+            className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium transition-colors capitalize ${
+              tab === t ? "bg-white shadow-sm text-gray-800" : "text-gray-500 hover:text-gray-700"
+            }`}
+          >
+            {t === "all" && <Users className="w-4 h-4" />}
+            {t === "instructors" && <GraduationCap className="w-4 h-4" />}
+            {t === "students" && <UserCheck className="w-4 h-4" />}
+            {t === "archive" && <Archive className="w-4 h-4" />}
+            {t === "all" ? "All Users" : t.charAt(0).toUpperCase() + t.slice(1)}
+            {t === "archive" && archived.length > 0 && (
+              <span className="ml-0.5 text-[10px] font-bold bg-red-500 text-white rounded-full px-1.5 py-0.5 leading-none">{archived.length}</span>
+            )}
+          </button>
+        ))}
       </div>
 
-      {/* ── All Users tab ── */}
-      {tab === "users" && (
+      {/* ── Users tabs (All / Instructors / Students) ── */}
+      {(tab === "all" || tab === "instructors" || tab === "students") && (
         <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
           <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
-            <h2 className="text-sm font-semibold text-gray-800">All Users</h2>
+            <h2 className="text-sm font-semibold text-gray-800">
+              {tab === "instructors" ? "Instructors" : tab === "students" ? "Students" : "All Users"}
+            </h2>
             <div className="flex items-center gap-2">
               <div className="relative">
                 <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
@@ -415,7 +427,7 @@ export default function AdminUsers() {
                 </tr>
               </thead>
               <tbody>
-                {filtered.length === 0 && (
+                {activeUsers.length === 0 && pendingUsers.length === 0 && (
                   <tr><td colSpan={8} className="text-center text-gray-400 py-12 text-sm">No users found</td></tr>
                 )}
                 {/* Pending-deletion users shown first with a tinted row */}
@@ -500,17 +512,27 @@ export default function AdminUsers() {
                     <td className="px-5 py-3.5">
                       {user.is_admin
                         ? <span className="text-xs font-semibold text-purple-700 bg-purple-50 px-2.5 py-1 rounded-full">Admin</span>
-                        : <span className="text-xs text-gray-400 bg-gray-100 px-2.5 py-1 rounded-full">User</span>}
+                        : user.is_instructor
+                        ? <div><span className="text-xs font-semibold text-indigo-700 bg-indigo-50 px-2.5 py-1 rounded-full">Instructor</span></div>
+                        : <div>
+                            <span className="text-xs text-blue-700 bg-blue-50 px-2.5 py-1 rounded-full">Student</span>
+                            {user.course && <div className="text-[10px] text-gray-400 mt-0.5 truncate max-w-[110px]">{user.course}</div>}
+                            {user.instructor && <div className="text-[10px] text-gray-400 truncate max-w-[110px]">under {user.instructor}</div>}
+                          </div>}
                     </td>
                     <td className="px-5 py-3.5">
                       {user.strike_count > 0 ? (
-                        <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
-                          user.strike_count >= 3 ? "bg-red-100 text-red-700" :
-                          user.strike_count === 2 ? "bg-amber-100 text-amber-700" :
-                          "bg-yellow-50 text-yellow-700"
-                        }`}>
-                          {user.strike_count}/3
-                        </span>
+                        <div className="flex items-center gap-1.5">
+                          <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
+                            user.strike_count >= 3 ? "bg-red-100 text-red-700" :
+                            user.strike_count === 2 ? "bg-amber-100 text-amber-700" :
+                            "bg-yellow-50 text-yellow-700"
+                          }`}>{user.strike_count}/3</span>
+                          <button onClick={() => handleRemoveStrikes(user)}
+                            className="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-500 hover:bg-gray-200 transition-colors font-medium whitespace-nowrap">
+                            Clear
+                          </button>
+                        </div>
                       ) : (
                         <span className="text-xs text-gray-300">—</span>
                       )}

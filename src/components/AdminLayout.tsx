@@ -31,10 +31,10 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     setLocation("/login");
   }
 
-  const pageTitle = isOverview ? "Overview" : isClasses ? "Classes" : "User Management";
+  const pageTitle = isOverview ? "Overview" : isClasses ? "Courses" : "User Management";
   const pageDesc  = isOverview ? "Platform analytics and statistics"
-    : isClasses   ? "Class overview, instructor activity, and semester management"
-    : "Manage user accounts and permissions";
+    : isClasses   ? "Manage courses, invitation links, and instructor activity"
+    : "Manage user accounts, roles, and strikes";
 
   return (
     <div className="flex h-screen overflow-hidden bg-gray-50">

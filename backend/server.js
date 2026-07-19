@@ -1065,19 +1065,23 @@ app.delete("/api/schemas/:id", async (req, res) => {
 
 app.get("/api/admin/stats", requireAdmin, async (req, res) => {
   try {
-    const [users, verified, schemas, datasets, rows] = await Promise.all([
+    const [users, verified, schemas, datasets, rows, instructors, students] = await Promise.all([
       pool.query("SELECT COUNT(*) FROM users"),
       pool.query("SELECT COUNT(*) FROM users WHERE email_verified = TRUE"),
       pool.query("SELECT COUNT(*) FROM schemas"),
       pool.query("SELECT COUNT(*) FROM datasets"),
       pool.query("SELECT COALESCE(SUM(row_count), 0) AS total FROM datasets"),
+      pool.query("SELECT COUNT(*) FROM users WHERE is_instructor = TRUE"),
+      pool.query("SELECT COUNT(*) FROM users WHERE is_instructor = FALSE AND is_admin = FALSE"),
     ]);
     res.json({
-      total_users:    parseInt(users.rows[0].count),
-      verified_users: parseInt(verified.rows[0].count),
-      total_schemas:  parseInt(schemas.rows[0].count),
-      total_datasets: parseInt(datasets.rows[0].count),
-      total_rows:     parseInt(rows.rows[0].total),
+      total_users:      parseInt(users.rows[0].count),
+      verified_users:   parseInt(verified.rows[0].count),
+      total_schemas:    parseInt(schemas.rows[0].count),
+      total_datasets:   parseInt(datasets.rows[0].count),
+      total_rows:       parseInt(rows.rows[0].total),
+      instructor_count: parseInt(instructors.rows[0].count),
+      student_count:    parseInt(students.rows[0].count),
     });
   } catch (err) {
     console.error("Admin stats error:", err.message);
@@ -1156,7 +1160,9 @@ app.get("/api/admin/users", requireAdmin, async (req, res) => {
   try {
     const result = await pool.query(`
       SELECT u.id, u.first_name, u.last_name, COALESCE(u.first_name || ' ' || u.last_name, u.full_name) AS full_name,
-             u.email, u.username, u.email_verified, u.is_admin, u.created_at,
+             u.email, u.username, u.email_verified, u.is_admin,
+             COALESCE(u.is_instructor, FALSE) AS is_instructor,
+             u.course, u.instructor, u.approval_status, u.created_at,
              COALESCE(u.strike_count, 0) AS strike_count, COALESCE(u.is_banned, FALSE) AS is_banned, u.ban_reason,
              COALESCE(u.pending_deletion, FALSE) AS pending_deletion,
              u.deletion_scheduled_at, u.deletion_reason,
@@ -1331,6 +1337,76 @@ app.patch("/api/admin/users/:id/unban", requireAdmin, async (req, res) => {
     res.json({ success: true });
   } catch (err) {
     console.error("Admin unban user error:", err.message);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+// ── Admin: remove strikes ─────────────────────────────────────────────────────
+app.patch("/api/admin/users/:id/remove-strikes", requireAdmin, async (req, res) => {
+  try {
+    await pool.query(
+      "UPDATE users SET strike_count = 0, is_banned = FALSE, ban_reason = NULL WHERE id = $1",
+      [req.params.id]
+    );
+    res.json({ success: true });
+  } catch (err) {
+    console.error("Remove strikes error:", err.message);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+// ── Admin: courses (class_invitations) ───────────────────────────────────────
+app.get("/api/admin/courses", requireAdmin, async (req, res) => {
+  try {
+    const invites = await pool.query(`
+      SELECT ci.*, u.full_name AS instructor_name, u.email AS instructor_email
+      FROM class_invitations ci
+      JOIN users u ON u.id = ci.instructor_id
+      ORDER BY ci.created_at DESC
+    `);
+    // Attach enrolled students to each course
+    const rows = await Promise.all(invites.rows.map(async (inv) => {
+      const students = await pool.query(
+        `SELECT id, COALESCE(first_name || ' ' || last_name, full_name) AS full_name,
+                email, approval_status, created_at
+         FROM users
+         WHERE course = $1 AND instructor = $2 AND is_instructor = FALSE AND is_admin = FALSE
+         ORDER BY created_at DESC`,
+        [inv.course, inv.instructor_name]
+      );
+      return { ...inv, students: students.rows };
+    }));
+    res.json(rows);
+  } catch (err) {
+    console.error("Admin courses error:", err.message);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+app.post("/api/admin/courses", requireAdmin, async (req, res) => {
+  const { instructor_id, course } = req.body;
+  if (!instructor_id || !course?.trim()) return res.status(400).json({ error: "instructor_id and course required" });
+  try {
+    const token = crypto.randomBytes(24).toString("hex");
+    const result = await pool.query(
+      `INSERT INTO class_invitations (instructor_id, course, token)
+       VALUES ($1, $2, $3)
+       RETURNING *, (SELECT COALESCE(first_name || ' ' || last_name, full_name) FROM users WHERE id = $1) AS instructor_name`,
+      [instructor_id, course.trim(), token]
+    );
+    res.status(201).json({ ...result.rows[0], students: [] });
+  } catch (err) {
+    console.error("Admin create course error:", err.message);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+app.delete("/api/admin/courses/:id", requireAdmin, async (req, res) => {
+  try {
+    await pool.query("DELETE FROM class_invitations WHERE id = $1", [req.params.id]);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("Admin delete course error:", err.message);
     res.status(500).json({ error: "Server error" });
   }
 });
