@@ -326,6 +326,46 @@ async function sendPromptApprovedEmail(to, studentName, promptText, instructorNa
   });
 }
 
+async function sendPromptRejectedEmail(to, studentName, promptText, instructorName, strikeCount) {
+  if (!EMAIL_READY) return;
+  const sender = process.env.GMAIL_SENDER || "christianboluntate5@gmail.com";
+  const rejectedBy = instructorName || "your instructor";
+  const strikeWarning = strikeCount >= 3
+    ? `<div style="background:#fee2e2;border:1px solid #fca5a5;border-radius:8px;padding:12px;margin:12px 0;font-size:13px;color:#991b1b">
+        Your account has been <strong>suspended</strong> due to repeated violations.
+       </div>`
+    : `<p style="color:#6b7280;font-size:13px;margin-top:12px">
+        This is strike <strong>${strikeCount}</strong> of 3. Reaching 3 strikes will result in account suspension.
+       </p>`;
+  const htmlBody = `
+    <div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:32px 24px">
+      <h2 style="color:#dc2626;margin-bottom:8px">Your prompt has been rejected</h2>
+      <p style="color:#374151;font-size:15px;line-height:1.6">
+        Hi <strong>${studentName}</strong>, <strong>${rejectedBy}</strong> has reviewed and rejected your flagged prompt.
+        Please revise your request to follow the academic use guidelines.
+      </p>
+      <div style="background:#fef2f2;border:1px solid #fca5a5;border-radius:8px;padding:16px;margin:16px 0;font-size:14px;color:#7f1d1d">
+        ${promptText}
+      </div>
+      ${strikeWarning}
+      <p style="color:#9ca3af;font-size:12px">If you believe this is an error, please contact your instructor directly.</p>
+    </div>`;
+  const subjectText = `[SynthCS] Your prompt has been rejected by ${rejectedBy}`;
+  const subjectEncoded = `=?UTF-8?B?${Buffer.from(subjectText).toString("base64")}?=`;
+  const rawEmail = [
+    `From: SynthCS <${sender}>`, `To: ${to}`,
+    `Subject: ${subjectEncoded}`,
+    `MIME-Version: 1.0`, `Content-Type: text/html; charset=UTF-8`, ``, htmlBody,
+  ].join("\r\n");
+  const encoded = Buffer.from(rawEmail).toString("base64").replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,"");
+  const accessToken = await getGmailAccessToken();
+  await fetch("https://gmail.googleapis.com/gmail/v1/users/me/messages/send", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ raw: encoded }),
+  });
+}
+
 async function logActivity(userId, actionType, details = {}) {
   try {
     await pool.query(
@@ -1986,12 +2026,13 @@ app.post("/instructor/flagged-prompts/:id/reject", async (req, res) => {
   try {
     const result = await pool.query(
       `UPDATE flagged_prompts SET status = 'rejected', reviewed_at = NOW(), reviewed_by = $1
-       WHERE id = $2 RETURNING student_id`,
+       WHERE id = $2 RETURNING student_id, prompt_text`,
       [instructor_id, req.params.id]
     );
     if (!result.rows.length) return res.status(404).json({ error: "Not found" });
-    // Apply a strike to the student
-    const { student_id } = result.rows[0];
+    const { student_id, prompt_text } = result.rows[0];
+
+    // Apply a strike and check for ban
     await pool.query(
       "UPDATE users SET strike_count = COALESCE(strike_count, 0) + 1 WHERE id = $1",
       [student_id]
@@ -2001,7 +2042,20 @@ app.post("/instructor/flagged-prompts/:id/reject", async (req, res) => {
        WHERE id = $1 AND strike_count >= 3`,
       [student_id]
     );
-    if (instructor_id) logActivity(instructor_id, "prompt_rejected", { student_id });
+
+    // Fetch student + instructor info to send rejection email
+    const [studentRes, instructorRes] = await Promise.all([
+      pool.query("SELECT email, full_name, strike_count FROM users WHERE id = $1", [student_id]),
+      instructor_id ? pool.query("SELECT full_name FROM users WHERE id = $1", [instructor_id]) : Promise.resolve({ rows: [] }),
+    ]);
+    const student = studentRes.rows[0];
+    const instructorName = instructorRes.rows[0]?.full_name ?? null;
+    if (student && EMAIL_READY) {
+      sendPromptRejectedEmail(student.email, student.full_name, prompt_text, instructorName, student.strike_count)
+        .catch((e) => console.error("Prompt rejected email failed:", e.message));
+    }
+
+    if (instructor_id) logActivity(instructor_id, "prompt_rejected", { student_name: student?.full_name, prompt_text });
     res.json({ ok: true });
   } catch (err) {
     console.error("Reject prompt error:", err.message);
