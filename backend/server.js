@@ -293,14 +293,15 @@ async function sendFlaggedPromptEmail(to, instructorName, studentName, promptTex
   });
 }
 
-async function sendPromptApprovedEmail(to, studentName, promptText) {
+async function sendPromptApprovedEmail(to, studentName, promptText, instructorName) {
   if (!EMAIL_READY) return;
   const sender = process.env.GMAIL_SENDER || "christianboluntate5@gmail.com";
+  const approvedBy = instructorName || "your instructor";
   const htmlBody = `
     <div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:32px 24px">
       <h2 style="color:#059669;margin-bottom:8px">Your prompt has been approved!</h2>
       <p style="color:#374151;font-size:15px;line-height:1.6">
-        Hi <strong>${studentName}</strong>, your instructor has approved your flagged prompt.
+        Hi <strong>${studentName}</strong>, <strong>${approvedBy}</strong> has approved your flagged prompt.
         You can now resubmit it in SynthCS to generate your dataset.
       </p>
       <div style="background:#d1fae5;border:1px solid #a7f3d0;border-radius:8px;padding:16px;margin:16px 0;font-size:14px;color:#065f46">
@@ -308,9 +309,12 @@ async function sendPromptApprovedEmail(to, studentName, promptText) {
       </div>
       <p style="color:#9ca3af;font-size:12px">Sign in and paste the same prompt to proceed.</p>
     </div>`;
+  // Encode subject using RFC 2047 to safely handle any non-ASCII characters
+  const subjectText = `[SynthCS] Your prompt has been approved by ${approvedBy}`;
+  const subjectEncoded = `=?UTF-8?B?${Buffer.from(subjectText).toString("base64")}?=`;
   const rawEmail = [
     `From: SynthCS <${sender}>`, `To: ${to}`,
-    `Subject: [SynthCS] Your prompt has been approved — you can now resubmit`,
+    `Subject: ${subjectEncoded}`,
     `MIME-Version: 1.0`, `Content-Type: text/html; charset=UTF-8`, ``, htmlBody,
   ].join("\r\n");
   const encoded = Buffer.from(rawEmail).toString("base64").replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,"");
@@ -1960,9 +1964,13 @@ app.post("/instructor/flagged-prompts/:id/approve", async (req, res) => {
     );
     if (!result.rows.length) return res.status(404).json({ error: "Not found" });
     const { student_id, prompt_text } = result.rows[0];
-    const student = await pool.query("SELECT email, full_name FROM users WHERE id = $1", [student_id]);
+    const [student, instructor] = await Promise.all([
+      pool.query("SELECT email, full_name FROM users WHERE id = $1", [student_id]),
+      instructor_id ? pool.query("SELECT full_name FROM users WHERE id = $1", [instructor_id]) : Promise.resolve({ rows: [] }),
+    ]);
+    const instructorName = instructor.rows[0]?.full_name ?? null;
     if (student.rows.length && EMAIL_READY) {
-      sendPromptApprovedEmail(student.rows[0].email, student.rows[0].full_name, prompt_text)
+      sendPromptApprovedEmail(student.rows[0].email, student.rows[0].full_name, prompt_text, instructorName)
         .catch((e) => console.error("Prompt approved email failed:", e.message));
     }
     if (instructor_id) logActivity(instructor_id, "prompt_approved", { student_name: student.rows[0]?.full_name, prompt_text });
