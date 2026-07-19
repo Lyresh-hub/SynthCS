@@ -846,6 +846,24 @@ export default function SchemaBuilder() {
     setLlmError("");
     setStrikeWarning(null);
     setPendingReview(false);
+
+    // Safety check before doing anything — block search and generation if flagged
+    const userId = localStorage.getItem("user_id");
+    try {
+      const safetyRes = await fetch(`${NODE_API}/api/llm/check-prompt`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt: llmPrompt.trim(), user_id: userId }),
+      });
+      if (!safetyRes.ok) {
+        const data = await safetyRes.json();
+        if (data.error === "pending_review") { setPendingReview(true); return; }
+        if (data.error === "inappropriate_prompt") { setStrikeWarning({ strikes: data.strikes ?? 1, banned: data.banned ?? false }); return; }
+      }
+    } catch {
+      // If safety check fails, allow to proceed
+    }
+
     setSortBy("downloads");
     setSizeFilter("any");
     setPhase("smart_searching");
