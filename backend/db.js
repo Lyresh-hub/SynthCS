@@ -8,10 +8,19 @@ require("dotenv").config({ path: path.join(__dirname, ".env") });
 // Dito namin ginagawa yung koneksyon sa database.
 // Kung may DATABASE_URL (gaya sa Railway), yun ang gamitin kasama SSL para secure.
 // Kung wala, gagamit tayo ng hiwalay na credentials mula sa .env (para sa localhost).
+const POOL_CONFIG = {
+  max: 10,                        // max connections in pool
+  idleTimeoutMillis: 30_000,      // close idle connections after 30s (Railway drops them at ~5min)
+  connectionTimeoutMillis: 5_000, // fail fast if DB is unreachable
+  keepAlive: true,                // send TCP keepalives to prevent silent drops
+  keepAliveInitialDelayMillis: 10_000,
+};
+
 const pool = process.env.DATABASE_URL
   ? new Pool({
       connectionString: process.env.DATABASE_URL,
-      ssl: { rejectUnauthorized: false }, // kailangan ito para hindi mag-error sa Railway
+      ssl: { rejectUnauthorized: false },
+      ...POOL_CONFIG,
     })
   : new Pool({
       user:     process.env.DB_USER,
@@ -19,7 +28,13 @@ const pool = process.env.DATABASE_URL
       database: process.env.DB_NAME,
       password: process.env.DB_PASSWORD,
       port:     process.env.DB_PORT,
+      ...POOL_CONFIG,
     });
+
+// Log pool errors so disconnects are visible in Railway logs instead of silently failing
+pool.on("error", (err) => {
+  console.error("PostgreSQL pool error:", err.message);
+});
 
 // I-export natin ang pool para magamit ng server.js sa pag-query ng database
 module.exports = pool;
