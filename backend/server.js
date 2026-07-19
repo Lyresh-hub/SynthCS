@@ -693,13 +693,21 @@ app.post("/instructor/signup", async (req, res) => {
 
     const full_name = `${first_name} ${last_name}`.trim();
     const hashed = await bcrypt.hash(password, 10);
+    const token  = crypto.randomUUID();
 
-    // Instructors skip email verification — account is immediately active
     await pool.query(
-      `INSERT INTO users (first_name, last_name, full_name, email, password, email_verified, is_instructor, approval_status)
-       VALUES ($1, $2, $3, $4, $5, TRUE, TRUE, 'approved')`,
-      [first_name, last_name, full_name, email, hashed]
+      `INSERT INTO users (first_name, last_name, full_name, email, password, email_verified, verification_token, verification_token_expires, is_instructor, approval_status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, TRUE, 'approved')`,
+      [first_name, last_name, full_name, email, hashed, !EMAIL_READY, EMAIL_READY ? token : null, EMAIL_READY ? new Date(Date.now() + 24 * 60 * 60 * 1000) : null]
     );
+
+    if (EMAIL_READY) {
+      res.status(201).json({ pending_verification: true, email });
+      sendVerificationEmail(email, token).catch((e) =>
+        console.error("Instructor email send failed:", e.message)
+      );
+      return;
+    }
 
     res.status(201).json({ pending_verification: false, email });
   } catch (err) {
