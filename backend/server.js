@@ -1337,19 +1337,12 @@ function isInappropriatePrompt(prompt) {
   return INAPPROPRIATE_KEYWORDS.some((kw) => lower.includes(kw));
 }
 
-app.post("/api/llm/generate-schema", async (req, res) => {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) return res.status(503).json({ error: "ANTHROPIC_API_KEY not configured." });
-
-  const { prompt, user_id } = req.body;
-  if (!prompt?.trim()) return res.status(400).json({ error: "prompt is required" });
-
-  // ── Moderation: keyword check + Claude AI safety check ───────────────────────
+// ── Shared safety-check helper (used by both generate-schema and check-prompt) ──
+async function runSafetyCheck(prompt, user_id, apiKey) {
   const keywordFlagged = isInappropriatePrompt(prompt);
   let aiFlagReason = null;
 
   if (!keywordFlagged) {
-    // Second-pass: ask Claude to classify the prompt
     try {
       const safetyClient = new Anthropic({ apiKey });
       const safetyMsg = await safetyClient.messages.create({
@@ -1375,65 +1368,91 @@ Prompt: ${prompt.trim()}`
       if (classification.safe === false) aiFlagReason = classification.reason || "Flagged by AI safety check";
     } catch (e) {
       console.error("AI safety check error:", e.message);
-      // Don't block if safety check fails — allow generation to proceed
     }
   }
 
   const shouldFlag = keywordFlagged || !!aiFlagReason;
+  if (!shouldFlag) return { safe: true };
 
-  if (shouldFlag && user_id) {
+  if (user_id) {
     try {
-      // Check if this exact prompt was already approved by instructor
       const approved = await pool.query(
         "SELECT id FROM flagged_prompts WHERE student_id = $1 AND prompt_text = $2 AND status = 'approved'",
         [user_id, prompt.trim()]
       );
-      if (approved.rows.length > 0) {
-        // Whitelisted — instructor approved it, allow generation to proceed
-      } else {
-        // Fetch student's instructor to route the review
-        const student = await pool.query(
-          "SELECT full_name, email, instructor FROM users WHERE id = $1",
-          [user_id]
+      if (approved.rows.length > 0) return { safe: true }; // whitelisted
+
+      const student = await pool.query(
+        "SELECT full_name, email, instructor FROM users WHERE id = $1",
+        [user_id]
+      );
+      const instructorName = student.rows[0]?.instructor;
+      let instructorId = null;
+      let instructorEmail = null;
+      if (instructorName) {
+        const ins = await pool.query(
+          "SELECT id, email FROM users WHERE is_instructor = TRUE AND full_name = $1 LIMIT 1",
+          [instructorName]
         );
-        const instructorName = student.rows[0]?.instructor;
-        let instructorId = null;
-        let instructorEmail = null;
-        if (instructorName) {
-          const ins = await pool.query(
-            "SELECT id, email FROM users WHERE is_instructor = TRUE AND full_name = $1 LIMIT 1",
-            [instructorName]
-          );
-          if (ins.rows.length > 0) {
-            instructorId = ins.rows[0].id;
-            instructorEmail = ins.rows[0].email;
-          }
-        }
-
-        const flagReason = aiFlagReason || "Matched inappropriate keyword list";
-        await pool.query(
-          "INSERT INTO flagged_prompts (student_id, instructor_id, prompt_text, flag_reason) VALUES ($1, $2, $3, $4)",
-          [user_id, instructorId, prompt.trim(), flagReason]
-        );
-        logActivity(user_id, "prompt_flagged", { prompt_text: prompt.trim(), flag_reason: flagReason });
-
-        if (instructorEmail) {
-          sendFlaggedPromptEmail(instructorEmail, instructorName, student.rows[0].full_name, prompt.trim())
-            .catch((e) => console.error("Flagged prompt email failed:", e.message));
-        }
-
-        return res.status(403).json({
-          error: "pending_review",
-          message: "Your prompt has been flagged and sent to your instructor for review. You will receive an email once it is approved.",
-        });
+        if (ins.rows.length > 0) { instructorId = ins.rows[0].id; instructorEmail = ins.rows[0].email; }
       }
+
+      const flagReason = aiFlagReason || "Matched inappropriate keyword list";
+      await pool.query(
+        "INSERT INTO flagged_prompts (student_id, instructor_id, prompt_text, flag_reason) VALUES ($1, $2, $3, $4)",
+        [user_id, instructorId, prompt.trim(), flagReason]
+      );
+      logActivity(user_id, "prompt_flagged", { prompt_text: prompt.trim(), flag_reason: flagReason });
+
+      if (instructorEmail) {
+        sendFlaggedPromptEmail(instructorEmail, instructorName, student.rows[0].full_name, prompt.trim())
+          .catch((e) => console.error("Flagged prompt email failed:", e.message));
+      }
+
+      return {
+        safe: false,
+        error: "pending_review",
+        message: "Your search query has been flagged and sent to your instructor for review. You will receive an email once it is approved.",
+      };
     } catch (e) {
       console.error("Flagging error:", e.message);
+      return { safe: true }; // don't block on DB errors
     }
-  } else if (shouldFlag) {
+  }
+
+  return {
+    safe: false,
+    error: "inappropriate_prompt",
+    message: "Your query was flagged as inappropriate and cannot be processed.",
+  };
+}
+
+// ── Check prompt safety (called before dataset search) ───────────────────────
+app.post("/api/llm/check-prompt", async (req, res) => {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) return res.json({ safe: true }); // no key = no check, don't block
+
+  const { prompt, user_id } = req.body;
+  if (!prompt?.trim()) return res.json({ safe: true });
+
+  const result = await runSafetyCheck(prompt.trim(), user_id, apiKey);
+  if (result.safe) return res.json({ safe: true });
+  return res.status(403).json(result);
+});
+
+app.post("/api/llm/generate-schema", async (req, res) => {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) return res.status(503).json({ error: "ANTHROPIC_API_KEY not configured." });
+
+  const { prompt, user_id } = req.body;
+  if (!prompt?.trim()) return res.status(400).json({ error: "prompt is required" });
+
+  // ── Moderation: delegate to shared safety-check helper ──────────────────────
+  const safetyResult = await runSafetyCheck(prompt.trim(), user_id, apiKey);
+  if (!safetyResult.safe) {
     return res.status(403).json({
-      error: "inappropriate_prompt",
-      message: "Your prompt was flagged as inappropriate and cannot be processed.",
+      error: safetyResult.error,
+      message: safetyResult.message,
     });
   }
 

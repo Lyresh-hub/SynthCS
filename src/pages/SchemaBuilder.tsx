@@ -1156,6 +1156,25 @@ export default function SchemaBuilder() {
 
   const handleSearch = async () => {
     if (!searchQuery.trim()) return;
+
+    // Safety check before allowing dataset search
+    const userId = localStorage.getItem("user_id");
+    try {
+      const safetyRes = await fetch(`${NODE_API}/api/llm/check-prompt`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt: searchQuery.trim(), user_id: userId }),
+      });
+      if (!safetyRes.ok) {
+        const data = await safetyRes.json();
+        if (data.error === "pending_review") { setPendingReview(true); return; }
+        if (data.error === "inappropriate_prompt") { setStrikeWarning({ strikes: 1, banned: false }); return; }
+      }
+    } catch {
+      // If safety check itself fails, allow the search to proceed
+    }
+
+    setPendingReview(false);
     setExtSourceFilter("all");
     setSortBy("downloads");
     setSizeFilter("any");
