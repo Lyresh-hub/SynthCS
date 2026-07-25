@@ -1875,9 +1875,12 @@ export default function SchemaBuilder() {
             <div className="w-8 h-8 rounded-full bg-purple-600 flex items-center justify-center flex-shrink-0">
               <Sparkles className="w-4 h-4 text-white" />
             </div>
-            <div>
-              <p className="text-sm font-semibold text-gray-800">LLM Schema Generator</p>
-              <p className="text-xs text-gray-400">Describe your dataset — AI builds the schema with constraints</p>
+            <div className="flex-1">
+              <div className="flex items-center gap-2">
+                <p className="text-sm font-semibold text-gray-800">Describe Your Dataset</p>
+                <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-purple-100 text-purple-700 border border-purple-200">Option A — AI Path</span>
+              </div>
+              <p className="text-xs text-gray-400 mt-0.5">AI generates fresh data with clean column names, realistic values, and proper target columns (approved, is_fraud, etc.)</p>
             </div>
           </div>
           <div className="px-4 py-3 flex gap-2">
@@ -2207,8 +2210,11 @@ export default function SchemaBuilder() {
               <Upload className="w-4 h-4 text-white" />
             </div>
             <div className="flex-1">
-              <p className="text-sm font-semibold text-gray-800">Import Your Own Dataset</p>
-              <p className="text-xs text-gray-400">Upload a CSV file — system analyzes its columns and types automatically</p>
+              <div className="flex items-center gap-2">
+                <p className="text-sm font-semibold text-gray-800">Upload a Real Dataset</p>
+                <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-green-100 text-green-700 border border-green-200">Option B — CTGAN Path</span>
+              </div>
+              <p className="text-xs text-gray-400 mt-0.5">CTGAN learns from your CSV and generates a statistically similar dataset — column names and structure are inherited from the source</p>
             </div>
             <span className="text-xs text-green-700 font-medium border border-green-200 rounded-full px-3 py-1 bg-green-50 group-hover:bg-green-100 transition-colors">
               Choose CSV
@@ -2232,11 +2238,16 @@ export default function SchemaBuilder() {
         <div className="bg-white border border-gray-100 rounded-xl p-5 shadow-sm space-y-4">
 
           {/* Header */}
-          <div>
-            <p className="text-sm font-semibold text-gray-800">Search Dataset Sources</p>
-            <p className="text-xs text-gray-500 mt-0.5">
-              Searches Kaggle, Hugging Face, UCI, OpenML, Data.gov.ph &amp; PSA simultaneously
-            </p>
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <div className="flex items-center gap-2">
+                <p className="text-sm font-semibold text-gray-800">Search Dataset Sources</p>
+                <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-green-100 text-green-700 border border-green-200">Option B — CTGAN Path</span>
+              </div>
+              <p className="text-xs text-gray-500 mt-0.5">
+                Searches Kaggle, Hugging Face, UCI, OpenML, Data.gov.ph &amp; PSA simultaneously — generated data inherits the source dataset's column names
+              </p>
+            </div>
           </div>
 
           {/* Search bar */}
@@ -2671,6 +2682,11 @@ export default function SchemaBuilder() {
               </p>
             </div>
 
+            <div className="flex items-start gap-2 bg-purple-50 border border-purple-100 rounded-lg px-3 py-2 text-xs text-purple-800">
+              <span className="font-semibold flex-shrink-0">Option A path:</span>
+              <span>CTGAN trains on the 200-row AI template above (not a real dataset) and scales it up. Column names, value types, and the target column (approved/is_fraud) are exactly as described — clean and ready for downstream tools.</span>
+            </div>
+
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-medium text-gray-600">Final Row Count</span>
@@ -2881,6 +2897,29 @@ export default function SchemaBuilder() {
               ← Start Over
             </button>
           </div>
+
+          {/* Loan-demo compatibility indicator */}
+          {(() => {
+            const names = table.fields.map((f) => f.name.toLowerCase());
+            const hasApproved = names.some((n) => ["approved","is_approved","loan_approved","loan_status","default","target","label","outcome"].some((k) => n.includes(k)));
+            const hasFraud    = names.some((n) => ["is_fraud","fraud","fraudulent"].some((k) => n.includes(k)));
+            const hasCredit   = names.some((n) => ["credit_score","fico","credit_rating"].some((k) => n.includes(k)));
+            const hasIncome   = names.some((n) => n.includes("income") || n.includes("salary"));
+            const score       = [hasApproved, hasFraud || hasCredit || hasIncome].filter(Boolean).length;
+            if (score === 0) return null;
+            return (
+              <div className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium ${score === 2 ? "bg-green-50 border border-green-200 text-green-800" : "bg-amber-50 border border-amber-200 text-amber-800"}`}>
+                <span>{score === 2 ? "✓" : "⚠"}</span>
+                <span>
+                  {score === 2
+                    ? "Loan-demo compatible — this dataset has a target column and financial features. It will train and predict correctly when imported."
+                    : hasApproved
+                    ? "Has a target column (approved/loan_status) — add income or credit score fields for better predictions."
+                    : "Has financial features — add an 'approved' or 'loan_status' column so loan-demo can train a model."}
+                </span>
+              </div>
+            );
+          })()}
 
           {/* Field table */}
           <div className="bg-white border border-gray-100 rounded-xl overflow-hidden shadow-sm">
