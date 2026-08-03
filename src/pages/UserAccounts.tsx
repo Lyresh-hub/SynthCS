@@ -311,7 +311,7 @@ export default function UserAccounts() {
 
             <div>
               <p className="font-semibold text-gray-800 mb-1">1. Acceptance of Terms</p>
-              <p>By accessing or using SynthCS, you agree to be bound by these Terms and Conditions. If you do not agree, you may NOT use the platform.</p>
+              <p>By accessing or using SynthCS, you agree to be bound by these Terms and Conditions. If you do NOT agree, you may NOT use the platform.</p>
             </div>
 
             <div>
