@@ -472,17 +472,17 @@ function TermsOfServiceContent() {
 
       <section>
         <h3 className="font-semibold text-gray-800 mb-1">1. Acceptance of Terms</h3>
-        <p>By creating an account and using SynthCS, you agree to be bound by these Terms of Service. If you do NOT agree, do NOT use the platform.</p>
+        <p>By creating an account and using SynthCS, you agree to be bound by these Terms of Service. If you do <strong className="text-red-600">NOT</strong> agree, do <strong className="text-red-600">NOT</strong> use the platform.</p>
       </section>
 
       <section>
         <h3 className="font-semibold text-gray-800 mb-1">2. Eligibility</h3>
-        <p>SynthCS is exclusively available to students, faculty, and staff of Gordon College with a valid <strong>@gordoncollege.edu.ph</strong> email address. Accounts created with unauthorized emails will NOT be activated.</p>
+        <p>SynthCS is exclusively available to students, faculty, and staff of Gordon College with a valid <strong>@gordoncollege.edu.ph</strong> email address. Accounts created with unauthorized emails will <strong className="text-red-600">NOT</strong> be activated.</p>
       </section>
 
       <section>
         <h3 className="font-semibold text-gray-800 mb-1">3. Acceptable Use</h3>
-        <p>You may use SynthCS only for lawful, academic, and professional purposes. You agree <strong>NOT</strong> to:</p>
+        <p>You may use SynthCS only for lawful, academic, and professional purposes. You agree <strong className="text-red-600">NOT</strong> to:</p>
         <ul className="list-disc pl-5 mt-1 space-y-1">
           <li>Generate datasets intended to facilitate fraud, identity theft, or financial crime (e.g., fake credit card numbers, fake government IDs)</li>
           <li>Generate datasets containing sensitive personal information about real individuals</li>
@@ -511,12 +511,12 @@ function TermsOfServiceContent() {
 
       <section>
         <h3 className="font-semibold text-gray-800 mb-1">6. Intellectual Property</h3>
-        <p>All synthetic data you generate using SynthCS is yours to use for academic and professional purposes. SynthCS does NOT claim ownership of your generated datasets.</p>
+        <p>All synthetic data you generate using SynthCS is yours to use for academic and professional purposes. SynthCS does <strong className="text-red-600">NOT</strong> claim ownership of your generated datasets.</p>
       </section>
 
       <section>
         <h3 className="font-semibold text-gray-800 mb-1">7. Disclaimer</h3>
-        <p>SynthCS is provided as-is for academic use. We do NOT guarantee that generated data will be suitable for all purposes. We are NOT liable for any outcomes resulting from the use of generated datasets.</p>
+        <p>SynthCS is provided as-is for academic use. We do <strong className="text-red-600">NOT</strong> guarantee that generated data will be suitable for all purposes. We are <strong className="text-red-600">NOT</strong> liable for any outcomes resulting from the use of generated datasets.</p>
       </section>
 
       <section>
@@ -549,8 +549,8 @@ function PrivacyPolicyContent() {
       <section>
         <h3 className="font-semibold text-gray-800 mb-1">3. What We Do NOT Collect</h3>
         <ul className="list-disc pl-5 mt-1 space-y-1">
-          <li>We do NOT collect or store real personal data from third parties.</li>
-          <li>We do NOT sell or share your data with advertisers.</li>
+          <li>We do <strong className="text-red-600">NOT</strong> collect or store real personal data from third parties.</li>
+          <li>We do <strong className="text-red-600">NOT</strong> sell or share your data with advertisers.</li>
           <li>Generated datasets contain no real personal information — they are entirely synthetic.</li>
         </ul>
       </section>
