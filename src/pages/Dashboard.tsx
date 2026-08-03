@@ -32,7 +32,7 @@ const outputFormats = [
   { id: "csv",   label: "CSV",   icon: FileSpreadsheet },
   { id: "json",  label: "JSON",  icon: FileJson },
   { id: "sql",   label: "SQL",   icon: FileCode },
-  { id: "excel", label: "Excel", icon: FileSpreadsheet },
+  { id: "excel", label: "XLSX", icon: FileSpreadsheet },
 ];
 
 // Ginagawa nating mas readable ang date — hal. "2m ago", "3h ago", "May 2"

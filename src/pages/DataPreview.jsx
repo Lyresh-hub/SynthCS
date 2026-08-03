@@ -94,7 +94,7 @@ export default function DataPreview() {
     { id: "json",  label: "JSON" },
     { id: "jsonl", label: "JSONL" },
     { id: "sql",   label: "SQL" },
-    { id: "excel", label: "Excel" },
+    { id: "excel", label: "XLSX" },
   ];
 
   const handleExport = async () => {

@@ -2827,7 +2827,7 @@ export default function SchemaBuilder() {
               onClick={handleConfirmDownloadZip}
               className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-purple-600 text-white rounded-lg text-sm font-semibold hover:bg-purple-700 transition-colors shadow-sm">
               <Download className="w-4 h-4" />
-              Looks good — Download {tables.length} Tables as {downloadFormat === "xlsx" ? "Excel" : downloadFormat.toUpperCase()}
+              Looks good — Download {tables.length} Tables as {downloadFormat.toUpperCase()}
             </button>
           </div>
         </div>
