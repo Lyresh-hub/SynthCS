@@ -83,6 +83,21 @@ export default function Dashboard() {
     try { return JSON.parse(raw); } catch { return null; }
   });
 
+  // Class info — fetch instructor + course from user profile
+  const [classInfo, setClassInfo] = useState<{ instructor: string; course: string } | null>(null);
+  useEffect(() => {
+    if (!userId) return;
+    fetch(`${NODE_API}/api/users/${userId}`)
+      .then((r) => r.json())
+      .then((u) => {
+        if (u?.instructor) {
+          setClassInfo({ instructor: u.instructor, course: u.course ?? "" });
+          localStorage.setItem("instructor", u.instructor);
+        }
+      })
+      .catch(() => {});
+  }, [userId]);
+
   // Para sa Quick Generate section — yung rows slider, selected schema, at output format
   const [rows, setRows]                 = useState(1000);
   const [selectedSchemaId, setSelectedSchemaId] = useState<string>("");
@@ -207,6 +222,21 @@ export default function Dashboard() {
           <button onClick={() => setClassJoined(null)} className="text-green-500 hover:text-green-700 flex-shrink-0">
             <X className="w-4 h-4" />
           </button>
+        </div>
+      )}
+
+      {/* Your Class card — only shown when student has an instructor */}
+      {classInfo && (
+        <div className="flex items-center gap-4 bg-purple-50 border border-purple-100 rounded-xl px-5 py-3">
+          <div className="w-9 h-9 rounded-lg bg-purple-100 flex items-center justify-center flex-shrink-0">
+            <GraduationCap className="w-5 h-5 text-purple-600" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-xs text-purple-500 font-medium">Your Class</p>
+            <p className="text-sm font-semibold text-purple-900 truncate">
+              {classInfo.course || "Class"} &mdash; <span className="font-normal">{classInfo.instructor}</span>
+            </p>
+          </div>
         </div>
       )}
 
