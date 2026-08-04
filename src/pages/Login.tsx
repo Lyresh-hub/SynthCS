@@ -108,8 +108,11 @@ export default function Login() {
       if (json.instructor) localStorage.setItem("instructor", json.instructor);
       else localStorage.removeItem("instructor");
       sessionStorage.removeItem("schema_builder_draft");
+      const pendingInvite = sessionStorage.getItem("pending_invite_token");
       if (json.is_instructor) {
         setLocation("/instructor/dashboard");
+      } else if (pendingInvite) {
+        setLocation(`/accept-invitation?token=${pendingInvite}`);
       } else {
         setLocation("/dashboard");
       }

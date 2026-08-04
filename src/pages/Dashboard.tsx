@@ -3,7 +3,7 @@ import { useLocation } from "wouter";
 import {
   Database, TrendingUp, BookMarked, Download,
   Plus, Sparkles, ChevronDown, FileSpreadsheet,
-  FileJson, FileCode,
+  FileJson, FileCode, GraduationCap, X,
 } from "lucide-react";
 import { cn } from "../lib/utils";
 
@@ -74,6 +74,14 @@ export default function Dashboard() {
   const [schemas, setSchemas]   = useState<Schema[]>([]);
   const [datasets, setDatasets] = useState<Dataset[]>([]);
   const [loading, setLoading]   = useState(true);
+
+  // Class joined banner — shown after accepting an instructor invitation
+  const [classJoined, setClassJoined] = useState<{ instructor: string; course: string } | null>(() => {
+    const raw = sessionStorage.getItem("class_joined");
+    if (!raw) return null;
+    sessionStorage.removeItem("class_joined");
+    try { return JSON.parse(raw); } catch { return null; }
+  });
 
   // Para sa Quick Generate section — yung rows slider, selected schema, at output format
   const [rows, setRows]                 = useState(1000);
@@ -186,6 +194,22 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-5">
+      {/* Class joined banner — shown after accepting an instructor's invitation */}
+      {classJoined && (
+        <div className="flex items-center justify-between gap-3 bg-green-50 border border-green-200 rounded-xl px-4 py-3">
+          <div className="flex items-center gap-3">
+            <GraduationCap className="w-5 h-5 text-green-600 flex-shrink-0" />
+            <p className="text-sm text-green-800">
+              You've been added to <strong>{classJoined.instructor}</strong>'s class —{" "}
+              <span className="font-medium">{classJoined.course}</span>. Welcome!
+            </p>
+          </div>
+          <button onClick={() => setClassJoined(null)} className="text-green-500 hover:text-green-700 flex-shrink-0">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
       {/* Stats cards sa tuktok — nagpapakita ng overview ng activity ng user */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
         {statsCards.map((stat) => {

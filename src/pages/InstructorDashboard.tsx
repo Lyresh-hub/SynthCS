@@ -196,10 +196,9 @@ export default function InstructorDashboard() {
         body: JSON.stringify({ instructor_id: instructorId, email: addEmail.trim() }),
       });
       const data = await res.json();
-      if (!res.ok) { setAddError(data.error ?? "Failed to add student"); return; }
-      setStudents((p) => [...p, { ...data, approval_status: "approved" } as Student]);
+      if (!res.ok) { setAddError(data.error ?? "Failed to send invitation"); return; }
       setAddEmail(""); setAddOk(true);
-      setTimeout(() => setAddOk(false), 3000);
+      setTimeout(() => setAddOk(false), 5000);
     } catch { setAddError("Could not reach the server"); }
   };
 
@@ -426,7 +425,7 @@ export default function InstructorDashboard() {
                 </button>
               </div>
               {addError && <p className="mt-2 text-xs text-red-500">{addError}</p>}
-              {addOk    && <p className="mt-2 text-xs text-green-600 flex items-center gap-1"><Check className="w-3.5 h-3.5" /> Student added successfully.</p>}
+              {addOk    && <p className="mt-2 text-xs text-green-600 flex items-center gap-1"><Check className="w-3.5 h-3.5" /> Invitation sent — the student will receive an email with an "Accept Invitation" link.</p>}
             </div>
             <StudentTable rows={students} loading={loadingStudents} filter="all"
               actionId={actionId} onApprove={handleApprove} onReject={handleReject} onRemove={handleRemoveStudent} />

@@ -30,6 +30,7 @@ import AdminPanel from "./pages/AdminPanel";
 import AdminUsers from "./pages/AdminUsers";
 import AdminClasses from "./pages/AdminClasses";
 import ValidationReport from "./pages/ValidationReport";
+import AcceptInvitation from "./pages/AcceptInvitation";
 
 // Bago mag-start ang memory router, tignan muna natin kung may espesyal na params sa URL.
 // Halimbawa: kapag nag-click ang user ng verification link sa email, ang URL ay
@@ -42,6 +43,8 @@ function getInitialPath() {
   const params = new URLSearchParams(window.location.search);
   if (params.get("verified"))    return `/login?verified=1`;
   if (params.get("role") === "instructor") return `/instructor/register`;
+  if (window.location.pathname === "/accept-invitation" && params.get("token"))
+    return `/accept-invitation?token=${encodeURIComponent(params.get("token")!)}`;
   if (params.get("invite"))      return `/signup?invite=${encodeURIComponent(params.get("invite")!)}`;
   if (params.get("oauth_error")) return `/signup?oauth_error=${encodeURIComponent(params.get("oauth_error")!)}`;
   if (params.get("error")) {
@@ -113,6 +116,7 @@ export default function App() {
         <Route path="/instructor/dashboard" component={InstructorDashboard} />
         {/* Dito napupunta ang browser pagkatapos mag-login sa GitHub o Google */}
         <Route path="/auth/callback" component={AuthCallback} />
+        <Route path="/accept-invitation" component={AcceptInvitation} />
 
         {/* Admin routes — nakabalot sa AdminLayout para may madilim na design */}
         <Route path="/admin">

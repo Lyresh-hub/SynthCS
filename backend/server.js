@@ -154,6 +154,57 @@ async function sendPasswordResetEmail(to, code) {
   }
 }
 
+async function sendClassInvitationEmail(to, instructorName, course, token) {
+  const sender = process.env.GMAIL_SENDER || "christianboluntate5@gmail.com";
+  const link   = `${process.env.FRONTEND_URL || "https://synthcs.site"}/accept-invitation?token=${token}`;
+
+  const htmlBody = `
+    <div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:32px 24px">
+      <h2 style="color:#6d28d9;margin-bottom:8px">You've been invited to join a class</h2>
+      <p style="color:#374151;font-size:15px;line-height:1.6">
+        <strong>${instructorName}</strong> has invited you to join their
+        <strong>${course || "class"}</strong> on <strong>SynthCS</strong>.
+      </p>
+      <a href="${link}"
+         style="display:inline-block;margin:24px 0;padding:12px 28px;background:#7c3aed;color:#fff;
+                border-radius:8px;text-decoration:none;font-weight:600;font-size:14px">
+        Accept Invitation
+      </a>
+      <p style="color:#9ca3af;font-size:12px">
+        If you don't have a SynthCS account yet, you'll be asked to sign up first.<br>
+        If you didn't expect this invitation, you can safely ignore this email.
+      </p>
+    </div>`;
+
+  const rawEmail = [
+    `From: SynthCS <${sender}>`,
+    `To: ${to}`,
+    `Subject: ${instructorName} invited you to a SynthCS class`,
+    `MIME-Version: 1.0`,
+    `Content-Type: text/html; charset=UTF-8`,
+    ``,
+    htmlBody,
+  ].join("\r\n");
+
+  const encoded = Buffer.from(rawEmail)
+    .toString("base64")
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
+
+  const accessToken = await getGmailAccessToken();
+  const res = await fetch("https://gmail.googleapis.com/gmail/v1/users/me/messages/send", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ raw: encoded }),
+  });
+
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`Gmail API error ${res.status}: ${body}`);
+  }
+}
+
 async function sendDeletionWarningEmail(to, fullName, deletionDate, reason) {
   const sender = process.env.GMAIL_SENDER || "christianboluntate5@gmail.com";
   const dateStr = new Date(deletionDate).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
@@ -561,6 +612,19 @@ async function initDB() {
         course        VARCHAR(100) NOT NULL,
         token         VARCHAR(64) UNIQUE NOT NULL,
         active        BOOLEAN DEFAULT TRUE,
+        created_at    TIMESTAMPTZ DEFAULT NOW()
+      )
+    `).catch(() => {});
+
+    // Student invitations sent manually by instructors
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS student_invitations (
+        id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        instructor_id UUID NOT NULL,
+        student_email VARCHAR(255) NOT NULL,
+        course        VARCHAR(100),
+        token         VARCHAR(64) UNIQUE NOT NULL,
+        status        VARCHAR(20) DEFAULT 'pending',
         created_at    TIMESTAMPTZ DEFAULT NOW()
       )
     `).catch(() => {});
@@ -2287,16 +2351,83 @@ app.post("/instructor/students/add", async (req, res) => {
   const { instructor_id, email } = req.body;
   if (!instructor_id || !email) return res.status(400).json({ error: "instructor_id and email required" });
   try {
-    const ins = await pool.query("SELECT full_name FROM users WHERE id = $1 AND is_instructor = TRUE", [instructor_id]);
-    if (!ins.rows.length) return res.status(403).json({ error: "Instructor not found" });
-    const instructorName = ins.rows[0].full_name;
-    const student = await pool.query(
-      "UPDATE users SET instructor = $1, approval_status = 'approved' WHERE email = $2 AND is_instructor = FALSE RETURNING id, full_name, email, course",
-      [instructorName, email]
+    const ins = await pool.query(
+      "SELECT id, full_name, course FROM users WHERE id = $1 AND is_instructor = TRUE",
+      [instructor_id]
     );
-    if (!student.rows.length) return res.status(404).json({ error: "Student not found" });
-    res.json(student.rows[0]);
+    if (!ins.rows.length) return res.status(403).json({ error: "Instructor not found" });
+    const { full_name: instructorName, course } = ins.rows[0];
+
+    // Delete any previous pending invitation for the same instructor+email
+    await pool.query(
+      "DELETE FROM student_invitations WHERE instructor_id = $1 AND student_email = $2 AND status = 'pending'",
+      [instructor_id, email.toLowerCase()]
+    );
+
+    const token = crypto.randomBytes(32).toString("hex");
+    await pool.query(
+      "INSERT INTO student_invitations (instructor_id, student_email, course, token) VALUES ($1, $2, $3, $4)",
+      [instructor_id, email.toLowerCase(), course || "Data Science", token]
+    );
+
+    if (EMAIL_READY) {
+      await sendClassInvitationEmail(email, instructorName, course || "Data Science", token).catch((e) =>
+        console.error("Invitation email error:", e.message)
+      );
+    }
+
+    res.json({ invited: true, email });
   } catch (err) {
+    console.error("Add student error:", err.message);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+// Accept a student invitation
+app.get("/api/invitation/accept", async (req, res) => {
+  const { token } = req.query;
+  if (!token) return res.status(400).json({ error: "Token required" });
+  try {
+    const inv = await pool.query(
+      `SELECT si.*, u.full_name AS instructor_name
+       FROM student_invitations si
+       JOIN users u ON u.id = si.instructor_id
+       WHERE si.token = $1 AND si.status = 'pending'`,
+      [token]
+    );
+    if (!inv.rows.length) return res.status(404).json({ error: "Invitation not found or already used" });
+    res.json(inv.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+app.post("/api/invitation/accept", async (req, res) => {
+  const { token, user_id } = req.body;
+  if (!token || !user_id) return res.status(400).json({ error: "token and user_id required" });
+  try {
+    const inv = await pool.query(
+      `SELECT si.*, u.full_name AS instructor_name
+       FROM student_invitations si
+       JOIN users u ON u.id = si.instructor_id
+       WHERE si.token = $1 AND si.status = 'pending'`,
+      [token]
+    );
+    if (!inv.rows.length) return res.status(404).json({ error: "Invitation not found or already used" });
+    const { instructor_name, course } = inv.rows[0];
+
+    await pool.query(
+      "UPDATE users SET instructor = $1, course = $2, approval_status = 'approved' WHERE id = $3",
+      [instructor_name, course, user_id]
+    );
+    await pool.query(
+      "UPDATE student_invitations SET status = 'accepted' WHERE token = $1",
+      [token]
+    );
+
+    res.json({ ok: true, instructor_name, course });
+  } catch (err) {
+    console.error("Accept invitation error:", err.message);
     res.status(500).json({ error: "Server error" });
   }
 });
