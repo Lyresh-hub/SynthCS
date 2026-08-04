@@ -83,8 +83,12 @@ export default function Dashboard() {
     try { return JSON.parse(raw); } catch { return null; }
   });
 
-  // Class info — fetch instructor + course from user profile
-  const [classInfo, setClassInfo] = useState<{ instructor: string; course: string } | null>(null);
+  // Class info — read from localStorage immediately, then confirm/update from API
+  const [classInfo, setClassInfo] = useState<{ instructor: string; course: string } | null>(() => {
+    const instructor = localStorage.getItem("instructor");
+    if (instructor) return { instructor, course: localStorage.getItem("course") ?? "" };
+    return null;
+  });
   useEffect(() => {
     if (!userId) return;
     fetch(`${NODE_API}/api/users/${userId}`)
@@ -93,6 +97,7 @@ export default function Dashboard() {
         if (u?.instructor) {
           setClassInfo({ instructor: u.instructor, course: u.course ?? "" });
           localStorage.setItem("instructor", u.instructor);
+          if (u.course) localStorage.setItem("course", u.course);
         }
       })
       .catch(() => {});
