@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useLocation } from "wouter";
 import {
   LogOut, Clock, CheckCircle, XCircle, Users, AlertTriangle,
-  Activity, Link as LinkIcon, Plus, Trash2, UserMinus, UserPlus, Copy, Check,
+  Activity, Link as LinkIcon, Plus, Trash2, UserMinus, UserPlus, Copy, Check, Shield, Save,
 } from "lucide-react";
 import { NODE_API as BACKEND } from "../lib/config";
 
@@ -46,7 +46,7 @@ type Invite = {
   created_at: string;
 };
 
-type Tab = "pending" | "flagged" | "activity" | "students" | "invites";
+type Tab = "pending" | "flagged" | "activity" | "students" | "invites" | "restrictions";
 
 const FRONTEND = "https://synthcs.site";
 
@@ -81,11 +81,48 @@ export default function InstructorDashboard() {
   const [copiedId,  setCopiedId]  = useState<string | null>(null);
   const [newCourse, setNewCourse] = useState("Data Science");
 
+  const [maxRowsInput,  setMaxRowsInput]  = useState<string>("");
+  const [restrictSaved, setRestrictSaved] = useState(false);
+  const [restrictError, setRestrictError] = useState("");
+  const [loadingRestrict, setLoadingRestrict] = useState(false);
+
   useEffect(() => {
     if (!instructorId || localStorage.getItem("is_instructor") !== "true") {
       setLocation("/login");
     }
   }, []);
+
+  useEffect(() => {
+    if (!instructorName) return;
+    fetch(`${BACKEND}/api/restrictions?instructor_name=${encodeURIComponent(instructorName)}`)
+      .then((r) => r.json())
+      .then((d) => { if (d.max_rows != null) setMaxRowsInput(String(d.max_rows)); })
+      .catch(() => {});
+  }, [instructorName]);
+
+  const handleSaveRestrictions = async () => {
+    setRestrictError(""); setRestrictSaved(false); setLoadingRestrict(true);
+    const maxRows = maxRowsInput.trim() === "" ? null : Number(maxRowsInput);
+    if (maxRows !== null && (isNaN(maxRows) || maxRows < 1)) {
+      setRestrictError("Row limit must be a positive number (or leave blank to remove the limit).");
+      setLoadingRestrict(false);
+      return;
+    }
+    try {
+      const res = await fetch(`${BACKEND}/api/instructor/${instructorId}/restrictions`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ max_rows: maxRows }),
+      });
+      if (!res.ok) throw new Error("Server error");
+      setRestrictSaved(true);
+      setTimeout(() => setRestrictSaved(false), 3000);
+    } catch {
+      setRestrictError("Failed to save. Please try again.");
+    } finally {
+      setLoadingRestrict(false);
+    }
+  };
 
   const fetchStudents = useCallback(async () => {
     setLoadingStudents(true);
@@ -222,7 +259,8 @@ export default function InstructorDashboard() {
     { id: "flagged",  label: "Flagged Prompts",  icon: <AlertTriangle className="w-3.5 h-3.5" />, badge: flaggedCount },
     { id: "activity", label: "Activity",         icon: <Activity className="w-3.5 h-3.5" /> },
     { id: "students", label: "Students",         icon: <Users className="w-3.5 h-3.5" /> },
-    { id: "invites",  label: "Invite Links",     icon: <LinkIcon className="w-3.5 h-3.5" /> },
+    { id: "invites",       label: "Invite Links",    icon: <LinkIcon className="w-3.5 h-3.5" /> },
+    { id: "restrictions",  label: "Restrictions",    icon: <Shield className="w-3.5 h-3.5" /> },
   ];
 
   return (
@@ -392,6 +430,47 @@ export default function InstructorDashboard() {
             </div>
             <StudentTable rows={students} loading={loadingStudents} filter="all"
               actionId={actionId} onApprove={handleApprove} onReject={handleReject} onRemove={handleRemoveStudent} />
+          </div>
+        )}
+
+        {tab === "restrictions" && (
+          <div className="space-y-4 max-w-xl">
+            <div className="bg-white rounded-xl border border-gray-100 shadow-sm px-5 py-5">
+              <p className="text-sm font-semibold text-gray-800 mb-1 flex items-center gap-2">
+                <Shield className="w-4 h-4 text-purple-500" /> Row limit per dataset
+              </p>
+              <p className="text-xs text-gray-500 mb-4">
+                Set the maximum number of rows a student can generate per dataset. Leave blank to allow unlimited rows.
+              </p>
+              <div className="flex gap-2 items-start">
+                <div className="flex-1">
+                  <input
+                    type="number"
+                    min={1}
+                    value={maxRowsInput}
+                    onChange={(e) => setMaxRowsInput(e.target.value)}
+                    placeholder="e.g. 1000 (blank = unlimited)"
+                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
+                  />
+                  {restrictError && <p className="mt-1.5 text-xs text-red-500">{restrictError}</p>}
+                  {restrictSaved && (
+                    <p className="mt-1.5 text-xs text-green-600 flex items-center gap-1">
+                      <Check className="w-3.5 h-3.5" /> Restriction saved — students will see this limit immediately.
+                    </p>
+                  )}
+                </div>
+                <button
+                  onClick={handleSaveRestrictions}
+                  disabled={loadingRestrict}
+                  className="flex items-center gap-1.5 px-4 py-2 bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition-colors whitespace-nowrap"
+                >
+                  <Save className="w-4 h-4" /> {loadingRestrict ? "Saving…" : "Save"}
+                </button>
+              </div>
+              <p className="mt-3 text-xs text-gray-400">
+                When a limit is set, students' row sliders in the dataset builder will be capped at this value and they will see a notice that their instructor has set a maximum.
+              </p>
+            </div>
           </div>
         )}
 

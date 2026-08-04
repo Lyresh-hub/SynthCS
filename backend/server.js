@@ -455,6 +455,8 @@ async function initDB() {
         created_at TIMESTAMPTZ  DEFAULT NOW()
       )
     `).catch(() => {});
+    // Restriction columns on instructors table
+    await pool.query(`ALTER TABLE instructors ADD COLUMN IF NOT EXISTS max_rows INTEGER DEFAULT NULL`).catch(() => {});
 
     // Seed the two instructors with a default password if they don't exist yet
     const instructorSeeds = [
@@ -919,7 +921,7 @@ app.post("/login", async (req, res) => {
     if (!user.is_admin && !user.is_instructor && user.approval_status !== 'approved')
       return res.status(403).json({ error: "pending_approval", message: "Your account is awaiting instructor approval." });
 
-    res.json({ id: user.id, first_name: user.first_name, last_name: user.last_name, full_name: user.full_name, email: user.email, is_admin: user.is_admin || false, is_instructor: user.is_instructor || false, tour_done: user.tour_done || false });
+    res.json({ id: user.id, first_name: user.first_name, last_name: user.last_name, full_name: user.full_name, email: user.email, is_admin: user.is_admin || false, is_instructor: user.is_instructor || false, tour_done: user.tour_done || false, instructor: user.instructor ?? null });
   } catch (err) {
     console.error("Login error:", err.message);
     res.status(500).json({ error: "Server error" });
@@ -2039,6 +2041,39 @@ app.get("/api/instructors", async (_req, res) => {
     res.json(result.rows);
   } catch (err) {
     console.error("Get instructors error:", err.message);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+// ── Instructor restrictions ───────────────────────────────────────────────────
+
+// Public: students fetch their instructor's restrictions by instructor name
+app.get("/api/restrictions", async (req, res) => {
+  const { instructor_name } = req.query;
+  if (!instructor_name) return res.json({ max_rows: null });
+  try {
+    const r = await pool.query(
+      "SELECT max_rows FROM instructors WHERE name = $1 LIMIT 1",
+      [instructor_name]
+    );
+    res.json(r.rows[0] ?? { max_rows: null });
+  } catch (err) {
+    console.error("Restrictions fetch error:", err.message);
+    res.json({ max_rows: null });
+  }
+});
+
+// Instructor: update their restrictions
+app.patch("/api/instructor/:id/restrictions", async (req, res) => {
+  const { max_rows } = req.body;
+  try {
+    await pool.query(
+      "UPDATE instructors SET max_rows = $1 WHERE id = $2",
+      [max_rows ?? null, req.params.id]
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("Restrictions update error:", err.message);
     res.status(500).json({ error: "Server error" });
   }
 });

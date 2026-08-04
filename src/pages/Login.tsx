@@ -105,6 +105,8 @@ export default function Login() {
       localStorage.setItem("is_admin",       json.is_admin       ? "true" : "false");
       localStorage.setItem("is_instructor",  json.is_instructor  ? "true" : "false");
       localStorage.setItem("tour_done",      json.tour_done      ? "true" : "false");
+      if (json.instructor) localStorage.setItem("instructor", json.instructor);
+      else localStorage.removeItem("instructor");
       sessionStorage.removeItem("schema_builder_draft");
       if (json.is_instructor) {
         setLocation("/instructor/dashboard");

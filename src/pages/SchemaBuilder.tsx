@@ -446,6 +446,7 @@ export default function SchemaBuilder() {
   const [tables, setTables]                 = useState<Table[]>(() => readDraft()?.tables ?? []);
   const [activeTableId, setActiveTableId]   = useState<string>(() => readDraft()?.activeTableId ?? "");
   const [rowCount, setRowCount]             = useState<number>(() => readDraft()?.rowCount ?? 1_000);
+  const [maxRows, setMaxRows]               = useState<number | null>(null);
 
   const [saveStatus, setSaveStatus] = useState<"idle"|"saving"|"saved"|"error">("idle");
   const [aiFieldLoading, setAiFieldLoading] = useState<string | null>(null);
@@ -532,6 +533,21 @@ export default function SchemaBuilder() {
       })
       .catch(() => {});
   }, [loadSchemaId]);
+
+  // Fetch instructor row limit for students
+  useEffect(() => {
+    const instructorName = localStorage.getItem("instructor");
+    if (!instructorName) return;
+    fetch(`${NODE_API}/api/restrictions?instructor_name=${encodeURIComponent(instructorName)}`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.max_rows != null) {
+          setMaxRows(Number(d.max_rows));
+          setRowCount((prev) => Math.min(prev, Number(d.max_rows)));
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   // Autosave draft to sessionStorage whenever the schema changes
   useEffect(() => {
@@ -2687,18 +2703,23 @@ export default function SchemaBuilder() {
               <span>CTGAN trains on the 200-row AI template above (not a real dataset) and scales it up. Column names, value types, and the target column (approved/is_fraud) are exactly as described — clean and ready for downstream tools.</span>
             </div>
 
+            {maxRows != null && (
+              <div className="flex items-center gap-2 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-xs text-amber-800">
+                <span>⚠️ Your instructor has set a maximum of <strong>{maxRows.toLocaleString()}</strong> rows per dataset.</span>
+              </div>
+            )}
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-medium text-gray-600">Final Row Count</span>
                 <span className="text-sm font-bold text-purple-700">{rowCount.toLocaleString()} rows</span>
               </div>
-              <input type="range" min={1_000} max={100_000} step={1_000}
+              <input type="range" min={1_000} max={maxRows != null ? Math.min(maxRows, 100_000) : 100_000} step={1_000}
                 value={rowCount} onChange={(e) => setRowCount(Number(e.target.value))}
                 className="w-full accent-purple-600" />
               <div className="flex justify-between text-[11px] text-gray-400">
                 <span>1,000</span>
-                <span>50,000</span>
-                <span>100,000</span>
+                {maxRows == null && <span>50,000</span>}
+                <span>{maxRows != null ? maxRows.toLocaleString() : "100,000"}</span>
               </div>
             </div>
 
@@ -2800,7 +2821,12 @@ export default function SchemaBuilder() {
               </div>
               <span className="text-sm font-bold text-purple-700">{rowCount.toLocaleString()}</span>
             </div>
-            <input type="range" min={100} max={100000} step={100}
+            {maxRows != null && (
+              <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-1.5">
+                ⚠️ Instructor limit: max <strong>{maxRows.toLocaleString()}</strong> rows per dataset.
+              </p>
+            )}
+            <input type="range" min={100} max={maxRows != null ? Math.min(maxRows, 100000) : 100000} step={100}
               value={rowCount} onChange={(e) => setRowCount(Number(e.target.value))}
               className="w-full accent-purple-600" />
 
@@ -3103,7 +3129,7 @@ export default function SchemaBuilder() {
                 <span className="text-xs font-medium text-gray-600 whitespace-nowrap">
                   Rows for <span className="text-purple-700 font-semibold">{table.name}</span>
                 </span>
-                <input type="range" min={100} max={100_000} step={100}
+                <input type="range" min={100} max={maxRows != null ? Math.min(maxRows, 100_000) : 100_000} step={100}
                   value={table.rowCount ?? rowCount}
                   onChange={(e) => updateTableRowCount(table.id, Number(e.target.value))}
                   className="flex-1 accent-purple-600" />
@@ -3115,14 +3141,21 @@ export default function SchemaBuilder() {
 
             {/* Row count slider — only shown for Kaggle/CTGAN mode with single table */}
             {mode === "kaggle" && tables.length === 1 && (
-              <div className="flex items-center gap-3">
-                <span className="text-xs font-medium text-gray-600 whitespace-nowrap">Row Count</span>
-                <input type="range" min={1_000} max={100_000} step={1_000}
-                  value={rowCount} onChange={(e) => setRowCount(Number(e.target.value))}
-                  className="flex-1 accent-purple-600" />
-                <span className="text-xs font-semibold text-purple-700 w-20 text-right tabular-nums">
-                  {rowCount.toLocaleString()}
-                </span>
+              <div className="space-y-1.5">
+                {maxRows != null && (
+                  <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-1.5">
+                    ⚠️ Your instructor has set a maximum of <strong>{maxRows.toLocaleString()}</strong> rows per dataset.
+                  </p>
+                )}
+                <div className="flex items-center gap-3">
+                  <span className="text-xs font-medium text-gray-600 whitespace-nowrap">Row Count</span>
+                  <input type="range" min={1_000} max={maxRows != null ? Math.min(maxRows, 100_000) : 100_000} step={1_000}
+                    value={rowCount} onChange={(e) => setRowCount(Number(e.target.value))}
+                    className="flex-1 accent-purple-600" />
+                  <span className="text-xs font-semibold text-purple-700 w-20 text-right tabular-nums">
+                    {rowCount.toLocaleString()}
+                  </span>
+                </div>
               </div>
             )}
 
