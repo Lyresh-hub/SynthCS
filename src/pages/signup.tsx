@@ -515,12 +515,17 @@ function TermsOfServiceContent() {
       </section>
 
       <section>
-        <h3 className="font-semibold text-gray-800 mb-1">7. Disclaimer</h3>
+        <h3 className="font-semibold text-gray-800 mb-1">7. Prompt Monitoring &amp; Instructor Oversight</h3>
+        <p>For security and academic integrity purposes, all prompts submitted by users are recorded and stored in the system. Your assigned instructor has the ability to view your full prompt history at any time. Flagged or suspicious prompts may be escalated for review. By using SynthCS, you consent to this monitoring as a condition of access.</p>
+      </section>
+
+      <section>
+        <h3 className="font-semibold text-gray-800 mb-1">8. Disclaimer</h3>
         <p>SynthCS is provided as-is for academic use. We do <strong className="text-red-600">NOT</strong> guarantee that generated data will be suitable for all purposes. We are <strong className="text-red-600">NOT</strong> liable for any outcomes resulting from the use of generated datasets.</p>
       </section>
 
       <section>
-        <h3 className="font-semibold text-gray-800 mb-1">8. Changes to These Terms</h3>
+        <h3 className="font-semibold text-gray-800 mb-1">9. Changes to These Terms</h3>
         <p>We may update these Terms at any time. Continued use of SynthCS after changes are posted constitutes acceptance of the updated Terms.</p>
       </section>
     </div>

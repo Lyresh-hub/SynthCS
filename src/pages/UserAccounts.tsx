@@ -340,7 +340,12 @@ export default function UserAccounts() {
             </div>
 
             <div>
-              <p className="font-semibold text-gray-800 mb-1">7. Modifications</p>
+              <p className="font-semibold text-gray-800 mb-1">7. Prompt Monitoring &amp; Instructor Oversight</p>
+              <p>For security and academic integrity purposes, all prompts submitted by users are recorded and stored in the system. Your assigned instructor has the ability to view your full prompt history at any time. Flagged or suspicious prompts may be escalated for review. By using SynthCS, you consent to this monitoring as a condition of access.</p>
+            </div>
+
+            <div>
+              <p className="font-semibold text-gray-800 mb-1">8. Modifications</p>
               <p>SynthCS reserves the right to modify these terms at any time. Continued use of the platform after changes constitutes your acceptance of the revised terms.</p>
             </div>
           </div>
