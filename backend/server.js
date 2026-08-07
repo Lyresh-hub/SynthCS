@@ -508,6 +508,7 @@ async function initDB() {
     `).catch(() => {});
     // Restriction columns on instructors table
     await pool.query(`ALTER TABLE instructors ADD COLUMN IF NOT EXISTS max_rows INTEGER DEFAULT NULL`).catch(() => {});
+    await pool.query(`ALTER TABLE instructors ADD COLUMN IF NOT EXISTS allowed_formats TEXT[] DEFAULT NULL`).catch(() => {});
 
     // Seed the two instructors with a default password if they don't exist yet
     const instructorSeeds = [
@@ -2117,7 +2118,7 @@ app.get("/api/restrictions", async (req, res) => {
   if (!instructor_name) return res.json({ max_rows: null });
   try {
     const r = await pool.query(
-      "SELECT max_rows FROM instructors WHERE name = $1 LIMIT 1",
+      "SELECT max_rows, allowed_formats FROM instructors WHERE name = $1 LIMIT 1",
       [instructor_name]
     );
     res.json(r.rows[0] ?? { max_rows: null });
@@ -2129,11 +2130,11 @@ app.get("/api/restrictions", async (req, res) => {
 
 // Instructor: update their restrictions
 app.patch("/api/instructor/:id/restrictions", async (req, res) => {
-  const { max_rows } = req.body;
+  const { max_rows, allowed_formats } = req.body;
   try {
     await pool.query(
-      "UPDATE instructors SET max_rows = $1 WHERE id = $2",
-      [max_rows ?? null, req.params.id]
+      "UPDATE instructors SET max_rows = $1, allowed_formats = $2 WHERE id = $3",
+      [max_rows ?? null, allowed_formats ?? null, req.params.id]
     );
     res.json({ ok: true });
   } catch (err) {

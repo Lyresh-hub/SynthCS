@@ -447,6 +447,7 @@ export default function SchemaBuilder() {
   const [activeTableId, setActiveTableId]   = useState<string>(() => readDraft()?.activeTableId ?? "");
   const [rowCount, setRowCount]             = useState<number>(() => readDraft()?.rowCount ?? 1_000);
   const [maxRows, setMaxRows]               = useState<number | null>(null);
+  const [allowedFormats, setAllowedFormats] = useState<string[] | null>(null);
 
   const [saveStatus, setSaveStatus] = useState<"idle"|"saving"|"saved"|"error">("idle");
   const [aiFieldLoading, setAiFieldLoading] = useState<string | null>(null);
@@ -575,6 +576,8 @@ export default function SchemaBuilder() {
           setMaxRows(Number(d.max_rows));
           setRowCount((prev) => Math.min(prev, Number(d.max_rows)));
         }
+        if (Array.isArray(d.allowed_formats) && d.allowed_formats.length > 0)
+          setAllowedFormats(d.allowed_formats);
       })
       .catch(() => {});
   }, []);
@@ -2897,19 +2900,31 @@ export default function SchemaBuilder() {
             {/* Format selector */}
             <div>
               <p className="text-xs font-medium text-gray-600 mb-2">Download format</p>
+              {allowedFormats != null && (
+                <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-1.5 mb-2">
+                  ⚠️ Your instructor allows: <strong>{allowedFormats.map((f) => f.toUpperCase()).join(", ")}</strong> only.
+                </p>
+              )}
               <div className="flex gap-2">
-                {(["csv", "json", "xlsx"] as const).map((fmt) => (
-                  <button
-                    key={fmt}
-                    onClick={() => setDownloadFormat(fmt)}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors
-                      ${downloadFormat === fmt
-                        ? "bg-purple-600 text-white border-purple-600"
-                        : "bg-white text-gray-600 border-gray-200 hover:border-purple-300 hover:text-purple-600"}`}
-                  >
-                    {fmt.toUpperCase()}
-                  </button>
-                ))}
+                {(["csv", "json", "xlsx"] as const).map((fmt) => {
+                  const blocked = allowedFormats != null && !allowedFormats.includes(fmt);
+                  return (
+                    <button
+                      key={fmt}
+                      onClick={() => !blocked && setDownloadFormat(fmt)}
+                      disabled={blocked}
+                      title={blocked ? "Not allowed by your instructor" : undefined}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors
+                        ${blocked
+                          ? "bg-gray-100 text-gray-300 border-gray-100 cursor-not-allowed"
+                          : downloadFormat === fmt
+                            ? "bg-purple-600 text-white border-purple-600"
+                            : "bg-white text-gray-600 border-gray-200 hover:border-purple-300 hover:text-purple-600"}`}
+                    >
+                      {fmt.toUpperCase()}
+                    </button>
+                  );
+                })}
               </div>
             </div>
 

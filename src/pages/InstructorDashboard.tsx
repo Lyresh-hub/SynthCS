@@ -91,9 +91,13 @@ export default function InstructorDashboard() {
   const [copiedId,  setCopiedId]  = useState<string | null>(null);
   const [newCourse, setNewCourse] = useState("Data Science");
 
-  const [maxRowsInput,  setMaxRowsInput]  = useState<string>("");
-  const [restrictSaved, setRestrictSaved] = useState(false);
-  const [restrictError, setRestrictError] = useState("");
+  const ALL_FORMATS = ["csv", "json", "xlsx"] as const;
+  type FormatKey = typeof ALL_FORMATS[number];
+
+  const [maxRowsInput,    setMaxRowsInput]    = useState<string>("");
+  const [allowedFormats,  setAllowedFormats]  = useState<Set<FormatKey>>(new Set(ALL_FORMATS));
+  const [restrictSaved,   setRestrictSaved]   = useState(false);
+  const [restrictError,   setRestrictError]   = useState("");
   const [loadingRestrict, setLoadingRestrict] = useState(false);
 
   useEffect(() => {
@@ -106,13 +110,18 @@ export default function InstructorDashboard() {
     if (!instructorName) return;
     fetch(`${BACKEND}/api/restrictions?instructor_name=${encodeURIComponent(instructorName)}`)
       .then((r) => r.json())
-      .then((d) => { if (d.max_rows != null) setMaxRowsInput(String(d.max_rows)); })
+      .then((d) => {
+        if (d.max_rows != null) setMaxRowsInput(String(d.max_rows));
+        if (Array.isArray(d.allowed_formats) && d.allowed_formats.length > 0)
+          setAllowedFormats(new Set(d.allowed_formats as FormatKey[]));
+      })
       .catch(() => {});
   }, [instructorName]);
 
   const handleSaveRestrictions = async () => {
     setRestrictError(""); setRestrictSaved(false); setLoadingRestrict(true);
     const maxRows = maxRowsInput.trim() === "" ? null : Number(maxRowsInput);
+    const formatsPayload = allowedFormats.size === ALL_FORMATS.length ? null : Array.from(allowedFormats);
     if (maxRows !== null && (isNaN(maxRows) || maxRows < 1)) {
       setRestrictError("Row limit must be a positive number (or leave blank to remove the limit).");
       setLoadingRestrict(false);
@@ -122,7 +131,7 @@ export default function InstructorDashboard() {
       const res = await fetch(`${BACKEND}/api/instructor/${instructorId}/restrictions`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ max_rows: maxRows }),
+        body: JSON.stringify({ max_rows: maxRows, allowed_formats: formatsPayload }),
       });
       if (!res.ok) throw new Error("Server error");
       setRestrictSaved(true);
@@ -489,6 +498,52 @@ export default function InstructorDashboard() {
               <p className="mt-3 text-xs text-gray-400">
                 When a limit is set, students' row sliders in the dataset builder will be capped at this value and they will see a notice that their instructor has set a maximum.
               </p>
+            </div>
+
+            {/* Format restrictions */}
+            <div className="bg-white rounded-xl border border-gray-100 shadow-sm px-5 py-5">
+              <p className="text-sm font-semibold text-gray-800 mb-1 flex items-center gap-2">
+                <Shield className="w-4 h-4 text-purple-500" /> Allowed download formats
+              </p>
+              <p className="text-xs text-gray-500 mb-4">
+                Uncheck a format to prevent students from downloading in that format. All are allowed by default.
+              </p>
+              <div className="flex gap-4 flex-wrap">
+                {ALL_FORMATS.map((fmt) => (
+                  <label key={fmt} className="flex items-center gap-2 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={allowedFormats.has(fmt)}
+                      onChange={(e) => {
+                        const next = new Set(allowedFormats);
+                        if (e.target.checked) next.add(fmt);
+                        else next.delete(fmt);
+                        if (next.size === 0) return; // must allow at least one
+                        setAllowedFormats(next);
+                      }}
+                      className="w-4 h-4 accent-purple-600"
+                    />
+                    <span className="text-sm font-medium text-gray-700 uppercase">{fmt}</span>
+                  </label>
+                ))}
+              </div>
+              <p className="mt-3 text-xs text-gray-400">At least one format must remain allowed.</p>
+
+              <div className="mt-4">
+                <button
+                  onClick={handleSaveRestrictions}
+                  disabled={loadingRestrict}
+                  className="flex items-center gap-1.5 px-4 py-2 bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition-colors"
+                >
+                  <Save className="w-4 h-4" /> {loadingRestrict ? "Saving…" : "Save all restrictions"}
+                </button>
+                {restrictSaved && (
+                  <p className="mt-2 text-xs text-green-600 flex items-center gap-1">
+                    <Check className="w-3.5 h-3.5" /> Restrictions saved.
+                  </p>
+                )}
+                {restrictError && <p className="mt-2 text-xs text-red-500">{restrictError}</p>}
+              </div>
             </div>
           </div>
         )}
