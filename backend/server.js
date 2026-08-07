@@ -2278,6 +2278,54 @@ app.get("/instructor/activity", async (req, res) => {
   }
 });
 
+// ── Instructor: full prompt history (flagged + successful) ───────────────────
+app.get("/instructor/prompt-history", async (req, res) => {
+  const { instructor_id } = req.query;
+  if (!instructor_id) return res.status(400).json({ error: "instructor_id required" });
+  try {
+    const ins = await pool.query("SELECT full_name FROM users WHERE id = $1", [instructor_id]);
+    if (!ins.rows.length) return res.status(404).json({ error: "Instructor not found" });
+    const instructorName = ins.rows[0].full_name;
+
+    // Flagged prompts
+    const flagged = await pool.query(
+      `SELECT fp.id, u.full_name AS student_name, u.email AS student_email,
+              fp.prompt_text, fp.flag_reason, fp.status, fp.created_at,
+              'flagged' AS source
+       FROM flagged_prompts fp
+       JOIN users u ON u.id = fp.student_id
+       WHERE u.instructor = $1
+       ORDER BY fp.created_at DESC`,
+      [instructorName]
+    );
+
+    // Successful schema generation prompts from activity_log
+    const generated = await pool.query(
+      `SELECT al.id, u.full_name AS student_name, u.email AS student_email,
+              al.details->>'prompt_text' AS prompt_text,
+              NULL AS flag_reason, NULL AS status, al.created_at,
+              'generated' AS source
+       FROM activity_log al
+       JOIN users u ON u.id = al.user_id
+       WHERE u.instructor = $1
+         AND al.action_type = 'schema_generated'
+         AND al.details->>'prompt_text' IS NOT NULL
+       ORDER BY al.created_at DESC`,
+      [instructorName]
+    );
+
+    // Merge and sort by created_at descending
+    const combined = [...flagged.rows, ...generated.rows].sort(
+      (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+    );
+
+    res.json(combined);
+  } catch (err) {
+    console.error("Prompt history error:", err.message);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
 // ── Instructor: invite links ──────────────────────────────────────────────────
 app.post("/instructor/invite", async (req, res) => {
   const { instructor_id, course } = req.body;
