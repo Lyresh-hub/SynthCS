@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { useLocation, Link, useRoute } from "wouter";
 import {
   LayoutDashboard, Layers, Download,
-  Bell, Plus, FileJson, Settings, CheckCheck, Trash2, Database, Menu, X, HelpCircle, GraduationCap,
+  Bell, FileJson, Settings, CheckCheck, Trash2, Database, Menu, X, HelpCircle, GraduationCap,
 } from "lucide-react";
 import { cn } from "../lib/utils";
 import {
@@ -44,8 +44,6 @@ export default function Layout({ children }: { children: React.ReactNode }) {
 
   // Kinukuha yung pangalan ng naka-login na user mula sa localStorage
   const userName = localStorage.getItem("user_name") ?? "User";
-
-  const isAnyAdminPage = isAdminPage || isAdminUsersPage;
 
   // Easter egg: i-click ang logo ng 5 beses para mapunta sa admin panel
   const [logoClicks, setLogoClicks] = useState(0);
@@ -281,91 +279,65 @@ export default function Layout({ children }: { children: React.ReactNode }) {
             </div>
           </div>
 
-          {!isAccountPage && !isDownloadsPage && !isSavedSchemasPage && !isSchemaBuilderPage && !isAnyAdminPage && (
-            <div className="flex items-center gap-2">
-              {/* Search — hidden on mobile */}
-              <div className="relative hidden md:block">
-                <input
-                  type="search"
-                  placeholder="Search schemas..."
-                  className="text-sm bg-gray-50 border border-gray-200 rounded-md pl-8 pr-3 py-1.5 w-52 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent placeholder:text-gray-400"
-                />
-                <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                </svg>
-              </div>
+          {/* Notification bell — always visible */}
+          <div className="relative" ref={bellRef}>
+            <button
+              data-tour="notif-bell"
+              onClick={() => { setBellOpen((o) => !o); if (!bellOpen) markAllRead(); }}
+              className="relative w-8 h-8 flex items-center justify-center rounded-md hover:bg-gray-100 transition-colors"
+            >
+              <Bell className="w-4 h-4 text-gray-500" />
+              {unreadCount > 0 && (
+                <span className="absolute top-1 right-1 w-4 h-4 rounded-full bg-purple-600 text-white text-[9px] font-bold flex items-center justify-center leading-none">
+                  {unreadCount > 9 ? "9+" : unreadCount}
+                </span>
+              )}
+            </button>
 
-              {/* Notification bell */}
-              <div className="relative" ref={bellRef}>
-                <button
-                  data-tour="notif-bell"
-                  onClick={() => { setBellOpen((o) => !o); if (!bellOpen) markAllRead(); }}
-                  className="relative w-8 h-8 flex items-center justify-center rounded-md hover:bg-gray-100 transition-colors"
-                >
-                  <Bell className="w-4 h-4 text-gray-500" />
-                  {unreadCount > 0 && (
-                    <span className="absolute top-1 right-1 w-4 h-4 rounded-full bg-purple-600 text-white text-[9px] font-bold flex items-center justify-center leading-none">
-                      {unreadCount > 9 ? "9+" : unreadCount}
-                    </span>
-                  )}
-                </button>
-
-                {bellOpen && (
-                  <div className="absolute right-0 top-10 w-[calc(100vw-2rem)] max-w-sm bg-white border border-gray-200 rounded-xl shadow-xl z-50 overflow-hidden">
-                    <div className="flex items-center justify-between px-4 py-2.5 border-b border-gray-100 bg-gray-50">
-                      <span className="text-xs font-semibold text-gray-700">Notifications</span>
-                      {notifications.length > 0 && (
-                        <div className="flex items-center gap-2">
-                          <button onClick={() => { markAllRead(); setNotifications(getNotifications()); }} className="text-[11px] text-purple-600 hover:underline flex items-center gap-1">
-                            <CheckCheck className="w-3 h-3" /> Mark all read
-                          </button>
-                          <button onClick={() => { clearNotifications(); setNotifications([]); }} className="text-[11px] text-gray-400 hover:text-red-500 transition-colors">
-                            <Trash2 className="w-3 h-3" />
-                          </button>
-                        </div>
-                      )}
+            {bellOpen && (
+              <div className="absolute right-0 top-10 w-[calc(100vw-2rem)] max-w-sm bg-white border border-gray-200 rounded-xl shadow-xl z-50 overflow-hidden">
+                <div className="flex items-center justify-between px-4 py-2.5 border-b border-gray-100 bg-gray-50">
+                  <span className="text-xs font-semibold text-gray-700">Notifications</span>
+                  {notifications.length > 0 && (
+                    <div className="flex items-center gap-2">
+                      <button onClick={() => { markAllRead(); setNotifications(getNotifications()); }} className="text-[11px] text-purple-600 hover:underline flex items-center gap-1">
+                        <CheckCheck className="w-3 h-3" /> Mark all read
+                      </button>
+                      <button onClick={() => { clearNotifications(); setNotifications([]); }} className="text-[11px] text-gray-400 hover:text-red-500 transition-colors">
+                        <Trash2 className="w-3 h-3" />
+                      </button>
                     </div>
-                    {notifications.length === 0 ? (
-                      <div className="px-4 py-8 text-center text-xs text-gray-400">No notifications yet</div>
-                    ) : (
-                      <div className="max-h-64 overflow-y-auto divide-y divide-gray-50">
-                        {notifications.map((n) => (
-                          <button
-                            key={n.id}
-                            onClick={() => handleNotifClick(n)}
-                            className={cn(
-                              "w-full text-left px-4 py-3 hover:bg-gray-50 transition-colors flex items-start gap-3",
-                              !n.read && "bg-purple-50/60"
-                            )}
-                          >
-                            <div className="w-7 h-7 rounded-full bg-gradient-to-br from-purple-500 to-indigo-600 flex items-center justify-center flex-shrink-0 mt-0.5">
-                              <Database className="w-3.5 h-3.5 text-white" />
-                            </div>
-                            <div className="flex-1 min-w-0">
-                              <p className="text-xs font-semibold text-gray-800 truncate">{n.title}</p>
-                              <p className="text-[11px] text-gray-500 truncate">{n.message}</p>
-                              <p className="text-[10px] text-gray-400 mt-0.5">{timeAgo(n.created_at)}</p>
-                            </div>
-                            {!n.read && <span className="w-1.5 h-1.5 rounded-full bg-purple-500 flex-shrink-0 mt-1.5" />}
-                          </button>
-                        ))}
-                      </div>
-                    )}
+                  )}
+                </div>
+                {notifications.length === 0 ? (
+                  <div className="px-4 py-8 text-center text-xs text-gray-400">No notifications yet</div>
+                ) : (
+                  <div className="max-h-64 overflow-y-auto divide-y divide-gray-50">
+                    {notifications.map((n) => (
+                      <button
+                        key={n.id}
+                        onClick={() => handleNotifClick(n)}
+                        className={cn(
+                          "w-full text-left px-4 py-3 hover:bg-gray-50 transition-colors flex items-start gap-3",
+                          !n.read && "bg-purple-50/60"
+                        )}
+                      >
+                        <div className="w-7 h-7 rounded-full bg-gradient-to-br from-purple-500 to-indigo-600 flex items-center justify-center flex-shrink-0 mt-0.5">
+                          <Database className="w-3.5 h-3.5 text-white" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs font-semibold text-gray-800 truncate">{n.title}</p>
+                          <p className="text-[11px] text-gray-500 truncate">{n.message}</p>
+                          <p className="text-[10px] text-gray-400 mt-0.5">{timeAgo(n.created_at)}</p>
+                        </div>
+                        {!n.read && <span className="w-1.5 h-1.5 rounded-full bg-purple-500 flex-shrink-0 mt-1.5" />}
+                      </button>
+                    ))}
                   </div>
                 )}
               </div>
-
-              {/* New Dataset → Schema Builder */}
-              <button
-                data-tour="new-dataset-btn"
-                onClick={() => setLocation("/schema-builder")}
-                className="flex items-center gap-1.5 px-2.5 py-1.5 bg-purple-600 text-white text-xs font-medium rounded-md hover:bg-purple-700 transition-colors"
-              >
-                <Plus className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline">New Dataset</span>
-              </button>
-            </div>
-          )}
+            )}
+          </div>
         </header>
 
         <main className="flex-1 overflow-auto p-3 md:p-6">
