@@ -2441,6 +2441,16 @@ app.delete("/instructor/invites/:id", async (req, res) => {
   }
 });
 
+app.patch("/instructor/invites/:id/toggle", async (req, res) => {
+  try {
+    const result = await pool.query(
+      "UPDATE class_invitations SET active = NOT active WHERE id = $1 RETURNING active",
+      [req.params.id]
+    );
+    res.json({ active: result.rows[0].active });
+  } catch (err) { res.status(500).json({ error: "Server error" }); }
+});
+
 app.get("/invite/:token", async (req, res) => {
   try {
     const result = await pool.query(

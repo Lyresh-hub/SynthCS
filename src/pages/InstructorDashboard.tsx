@@ -231,6 +231,12 @@ export default function InstructorDashboard() {
     setInvites((p) => p.filter((i) => i.id !== id));
   };
 
+  const handleToggleInvite = async (id: string) => {
+    const res = await fetch(`${BACKEND}/instructor/invites/${id}/toggle`, { method: "PATCH" });
+    const data = await res.json();
+    setInvites((p) => p.map((i) => i.id === id ? { ...i, active: data.active } : i));
+  };
+
   const copyInviteLink = (token: string, id: string) => {
     navigator.clipboard.writeText(`${FRONTEND}/?invite=${token}`);
     setCopiedId(id);
@@ -581,24 +587,31 @@ export default function InstructorDashboard() {
               ) : (
                 <div className="divide-y divide-gray-50">
                   {invites.map((inv) => (
-                    <div key={inv.id} className="px-5 py-4 flex items-center justify-between gap-4">
+                    <div key={inv.id} className={`px-5 py-4 flex items-center justify-between gap-4 ${!inv.active ? "bg-gray-50/60" : ""}`}>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 mb-1">
                           <span className="text-sm font-medium text-gray-900">{inv.course}</span>
+                          <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full border ${inv.active ? "bg-green-50 text-green-700 border-green-200" : "bg-gray-100 text-gray-400 border-gray-200"}`}>
+                            {inv.active ? "Active" : "Inactive"}
+                          </span>
                           <span className="text-xs text-gray-400">
                             {new Date(inv.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
                           </span>
                         </div>
-                        <p className="text-xs text-gray-400 font-mono truncate max-w-[340px]">
+                        <p className={`text-xs font-mono truncate max-w-[300px] ${inv.active ? "text-gray-400" : "text-gray-300 line-through"}`}>
                           {FRONTEND}/?invite={inv.token}
                         </p>
                       </div>
                       <div className="flex items-center gap-2 flex-shrink-0">
-                        <button onClick={() => copyInviteLink(inv.token, inv.id)}
-                          className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-200 hover:bg-gray-50 text-gray-600 text-xs font-medium rounded-lg transition-colors">
+                        <button onClick={() => copyInviteLink(inv.token, inv.id)} disabled={!inv.active}
+                          className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-200 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed text-gray-600 text-xs font-medium rounded-lg transition-colors">
                           {copiedId === inv.id
                             ? <><Check className="w-3.5 h-3.5 text-green-500" /> Copied</>
                             : <><Copy className="w-3.5 h-3.5" /> Copy</>}
+                        </button>
+                        <button onClick={() => handleToggleInvite(inv.id)}
+                          className={`px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors ${inv.active ? "border-amber-200 text-amber-700 hover:bg-amber-50" : "border-green-200 text-green-700 hover:bg-green-50"}`}>
+                          {inv.active ? "Deactivate" : "Activate"}
                         </button>
                         <button onClick={() => handleDeleteInvite(inv.id)}
                           className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors">
