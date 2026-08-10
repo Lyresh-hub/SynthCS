@@ -446,8 +446,7 @@ export default function SchemaBuilder() {
   const [tables, setTables]                 = useState<Table[]>(() => readDraft()?.tables ?? []);
   const [activeTableId, setActiveTableId]   = useState<string>(() => readDraft()?.activeTableId ?? "");
   const [rowCount, setRowCount]             = useState<number>(() => readDraft()?.rowCount ?? 1_000);
-  const [maxRows, setMaxRows]               = useState<number | null>(null);
-  const [allowedFormats, setAllowedFormats] = useState<string[] | null>(null);
+
 
   const [saveStatus, setSaveStatus] = useState<"idle"|"saving"|"saved"|"error">("idle");
   const [aiFieldLoading, setAiFieldLoading] = useState<string | null>(null);
@@ -564,23 +563,6 @@ export default function SchemaBuilder() {
       })
       .catch(() => {});
   }, [loadSchemaId]);
-
-  // Fetch instructor row limit for students
-  useEffect(() => {
-    const instructorName = localStorage.getItem("instructor");
-    if (!instructorName) return;
-    fetch(`${NODE_API}/api/restrictions?instructor_name=${encodeURIComponent(instructorName)}`)
-      .then((r) => r.json())
-      .then((d) => {
-        if (d.max_rows != null) {
-          setMaxRows(Number(d.max_rows));
-          setRowCount((prev) => Math.min(prev, Number(d.max_rows)));
-        }
-        if (Array.isArray(d.allowed_formats) && d.allowed_formats.length > 0)
-          setAllowedFormats(d.allowed_formats);
-      })
-      .catch(() => {});
-  }, []);
 
   // Autosave draft to sessionStorage whenever the schema changes
   useEffect(() => {
@@ -770,7 +752,7 @@ export default function SchemaBuilder() {
       }));
       pushNotification({ title: data.primary_table, message: `${data.total_rows.toLocaleString()} rows · ${data.table_names.length} tables`, dataset_id: data.dataset_id });
       const userId = localStorage.getItem("user_id");
-      if (userId) fetch(`${NODE_API}/api/activity/log`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ user_id: userId, action_type: "dataset_downloaded", details: { table_name: data.primary_table, rows: data.total_rows, tables: data.table_names.length } }) }).catch(() => {});
+      if (userId) fetch(`${NODE_API}/api/activity/log`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ user_id: userId, action_type: "dataset_downloaded", details: { table_name: data.primary_table, rows: data.total_rows, tables: data.table_names.length, purpose: sessionStorage.getItem("generation_purpose") ?? null } }) }).catch(() => {});
       localStorage.setItem("last_path", "/schema-builder"); setLocation("/preview");
     } catch (e: any) {
       setErrorMsg(e.message ?? "Multi-table generation failed.");
@@ -840,7 +822,7 @@ export default function SchemaBuilder() {
       const res  = await fetch(`${NODE_API}/api/llm/generate-schema`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: llmPrompt, user_id: userId }),
+        body: JSON.stringify({ prompt: llmPrompt, user_id: userId, purpose: sessionStorage.getItem("generation_purpose") ?? undefined }),
         signal: llmCtrl.signal,
       });
       const data = await res.json();
@@ -2770,23 +2752,18 @@ export default function SchemaBuilder() {
               <span>CTGAN trains on the 200-row AI template above (not a real dataset) and scales it up. Column names, value types, and the target column (approved/is_fraud) are exactly as described — clean and ready for downstream tools.</span>
             </div>
 
-            {maxRows != null && (
-              <div className="flex items-center gap-2 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-xs text-amber-800">
-                <span>⚠️ Your instructor has set a maximum of <strong>{maxRows.toLocaleString()}</strong> rows per dataset.</span>
-              </div>
-            )}
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-medium text-gray-600">Final Row Count</span>
                 <span className="text-sm font-bold text-purple-700">{rowCount.toLocaleString()} rows</span>
               </div>
-              <input type="range" min={1_000} max={maxRows != null ? Math.min(maxRows, 100_000) : 100_000} step={1_000}
+              <input type="range" min={1_000} max={100_000} step={1_000}
                 value={rowCount} onChange={(e) => setRowCount(Number(e.target.value))}
                 className="w-full accent-purple-600" />
               <div className="flex justify-between text-[11px] text-gray-400">
                 <span>1,000</span>
-                {maxRows == null && <span>50,000</span>}
-                <span>{maxRows != null ? maxRows.toLocaleString() : "100,000"}</span>
+                <span>50,000</span>
+                <span>100,000</span>
               </div>
             </div>
 
@@ -2888,38 +2865,23 @@ export default function SchemaBuilder() {
               </div>
               <span className="text-sm font-bold text-purple-700">{rowCount.toLocaleString()}</span>
             </div>
-            {maxRows != null && (
-              <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-1.5">
-                ⚠️ Instructor limit: max <strong>{maxRows.toLocaleString()}</strong> rows per dataset.
-              </p>
-            )}
-            <input type="range" min={100} max={maxRows != null ? Math.min(maxRows, 100000) : 100000} step={100}
+            <input type="range" min={100} max={100000} step={100}
               value={rowCount} onChange={(e) => setRowCount(Number(e.target.value))}
               className="w-full accent-purple-600" />
 
             {/* Format selector */}
             <div>
               <p className="text-xs font-medium text-gray-600 mb-2">Download format</p>
-              {allowedFormats != null && (
-                <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-1.5 mb-2">
-                  ⚠️ Your instructor allows: <strong>{allowedFormats.map((f) => f.toUpperCase()).join(", ")}</strong> only.
-                </p>
-              )}
               <div className="flex gap-2">
                 {(["csv", "json", "xlsx"] as const).map((fmt) => {
-                  const blocked = allowedFormats != null && !allowedFormats.includes(fmt);
                   return (
                     <button
                       key={fmt}
-                      onClick={() => !blocked && setDownloadFormat(fmt)}
-                      disabled={blocked}
-                      title={blocked ? "Not allowed by your instructor" : undefined}
+                      onClick={() => setDownloadFormat(fmt)}
                       className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors
-                        ${blocked
-                          ? "bg-gray-100 text-gray-300 border-gray-100 cursor-not-allowed"
-                          : downloadFormat === fmt
-                            ? "bg-purple-600 text-white border-purple-600"
-                            : "bg-white text-gray-600 border-gray-200 hover:border-purple-300 hover:text-purple-600"}`}
+                        ${downloadFormat === fmt
+                          ? "bg-purple-600 text-white border-purple-600"
+                          : "bg-white text-gray-600 border-gray-200 hover:border-purple-300 hover:text-purple-600"}`}
                     >
                       {fmt.toUpperCase()}
                     </button>
@@ -3208,7 +3170,7 @@ export default function SchemaBuilder() {
                 <span className="text-xs font-medium text-gray-600 whitespace-nowrap">
                   Rows for <span className="text-purple-700 font-semibold">{table.name}</span>
                 </span>
-                <input type="range" min={100} max={maxRows != null ? Math.min(maxRows, 100_000) : 100_000} step={100}
+                <input type="range" min={100} max={100_000} step={100}
                   value={table.rowCount ?? rowCount}
                   onChange={(e) => updateTableRowCount(table.id, Number(e.target.value))}
                   className="flex-1 accent-purple-600" />
@@ -3221,14 +3183,9 @@ export default function SchemaBuilder() {
             {/* Row count slider — only shown for Kaggle/CTGAN mode with single table */}
             {mode === "kaggle" && tables.length === 1 && (
               <div className="space-y-1.5">
-                {maxRows != null && (
-                  <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-1.5">
-                    ⚠️ Your instructor has set a maximum of <strong>{maxRows.toLocaleString()}</strong> rows per dataset.
-                  </p>
-                )}
                 <div className="flex items-center gap-3">
                   <span className="text-xs font-medium text-gray-600 whitespace-nowrap">Row Count</span>
-                  <input type="range" min={1_000} max={maxRows != null ? Math.min(maxRows, 100_000) : 100_000} step={1_000}
+                  <input type="range" min={1_000} max={100_000} step={1_000}
                     value={rowCount} onChange={(e) => setRowCount(Number(e.target.value))}
                     className="flex-1 accent-purple-600" />
                   <span className="text-xs font-semibold text-purple-700 w-20 text-right tabular-nums">

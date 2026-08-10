@@ -2,8 +2,8 @@ import { useState, useEffect, useCallback } from "react";
 import { useLocation } from "wouter";
 import {
   LogOut, Clock, CheckCircle, XCircle, Users, AlertTriangle,
-  Activity, Link as LinkIcon, Plus, Trash2, UserMinus, UserPlus, Copy, Check, Shield, Save,
-  MessageSquare, Search,
+  Activity, Link as LinkIcon, Plus, Trash2, UserMinus, UserPlus, Copy, Check,
+  MessageSquare, Search, ChevronDown, ChevronUp, ShieldAlert,
 } from "lucide-react";
 import { NODE_API as BACKEND } from "../lib/config";
 
@@ -47,7 +47,7 @@ type Invite = {
   created_at: string;
 };
 
-type Tab = "pending" | "flagged" | "activity" | "students" | "invites" | "restrictions" | "prompts";
+type Tab = "pending" | "flagged" | "activity" | "students" | "invites" | "prompts";
 
 const FRONTEND = "https://synthcs.site";
 
@@ -84,6 +84,16 @@ export default function InstructorDashboard() {
   const [loadingPrompts, setLoadingPrompts] = useState(false);
   const [promptSearch,   setPromptSearch]   = useState("");
 
+  const [expandedRow, setExpandedRow] = useState<string | null>(null);
+
+  const SUSPICIOUS_KEYWORDS = [
+    "fake", "forged", "counterfeit", "illegal", "fraud", "stolen", "laundering",
+    "identity theft", "phishing", "scam", "fabricated", "falsified", "hack",
+    "exploit", "bypass", "cheat", "manipulate", "bribe", "corrupt",
+  ];
+  const isSuspicious = (text: string) =>
+    SUSPICIOUS_KEYWORDS.some((kw) => text.toLowerCase().includes(kw));
+
   const [actionId,  setActionId]  = useState<string | null>(null);
   const [addEmail,  setAddEmail]  = useState("");
   const [addError,  setAddError]  = useState("");
@@ -91,57 +101,11 @@ export default function InstructorDashboard() {
   const [copiedId,  setCopiedId]  = useState<string | null>(null);
   const [newCourse, setNewCourse] = useState("Data Science");
 
-  const ALL_FORMATS = ["csv", "json", "xlsx"] as const;
-  type FormatKey = typeof ALL_FORMATS[number];
-
-  const [maxRowsInput,    setMaxRowsInput]    = useState<string>("");
-  const [allowedFormats,  setAllowedFormats]  = useState<Set<FormatKey>>(new Set(ALL_FORMATS));
-  const [restrictSaved,   setRestrictSaved]   = useState(false);
-  const [restrictError,   setRestrictError]   = useState("");
-  const [loadingRestrict, setLoadingRestrict] = useState(false);
-
   useEffect(() => {
     if (!instructorId || localStorage.getItem("is_instructor") !== "true") {
       setLocation("/login");
     }
   }, []);
-
-  useEffect(() => {
-    if (!instructorName) return;
-    fetch(`${BACKEND}/api/restrictions?instructor_name=${encodeURIComponent(instructorName)}`)
-      .then((r) => r.json())
-      .then((d) => {
-        if (d.max_rows != null) setMaxRowsInput(String(d.max_rows));
-        if (Array.isArray(d.allowed_formats) && d.allowed_formats.length > 0)
-          setAllowedFormats(new Set(d.allowed_formats as FormatKey[]));
-      })
-      .catch(() => {});
-  }, [instructorName]);
-
-  const handleSaveRestrictions = async () => {
-    setRestrictError(""); setRestrictSaved(false); setLoadingRestrict(true);
-    const maxRows = maxRowsInput.trim() === "" ? null : Number(maxRowsInput);
-    const formatsPayload = allowedFormats.size === ALL_FORMATS.length ? null : Array.from(allowedFormats);
-    if (maxRows !== null && (isNaN(maxRows) || maxRows < 1)) {
-      setRestrictError("Row limit must be a positive number (or leave blank to remove the limit).");
-      setLoadingRestrict(false);
-      return;
-    }
-    try {
-      const res = await fetch(`${BACKEND}/api/instructor/${instructorId}/restrictions`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ max_rows: maxRows, allowed_formats: formatsPayload }),
-      });
-      if (!res.ok) throw new Error("Server error");
-      setRestrictSaved(true);
-      setTimeout(() => setRestrictSaved(false), 3000);
-    } catch {
-      setRestrictError("Failed to save. Please try again.");
-    } finally {
-      setLoadingRestrict(false);
-    }
-  };
 
   const fetchStudents = useCallback(async () => {
     setLoadingStudents(true);
@@ -286,9 +250,8 @@ export default function InstructorDashboard() {
     { id: "flagged",  label: "Flagged Prompts",  icon: <AlertTriangle className="w-3.5 h-3.5" />, badge: flaggedCount },
     { id: "activity", label: "Activity",         icon: <Activity className="w-3.5 h-3.5" /> },
     { id: "students", label: "Students",         icon: <Users className="w-3.5 h-3.5" /> },
-    { id: "invites",       label: "Invite Links",    icon: <LinkIcon className="w-3.5 h-3.5" /> },
-    { id: "restrictions",  label: "Restrictions",    icon: <Shield className="w-3.5 h-3.5" /> },
-    { id: "prompts",       label: "Prompt History",  icon: <MessageSquare className="w-3.5 h-3.5" /> },
+    { id: "invites",  label: "Invite Links",   icon: <LinkIcon className="w-3.5 h-3.5" /> },
+    { id: "prompts",  label: "Prompt History", icon: <MessageSquare className="w-3.5 h-3.5" /> },
   ];
 
   return (
@@ -392,42 +355,105 @@ export default function InstructorDashboard() {
               <EmptyState icon={<Activity className="w-5 h-5 text-gray-300" />} text="No activity recorded yet." />
             ) : (
               <div className="overflow-x-auto">
-                <table className="w-full text-sm min-w-[600px]">
+                <table className="w-full text-sm min-w-[640px]">
                   <thead>
                     <tr className="border-b border-gray-100 bg-gray-50/60">
                       <th className="text-left px-5 py-3 text-xs font-semibold text-gray-400 uppercase tracking-wide">Student</th>
                       <th className="text-left px-5 py-3 text-xs font-semibold text-gray-400 uppercase tracking-wide">Action</th>
                       <th className="text-left px-5 py-3 text-xs font-semibold text-gray-400 uppercase tracking-wide">Details</th>
                       <th className="text-left px-5 py-3 text-xs font-semibold text-gray-400 uppercase tracking-wide">Time</th>
+                      <th className="px-3 py-3" />
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-50">
                     {activity.map((a) => {
                       const meta = ACTION_LABELS[a.action_type] ?? { label: a.action_type, color: "text-gray-500 bg-gray-50 border-gray-100" };
+                      const promptText = String(a.details.prompt_text ?? "");
+                      const purpose    = String(a.details.purpose ?? "");
+                      const suspicious = promptText && isSuspicious(promptText);
+                      const isExpanded = expandedRow === a.id;
+                      const summaryText =
+                        (a.action_type === "schema_generated" || a.action_type === "prompt_flagged")
+                          ? promptText
+                          : a.action_type === "schema_saved"
+                          ? String(a.details.schema_name ?? "")
+                          : a.action_type === "dataset_downloaded"
+                          ? `${a.details.table_name ?? ""} · ${a.details.rows != null ? Number(a.details.rows).toLocaleString() : "?"} rows`
+                          : "—";
+
                       return (
-                        <tr key={a.id} className="hover:bg-gray-50/50 transition-colors">
-                          <td className="px-5 py-3">
-                            <div className="font-medium text-gray-900 text-xs truncate max-w-[160px]">{a.student_name}</div>
-                            <div className="text-xs text-gray-400 truncate max-w-[160px]">{a.student_email}</div>
-                          </td>
-                          <td className="px-5 py-3">
-                            <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${meta.color}`}>
-                              {meta.label}
-                            </span>
-                          </td>
-                          <td className="px-5 py-3 text-xs text-gray-500 max-w-[220px]">
-                            {(a.action_type === "schema_generated" || a.action_type === "prompt_flagged")
-                              ? <span className="truncate block">{String(a.details.prompt_text ?? "")}</span>
-                              : a.action_type === "schema_saved"
-                              ? String(a.details.schema_name ?? "")
-                              : a.action_type === "dataset_downloaded"
-                              ? `${a.details.table_name ?? ""} · ${a.details.rows != null ? Number(a.details.rows).toLocaleString() : "?"} rows`
-                              : "—"}
-                          </td>
-                          <td className="px-5 py-3 text-xs text-gray-400 whitespace-nowrap">
-                            {new Date(a.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
-                          </td>
-                        </tr>
+                        <>
+                          <tr
+                            key={a.id}
+                            onClick={() => setExpandedRow(isExpanded ? null : a.id)}
+                            className={`cursor-pointer transition-colors ${suspicious ? "bg-red-50/60 hover:bg-red-50" : "hover:bg-gray-50/50"}`}
+                          >
+                            <td className="px-5 py-3">
+                              <div className="font-medium text-gray-900 text-xs truncate max-w-[150px]">{a.student_name}</div>
+                              <div className="text-xs text-gray-400 truncate max-w-[150px]">{a.student_email}</div>
+                            </td>
+                            <td className="px-5 py-3">
+                              <div className="flex flex-col gap-1">
+                                <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${meta.color}`}>
+                                  {meta.label}
+                                </span>
+                                {suspicious && (
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium border bg-red-50 border-red-200 text-red-700">
+                                    <ShieldAlert className="w-3 h-3" /> Suspicious
+                                  </span>
+                                )}
+                              </div>
+                            </td>
+                            <td className="px-5 py-3 text-xs text-gray-500 max-w-[220px]">
+                              <span className="truncate block">{summaryText || "—"}</span>
+                              {purpose && (
+                                <span className="mt-0.5 inline-block text-[11px] text-purple-600 bg-purple-50 border border-purple-100 rounded px-1.5 py-0.5">
+                                  Purpose: {purpose}
+                                </span>
+                              )}
+                            </td>
+                            <td className="px-5 py-3 text-xs text-gray-400 whitespace-nowrap">
+                              {new Date(a.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+                            </td>
+                            <td className="px-3 py-3 text-gray-300">
+                              {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                            </td>
+                          </tr>
+                          {isExpanded && (
+                            <tr key={`${a.id}-expanded`} className={suspicious ? "bg-red-50/40" : "bg-gray-50/40"}>
+                              <td colSpan={5} className="px-5 py-4">
+                                <div className="space-y-2 text-xs">
+                                  {promptText && (
+                                    <div>
+                                      <p className="font-semibold text-gray-600 mb-1">Full prompt / description</p>
+                                      <p className="text-gray-700 leading-relaxed whitespace-pre-wrap bg-white border border-gray-100 rounded-lg px-3 py-2">
+                                        {promptText}
+                                      </p>
+                                    </div>
+                                  )}
+                                  {purpose && (
+                                    <div>
+                                      <p className="font-semibold text-gray-600 mb-1">Declared purpose</p>
+                                      <p className="text-purple-700 font-medium">{purpose}</p>
+                                    </div>
+                                  )}
+                                  {a.action_type === "dataset_downloaded" && (
+                                    <div className="text-gray-500">
+                                      Table: <strong>{String(a.details.table_name ?? "—")}</strong> ·{" "}
+                                      Rows: <strong>{a.details.rows != null ? Number(a.details.rows).toLocaleString() : "—"}</strong>
+                                    </div>
+                                  )}
+                                  {suspicious && (
+                                    <div className="flex items-start gap-2 bg-red-50 border border-red-200 rounded-lg px-3 py-2 text-red-700">
+                                      <ShieldAlert className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                                      <span>This prompt contains potentially suspicious keywords. Review the content above to determine if it violates academic integrity policies.</span>
+                                    </div>
+                                  )}
+                                </div>
+                              </td>
+                            </tr>
+                          )}
+                        </>
                       );
                     })}
                   </tbody>
@@ -458,93 +484,6 @@ export default function InstructorDashboard() {
             </div>
             <StudentTable rows={students} loading={loadingStudents} filter="all"
               actionId={actionId} onApprove={handleApprove} onReject={handleReject} onRemove={handleRemoveStudent} />
-          </div>
-        )}
-
-        {tab === "restrictions" && (
-          <div className="space-y-4 max-w-xl">
-            <div className="bg-white rounded-xl border border-gray-100 shadow-sm px-5 py-5">
-              <p className="text-sm font-semibold text-gray-800 mb-1 flex items-center gap-2">
-                <Shield className="w-4 h-4 text-purple-500" /> Row limit per dataset
-              </p>
-              <p className="text-xs text-gray-500 mb-4">
-                Set the maximum number of rows a student can generate per dataset. Leave blank to allow unlimited rows.
-              </p>
-              <div className="flex gap-2 items-start">
-                <div className="flex-1">
-                  <input
-                    type="number"
-                    min={1}
-                    value={maxRowsInput}
-                    onChange={(e) => setMaxRowsInput(e.target.value)}
-                    placeholder="e.g. 1000 (blank = unlimited)"
-                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
-                  />
-                  {restrictError && <p className="mt-1.5 text-xs text-red-500">{restrictError}</p>}
-                  {restrictSaved && (
-                    <p className="mt-1.5 text-xs text-green-600 flex items-center gap-1">
-                      <Check className="w-3.5 h-3.5" /> Restriction saved — students will see this limit immediately.
-                    </p>
-                  )}
-                </div>
-                <button
-                  onClick={handleSaveRestrictions}
-                  disabled={loadingRestrict}
-                  className="flex items-center gap-1.5 px-4 py-2 bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition-colors whitespace-nowrap"
-                >
-                  <Save className="w-4 h-4" /> {loadingRestrict ? "Saving…" : "Save"}
-                </button>
-              </div>
-              <p className="mt-3 text-xs text-gray-400">
-                When a limit is set, students' row sliders in the dataset builder will be capped at this value and they will see a notice that their instructor has set a maximum.
-              </p>
-            </div>
-
-            {/* Format restrictions */}
-            <div className="bg-white rounded-xl border border-gray-100 shadow-sm px-5 py-5">
-              <p className="text-sm font-semibold text-gray-800 mb-1 flex items-center gap-2">
-                <Shield className="w-4 h-4 text-purple-500" /> Allowed download formats
-              </p>
-              <p className="text-xs text-gray-500 mb-4">
-                Uncheck a format to prevent students from downloading in that format. All are allowed by default.
-              </p>
-              <div className="flex gap-4 flex-wrap">
-                {ALL_FORMATS.map((fmt) => (
-                  <label key={fmt} className="flex items-center gap-2 cursor-pointer select-none">
-                    <input
-                      type="checkbox"
-                      checked={allowedFormats.has(fmt)}
-                      onChange={(e) => {
-                        const next = new Set(allowedFormats);
-                        if (e.target.checked) next.add(fmt);
-                        else next.delete(fmt);
-                        if (next.size === 0) return; // must allow at least one
-                        setAllowedFormats(next);
-                      }}
-                      className="w-4 h-4 accent-purple-600"
-                    />
-                    <span className="text-sm font-medium text-gray-700 uppercase">{fmt}</span>
-                  </label>
-                ))}
-              </div>
-              <p className="mt-3 text-xs text-gray-400">At least one format must remain allowed.</p>
-
-              <div className="mt-4">
-                <button
-                  onClick={handleSaveRestrictions}
-                  disabled={loadingRestrict}
-                  className="flex items-center gap-1.5 px-4 py-2 bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition-colors"
-                >
-                  <Save className="w-4 h-4" /> {loadingRestrict ? "Saving…" : "Save all restrictions"}
-                </button>
-                {restrictSaved && (
-                  <p className="mt-2 text-xs text-green-600 flex items-center gap-1">
-                    <Check className="w-3.5 h-3.5" /> Restrictions saved.
-                  </p>
-                )}
-                {restrictError && <p className="mt-2 text-xs text-red-500">{restrictError}</p>}
-              </div>
-            </div>
           </div>
         )}
 

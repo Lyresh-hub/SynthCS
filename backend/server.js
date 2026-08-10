@@ -506,9 +506,22 @@ async function initDB() {
         created_at TIMESTAMPTZ  DEFAULT NOW()
       )
     `).catch(() => {});
-    // Restriction columns on instructors table
+    // Restriction columns on instructors table (kept for backward compat)
     await pool.query(`ALTER TABLE instructors ADD COLUMN IF NOT EXISTS max_rows INTEGER DEFAULT NULL`).catch(() => {});
     await pool.query(`ALTER TABLE instructors ADD COLUMN IF NOT EXISTS allowed_formats TEXT[] DEFAULT NULL`).catch(() => {});
+
+    // Per-course restrictions (replaces instructor-level columns)
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS instructor_course_restrictions (
+        id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        instructor_id  UUID NOT NULL,
+        course         VARCHAR(100) NOT NULL,
+        max_rows       INTEGER DEFAULT NULL,
+        allowed_formats TEXT[] DEFAULT NULL,
+        updated_at     TIMESTAMPTZ DEFAULT NOW(),
+        UNIQUE(instructor_id, course)
+      )
+    `).catch(() => {});
 
     // Seed the two instructors with a default password if they don't exist yet
     const instructorSeeds = [
@@ -1634,7 +1647,7 @@ app.post("/api/llm/generate-schema", async (req, res) => {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) return res.status(503).json({ error: "ANTHROPIC_API_KEY not configured." });
 
-  const { prompt, user_id } = req.body;
+  const { prompt, user_id, purpose } = req.body;
   if (!prompt?.trim()) return res.status(400).json({ error: "prompt is required" });
 
   // ── Moderation: delegate to shared safety-check helper ──────────────────────
@@ -1729,7 +1742,7 @@ Description: ${prompt.trim()}`;
     // raw = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
     const schema = JSON.parse(raw);
     if (!schema.table_name || !Array.isArray(schema.fields)) throw new Error("Invalid schema shape");
-    if (user_id) logActivity(user_id, "schema_generated", { prompt_text: prompt.trim(), table_name: schema.table_name });
+    if (user_id) logActivity(user_id, "schema_generated", { prompt_text: prompt.trim(), table_name: schema.table_name, purpose: purpose ?? null });
 
     schema.fields = schema.fields.map((f) => {
       const c = f.constraints ?? {};
@@ -2110,35 +2123,96 @@ app.get("/api/instructors", async (_req, res) => {
   }
 });
 
-// ── Instructor restrictions ───────────────────────────────────────────────────
+// ── Instructor restrictions (per course) ─────────────────────────────────────
 
-// Public: students fetch their instructor's restrictions by instructor name
+// Public: students fetch restrictions by instructor name + course
 app.get("/api/restrictions", async (req, res) => {
-  const { instructor_name } = req.query;
-  if (!instructor_name) return res.json({ max_rows: null });
+  const { instructor_name, course } = req.query;
+  if (!instructor_name) return res.json({ max_rows: null, allowed_formats: null });
   try {
-    const r = await pool.query(
-      "SELECT max_rows, allowed_formats FROM instructors WHERE name = $1 LIMIT 1",
+    // Find instructor UUID by name
+    const ins = await pool.query(
+      "SELECT id FROM users WHERE full_name = $1 AND is_instructor = TRUE LIMIT 1",
       [instructor_name]
     );
-    res.json(r.rows[0] ?? { max_rows: null });
+    if (!ins.rows.length) return res.json({ max_rows: null, allowed_formats: null });
+    const instructorId = ins.rows[0].id;
+
+    if (course) {
+      // Course-level restriction
+      const r = await pool.query(
+        "SELECT max_rows, allowed_formats FROM instructor_course_restrictions WHERE instructor_id = $1 AND course = $2 LIMIT 1",
+        [instructorId, course]
+      );
+      return res.json(r.rows[0] ?? { max_rows: null, allowed_formats: null });
+    }
+    // Fallback: no course provided — return nulls
+    res.json({ max_rows: null, allowed_formats: null });
   } catch (err) {
     console.error("Restrictions fetch error:", err.message);
-    res.json({ max_rows: null });
+    res.json({ max_rows: null, allowed_formats: null });
   }
 });
 
-// Instructor: update their restrictions
-app.patch("/api/instructor/:id/restrictions", async (req, res) => {
-  const { max_rows, allowed_formats } = req.body;
+// Instructor: get distinct courses they handle
+app.get("/api/instructor/:id/courses", async (req, res) => {
+  try {
+    const ins = await pool.query(
+      "SELECT full_name FROM users WHERE id = $1 AND is_instructor = TRUE LIMIT 1",
+      [req.params.id]
+    );
+    if (!ins.rows.length) return res.status(404).json({ error: "Instructor not found" });
+    const name = ins.rows[0].full_name;
+
+    // Courses from invite links
+    const invCourses = await pool.query(
+      "SELECT DISTINCT course FROM class_invitations WHERE instructor_id = $1",
+      [req.params.id]
+    );
+    // Courses from enrolled students
+    const stuCourses = await pool.query(
+      "SELECT DISTINCT course FROM users WHERE instructor = $1 AND is_instructor = FALSE AND course IS NOT NULL",
+      [name]
+    );
+
+    const all = new Set([
+      ...invCourses.rows.map((r) => r.course),
+      ...stuCourses.rows.map((r) => r.course),
+    ]);
+    res.json([...all].sort());
+  } catch (err) {
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+// Instructor: get all their course restrictions
+app.get("/api/instructor/:id/course-restrictions", async (req, res) => {
+  try {
+    const r = await pool.query(
+      "SELECT course, max_rows, allowed_formats FROM instructor_course_restrictions WHERE instructor_id = $1 ORDER BY course",
+      [req.params.id]
+    );
+    res.json(r.rows);
+  } catch (err) {
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+// Instructor: upsert restrictions for one course
+app.put("/api/instructor/:id/course-restrictions", async (req, res) => {
+  const { course, max_rows, allowed_formats } = req.body;
+  if (!course) return res.status(400).json({ error: "course required" });
   try {
     await pool.query(
-      "UPDATE instructors SET max_rows = $1, allowed_formats = $2 WHERE id = $3",
-      [max_rows ?? null, allowed_formats ?? null, req.params.id]
+      `INSERT INTO instructor_course_restrictions (instructor_id, course, max_rows, allowed_formats, updated_at)
+       VALUES ($1, $2, $3, $4, NOW())
+       ON CONFLICT (instructor_id, course)
+       DO UPDATE SET max_rows = $3, allowed_formats = $4, updated_at = NOW()`,
+      [req.params.id, course, max_rows ?? null, allowed_formats ?? null]
     );
     res.json({ ok: true });
   } catch (err) {
-    console.error("Restrictions update error:", err.message);
+    console.error("Course restrictions update error:", err.message);
     res.status(500).json({ error: "Server error" });
   }
 });
