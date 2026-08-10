@@ -230,8 +230,8 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* Your Class card — only shown when student has an instructor */}
-      {classInfo && (
+      {/* Your Class card — always visible */}
+      {classInfo ? (
         <div className="flex items-center gap-4 bg-purple-50 border border-purple-100 rounded-xl px-5 py-3">
           <div className="w-9 h-9 rounded-lg bg-purple-100 flex items-center justify-center flex-shrink-0">
             <GraduationCap className="w-5 h-5 text-purple-600" />
@@ -241,6 +241,16 @@ export default function Dashboard() {
             <p className="text-sm font-semibold text-purple-900 truncate">
               {classInfo.course || "Class"} &mdash; <span className="font-normal">{classInfo.instructor}</span>
             </p>
+          </div>
+        </div>
+      ) : (
+        <div className="flex items-center gap-4 bg-gray-50 border border-dashed border-gray-200 rounded-xl px-5 py-3">
+          <div className="w-9 h-9 rounded-lg bg-gray-100 flex items-center justify-center flex-shrink-0">
+            <GraduationCap className="w-5 h-5 text-gray-400" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-xs text-gray-400 font-medium">Your Class</p>
+            <p className="text-sm text-gray-400">No class yet — enroll or wait for your instructor's invite.</p>
           </div>
         </div>
       )}
