@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { useLocation, Link, useRoute } from "wouter";
 import {
   LayoutDashboard, Layers, Download,
-  Bell, Plus, FileJson, Settings, CheckCheck, Trash2, Database, Menu, X, HelpCircle,
+  Bell, Plus, FileJson, Settings, CheckCheck, Trash2, Database, Menu, X, HelpCircle, GraduationCap,
 } from "lucide-react";
 import { cn } from "../lib/utils";
 import {
@@ -18,6 +18,7 @@ const navItems = [
   { label: "Schema Builder", icon: Layers,         href: "/schema-builder", tourKey: "nav-schema" },
   { label: "Saved Schemas",  icon: FileJson,       href: "/saved-schemas",  tourKey: "nav-saved",    indent: true },
   { label: "Downloads",     icon: Download,        href: "/downloads",      tourKey: "nav-downloads" },
+  { label: "Classes",       icon: GraduationCap,  href: "/classes",        tourKey: "nav-classes" },
 ];
 
 // Ginagawa natin yung dalawang initials galing sa buong pangalan — hal. "Juan dela Cruz" = "JD"
@@ -39,6 +40,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   const [isAdminUsersPage]   = useRoute("/admin/users");
   const [isPreviewPage]      = useRoute("/preview");
   const [isValidationPage]   = useRoute("/validation-report");
+  const [isClassesPage]      = useRoute("/classes");
 
   // Kinukuha yung pangalan ng naka-login na user mula sa localStorage
   const userName = localStorage.getItem("user_name") ?? "User";
@@ -271,6 +273,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                   : isSchemaBuilderPage ? "Build schemas, search datasets, and generate synthetic data"
                   : isDownloadsPage   ? "Generated datasets · available for 30 days"
                   : isSavedSchemasPage ? "Saved schema templates for quick generation"
+                  : isClassesPage     ? "Your enrolled class and instructor information"
                   : isPreviewPage     ? "Preview and export your synthetic dataset"
                   : isValidationPage  ? "Statistical validation of synthetic vs real data"
                   : "Overview of your activity and generated datasets"}

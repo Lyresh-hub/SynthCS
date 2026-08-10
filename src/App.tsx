@@ -31,6 +31,7 @@ import AdminUsers from "./pages/AdminUsers";
 import AdminClasses from "./pages/AdminClasses";
 import ValidationReport from "./pages/ValidationReport";
 import AcceptInvitation from "./pages/AcceptInvitation";
+import Classes from "./pages/Classes";
 
 // Bago mag-start ang memory router, tignan muna natin kung may espesyal na params sa URL.
 // Halimbawa: kapag nag-click ang user ng verification link sa email, ang URL ay
@@ -143,6 +144,7 @@ export default function App() {
               <Route path="/schema-builder" component={SchemaBuilder} />
               <Route path="/saved-schemas" component={SavedSchemas} />
               <Route path="/downloads" component={Downloads} />
+              <Route path="/classes" component={Classes} />
               <Route path="/preview" component={DataPreview} />
               <Route path="/validation-report" component={ValidationReport} />
               <Route path="/api-access" component={APIAccess} />
