@@ -98,6 +98,10 @@ export default function Dashboard() {
           setClassInfo({ instructor: u.instructor, course: u.course ?? "" });
           localStorage.setItem("instructor", u.instructor);
           if (u.course) localStorage.setItem("course", u.course);
+        } else {
+          setClassInfo(null);
+          localStorage.removeItem("instructor");
+          localStorage.removeItem("course");
         }
       })
       .catch(() => {});
