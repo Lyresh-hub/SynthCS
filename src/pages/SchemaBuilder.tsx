@@ -2040,7 +2040,7 @@ export default function SchemaBuilder() {
                     type="text"
                     value={categoryOther}
                     onChange={(e) => setCategoryOther(e.target.value)}
-                    placeholder="Please specify the data category…"
+                    placeholder="Optional: specify the data category…"
                     className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
                     autoFocus
                   />
@@ -2052,7 +2052,7 @@ export default function SchemaBuilder() {
                   </button>
                   <button
                     onClick={() => setPurposeStep(2)}
-                    disabled={!selectedCategory || (selectedCategory === "Other" && !categoryOther.trim())}
+                    disabled={!selectedCategory}
                     className="px-4 py-2 text-sm bg-purple-600 text-white rounded-lg font-semibold hover:bg-purple-700 disabled:opacity-40 transition-colors">
                     Next →
                   </button>
@@ -2094,7 +2094,7 @@ export default function SchemaBuilder() {
                     type="text"
                     value={usageOther}
                     onChange={(e) => setUsageOther(e.target.value)}
-                    placeholder="Please describe how you will use this dataset…"
+                    placeholder="Optional: describe your use case…"
                     className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
                     autoFocus
                   />
@@ -2110,7 +2110,7 @@ export default function SchemaBuilder() {
                       Cancel
                     </button>
                     <button onClick={confirmPurpose}
-                      disabled={!selectedUsage || (selectedUsage === "Other" && !usageOther.trim())}
+                      disabled={!selectedUsage}
                       className="px-4 py-2 text-sm bg-purple-600 text-white rounded-lg font-semibold hover:bg-purple-700 disabled:opacity-40 transition-colors">
                       Generate
                     </button>
