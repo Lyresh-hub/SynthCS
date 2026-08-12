@@ -1647,7 +1647,7 @@ app.post("/api/llm/generate-schema", async (req, res) => {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) return res.status(503).json({ error: "ANTHROPIC_API_KEY not configured." });
 
-  const { prompt, user_id, purpose } = req.body;
+  const { prompt, user_id, purpose, category } = req.body;
   if (!prompt?.trim()) return res.status(400).json({ error: "prompt is required" });
 
   // ── Moderation: delegate to shared safety-check helper ──────────────────────
@@ -1742,7 +1742,7 @@ Description: ${prompt.trim()}`;
     // raw = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
     const schema = JSON.parse(raw);
     if (!schema.table_name || !Array.isArray(schema.fields)) throw new Error("Invalid schema shape");
-    if (user_id) logActivity(user_id, "schema_generated", { prompt_text: prompt.trim(), table_name: schema.table_name, purpose: purpose ?? null });
+    if (user_id) logActivity(user_id, "schema_generated", { prompt_text: prompt.trim(), table_name: schema.table_name, purpose: purpose ?? null, category: category ?? null });
 
     schema.fields = schema.fields.map((f) => {
       const c = f.constraints ?? {};

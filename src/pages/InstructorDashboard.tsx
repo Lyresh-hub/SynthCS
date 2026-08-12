@@ -375,7 +375,8 @@ export default function InstructorDashboard() {
                     {activity.map((a) => {
                       const meta = ACTION_LABELS[a.action_type] ?? { label: a.action_type, color: "text-gray-500 bg-gray-50 border-gray-100" };
                       const promptText = String(a.details.prompt_text ?? "");
-                      const purpose    = String(a.details.purpose ?? "");
+                      const purpose    = String(a.details.purpose   ?? "");
+                      const category   = String(a.details.category  ?? "");
                       const suspicious = promptText && isSuspicious(promptText);
                       const isExpanded = expandedRow === a.id;
                       const summaryText =
@@ -412,9 +413,14 @@ export default function InstructorDashboard() {
                             </td>
                             <td className="px-5 py-3 text-xs text-gray-500 max-w-[220px]">
                               <span className="truncate block">{summaryText || "—"}</span>
+                              {category && (
+                                <span className="mt-0.5 inline-block text-[11px] text-blue-600 bg-blue-50 border border-blue-100 rounded px-1.5 py-0.5">
+                                  {category}
+                                </span>
+                              )}
                               {purpose && (
                                 <span className="mt-0.5 inline-block text-[11px] text-purple-600 bg-purple-50 border border-purple-100 rounded px-1.5 py-0.5">
-                                  Purpose: {purpose}
+                                  {purpose}
                                 </span>
                               )}
                             </td>
@@ -437,9 +443,15 @@ export default function InstructorDashboard() {
                                       </p>
                                     </div>
                                   )}
+                                  {category && (
+                                    <div>
+                                      <p className="font-semibold text-gray-600 mb-1">Data category</p>
+                                      <p className="text-blue-700 font-medium">{category}</p>
+                                    </div>
+                                  )}
                                   {purpose && (
                                     <div>
-                                      <p className="font-semibold text-gray-600 mb-1">Declared purpose</p>
+                                      <p className="font-semibold text-gray-600 mb-1">Declared usage</p>
                                       <p className="text-purple-700 font-medium">{purpose}</p>
                                     </div>
                                   )}

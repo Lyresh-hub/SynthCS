@@ -454,29 +454,60 @@ export default function SchemaBuilder() {
   const [showPureAiConfirm, setShowPureAiConfirm] = useState(false);
 
   // Purpose modal — shown before any generation
-  const [showPurposeModal, setShowPurposeModal] = useState(false);
-  const [selectedPurpose, setSelectedPurpose]   = useState("");
+  const [showPurposeModal, setShowPurposeModal]   = useState(false);
+  const [purposeStep, setPurposeStep]             = useState<1 | 2>(1);
+  const [selectedCategory, setSelectedCategory]   = useState("");
+  const [categoryOther, setCategoryOther]         = useState("");
+  const [detectedCategory, setDetectedCategory]   = useState("");
+  const [selectedUsage, setSelectedUsage]         = useState("");
+  const [usageOther, setUsageOther]               = useState("");
   const [purposePendingAction, setPurposePendingAction] = useState<"template" | "expand" | "generate" | null>(null);
 
-  const PURPOSES = [
-    "Class Assignment",
-    "Thesis / Dissertation",
-    "Academic Research",
-    "Personal Learning / Practice",
-    "System Testing / Evaluation",
-    "Other",
+  const CATEGORIES = [
+    { label: "Healthcare / Medical",   keywords: ["patient","hospital","doctor","medical","disease","health","diagnosis","treatment","prescription","nurse","clinic","medication","symptom","surgery","pharmacy"] },
+    { label: "Finance / Banking",      keywords: ["bank","loan","credit","payment","transaction","fraud","account","balance","interest","mortgage","insurance","invest","stock","financial","money","billing"] },
+    { label: "Education / Academic",   keywords: ["student","grade","school","course","teacher","exam","enrollment","university","college","score","class","lecture","academic","professor","curriculum"] },
+    { label: "E-commerce / Retail",    keywords: ["product","order","customer","purchase","inventory","price","cart","sale","shipping","retail","store","shop","item","vendor","marketplace"] },
+    { label: "Technology / IT",        keywords: ["software","server","network","user","system","app","database","code","device","error","log","api","web","tech","computer","bug","deploy"] },
+    { label: "Government / Public",    keywords: ["citizen","government","policy","tax","vote","election","permit","license","public","municipal","regulation","census"] },
+    { label: "Business / HR",          keywords: ["employee","salary","department","performance","hire","payroll","company","manager","staff","workforce","job","position","leave","attendance"] },
+    { label: "Research / Science",     keywords: ["experiment","sample","observation","measurement","study","analysis","lab","research","hypothesis","scientific","survey","variable"] },
+    { label: "Other",                  keywords: [] },
   ];
 
+  const USAGES = ["Homework", "Project", "Research", "Testing / Evaluation", "Other"];
+
+  const detectCategory = (prompt: string): string => {
+    const lower = prompt.toLowerCase();
+    let best = { label: "Other", score: 0 };
+    for (const cat of CATEGORIES) {
+      const score = cat.keywords.filter((kw) => lower.includes(kw)).length;
+      if (score > best.score) best = { label: cat.label, score };
+    }
+    return best.label;
+  };
+
   const askPurposeThen = (action: "template" | "expand" | "generate") => {
-    setSelectedPurpose("");
+    const prompt = llmPrompt.trim() || tables.flatMap((t) => t.fields.map((f) => f.name)).join(" ");
+    const detected = detectCategory(prompt);
+    setDetectedCategory(detected);
+    setSelectedCategory(detected);
+    setCategoryOther("");
+    setSelectedUsage("");
+    setUsageOther("");
+    setPurposeStep(1);
     setPurposePendingAction(action);
     setShowPurposeModal(true);
   };
 
   const confirmPurpose = () => {
-    if (!selectedPurpose) return;
+    const finalCategory = selectedCategory === "Other" ? (categoryOther.trim() || "Other") : selectedCategory;
+    const finalUsage    = selectedUsage    === "Other" ? (usageOther.trim()    || "Other") : selectedUsage;
+    const combined = `${finalCategory} — ${finalUsage}`;
     setShowPurposeModal(false);
-    sessionStorage.setItem("generation_purpose", selectedPurpose);
+    sessionStorage.setItem("generation_purpose",  finalUsage);
+    sessionStorage.setItem("generation_category", finalCategory);
+    sessionStorage.setItem("generation_purpose_full", combined);
     if (purposePendingAction === "template") handleLlmGenerate();
     else if (purposePendingAction === "expand") handleExpand();
     else if (purposePendingAction === "generate") handleGenerate();
@@ -752,7 +783,7 @@ export default function SchemaBuilder() {
       }));
       pushNotification({ title: data.primary_table, message: `${data.total_rows.toLocaleString()} rows · ${data.table_names.length} tables`, dataset_id: data.dataset_id });
       const userId = localStorage.getItem("user_id");
-      if (userId) fetch(`${NODE_API}/api/activity/log`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ user_id: userId, action_type: "dataset_downloaded", details: { table_name: data.primary_table, rows: data.total_rows, tables: data.table_names.length, purpose: sessionStorage.getItem("generation_purpose") ?? null } }) }).catch(() => {});
+      if (userId) fetch(`${NODE_API}/api/activity/log`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ user_id: userId, action_type: "dataset_downloaded", details: { table_name: data.primary_table, rows: data.total_rows, tables: data.table_names.length, purpose: sessionStorage.getItem("generation_purpose") ?? null, category: sessionStorage.getItem("generation_category") ?? null } }) }).catch(() => {});
       localStorage.setItem("last_path", "/schema-builder"); setLocation("/preview");
     } catch (e: any) {
       setErrorMsg(e.message ?? "Multi-table generation failed.");
@@ -822,7 +853,7 @@ export default function SchemaBuilder() {
       const res  = await fetch(`${NODE_API}/api/llm/generate-schema`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: llmPrompt, user_id: userId, purpose: sessionStorage.getItem("generation_purpose") ?? undefined }),
+        body: JSON.stringify({ prompt: llmPrompt, user_id: userId, purpose: sessionStorage.getItem("generation_purpose") ?? undefined, category: sessionStorage.getItem("generation_category") ?? undefined }),
         signal: llmCtrl.signal,
       });
       const data = await res.json();
@@ -1900,33 +1931,113 @@ export default function SchemaBuilder() {
       {/* ── Purpose modal — shown before any generation ── */}
       {showPurposeModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
-          <div className="bg-white rounded-2xl shadow-2xl max-w-sm w-full p-6 space-y-4">
-            <div>
-              <h3 className="text-base font-semibold text-gray-900">What is the purpose of this dataset?</h3>
-              <p className="text-sm text-gray-500 mt-0.5">Select the reason for generating this dataset before continuing.</p>
-            </div>
-            <div className="space-y-2">
-              {PURPOSES.map((p) => (
-                <button key={p} onClick={() => setSelectedPurpose(p)}
-                  className={`w-full text-left px-4 py-2.5 rounded-xl border text-sm font-medium transition-colors ${
-                    selectedPurpose === p
-                      ? "bg-purple-600 text-white border-purple-600"
-                      : "bg-white text-gray-700 border-gray-200 hover:border-purple-300 hover:text-purple-700"
-                  }`}>
-                  {p}
-                </button>
+          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6 space-y-5">
+
+            {/* Step indicators */}
+            <div className="flex items-center gap-2">
+              {[1, 2].map((s) => (
+                <div key={s} className={`h-1.5 flex-1 rounded-full transition-colors ${purposeStep >= s ? "bg-purple-600" : "bg-gray-200"}`} />
               ))}
             </div>
-            <div className="flex gap-2 justify-end pt-1">
-              <button onClick={() => { setShowPurposeModal(false); setPurposePendingAction(null); }}
-                className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800 font-medium rounded-lg hover:bg-gray-100 transition-colors">
-                Cancel
-              </button>
-              <button onClick={confirmPurpose} disabled={!selectedPurpose}
-                className="px-4 py-2 text-sm bg-purple-600 text-white rounded-lg font-semibold hover:bg-purple-700 disabled:opacity-40 transition-colors">
-                Continue
-              </button>
-            </div>
+
+            {/* ── Step 1: Category ── */}
+            {purposeStep === 1 && (
+              <>
+                <div>
+                  <h3 className="text-base font-semibold text-gray-900">What type of data is this?</h3>
+                  <p className="text-sm text-gray-500 mt-0.5">We detected a category based on your description. Confirm or change it.</p>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  {CATEGORIES.map((cat) => (
+                    <button key={cat.label} onClick={() => { setSelectedCategory(cat.label); setCategoryOther(""); }}
+                      className={`text-left px-3 py-2.5 rounded-xl border text-sm font-medium transition-colors flex items-center justify-between gap-2 ${
+                        selectedCategory === cat.label
+                          ? "bg-purple-600 text-white border-purple-600"
+                          : "bg-white text-gray-700 border-gray-200 hover:border-purple-300 hover:text-purple-700"
+                      }`}>
+                      <span>{cat.label}</span>
+                      {cat.label === detectedCategory && selectedCategory !== cat.label && (
+                        <span className="text-[10px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-full font-semibold flex-shrink-0">Auto</span>
+                      )}
+                      {cat.label === detectedCategory && selectedCategory === cat.label && (
+                        <span className="text-[10px] bg-white/20 text-white px-1.5 py-0.5 rounded-full font-semibold flex-shrink-0">Auto</span>
+                      )}
+                    </button>
+                  ))}
+                </div>
+                {selectedCategory === "Other" && (
+                  <input
+                    type="text"
+                    value={categoryOther}
+                    onChange={(e) => setCategoryOther(e.target.value)}
+                    placeholder="Please specify the data category…"
+                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
+                    autoFocus
+                  />
+                )}
+                <div className="flex gap-2 justify-end">
+                  <button onClick={() => { setShowPurposeModal(false); setPurposePendingAction(null); }}
+                    className="px-4 py-2 text-sm text-gray-600 font-medium rounded-lg hover:bg-gray-100 transition-colors">
+                    Cancel
+                  </button>
+                  <button
+                    onClick={() => setPurposeStep(2)}
+                    disabled={!selectedCategory || (selectedCategory === "Other" && !categoryOther.trim())}
+                    className="px-4 py-2 text-sm bg-purple-600 text-white rounded-lg font-semibold hover:bg-purple-700 disabled:opacity-40 transition-colors">
+                    Next →
+                  </button>
+                </div>
+              </>
+            )}
+
+            {/* ── Step 2: Usage ── */}
+            {purposeStep === 2 && (
+              <>
+                <div>
+                  <h3 className="text-base font-semibold text-gray-900">What will you use this dataset for?</h3>
+                  <p className="text-sm text-gray-500 mt-0.5">Select how you intend to use the generated data.</p>
+                </div>
+                <div className="space-y-2">
+                  {USAGES.map((u) => (
+                    <button key={u} onClick={() => { setSelectedUsage(u); setUsageOther(""); }}
+                      className={`w-full text-left px-4 py-2.5 rounded-xl border text-sm font-medium transition-colors ${
+                        selectedUsage === u
+                          ? "bg-purple-600 text-white border-purple-600"
+                          : "bg-white text-gray-700 border-gray-200 hover:border-purple-300 hover:text-purple-700"
+                      }`}>
+                      {u}
+                    </button>
+                  ))}
+                </div>
+                {selectedUsage === "Other" && (
+                  <input
+                    type="text"
+                    value={usageOther}
+                    onChange={(e) => setUsageOther(e.target.value)}
+                    placeholder="Please describe how you will use this dataset…"
+                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
+                    autoFocus
+                  />
+                )}
+                <div className="flex gap-2 justify-between">
+                  <button onClick={() => setPurposeStep(1)}
+                    className="px-4 py-2 text-sm text-gray-600 font-medium rounded-lg hover:bg-gray-100 transition-colors">
+                    ← Back
+                  </button>
+                  <div className="flex gap-2">
+                    <button onClick={() => { setShowPurposeModal(false); setPurposePendingAction(null); }}
+                      className="px-4 py-2 text-sm text-gray-600 font-medium rounded-lg hover:bg-gray-100 transition-colors">
+                      Cancel
+                    </button>
+                    <button onClick={confirmPurpose}
+                      disabled={!selectedUsage || (selectedUsage === "Other" && !usageOther.trim())}
+                      className="px-4 py-2 text-sm bg-purple-600 text-white rounded-lg font-semibold hover:bg-purple-700 disabled:opacity-40 transition-colors">
+                      Generate
+                    </button>
+                  </div>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}
