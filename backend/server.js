@@ -630,6 +630,29 @@ async function initDB() {
       )
     `).catch(() => {});
 
+    // Multi-class enrollment table
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS student_classes (
+        id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        student_id    UUID NOT NULL,
+        instructor_id UUID NOT NULL,
+        course        VARCHAR(100) NOT NULL,
+        status        VARCHAR(20) DEFAULT 'pending',
+        enrolled_at   TIMESTAMPTZ DEFAULT NOW(),
+        UNIQUE(student_id, instructor_id, course)
+      )
+    `).catch(() => {});
+
+    // Migrate existing single-class enrollments into student_classes
+    await pool.query(`
+      INSERT INTO student_classes (student_id, instructor_id, course, status)
+      SELECT u.id, ins.id, u.course, COALESCE(u.approval_status, 'pending')
+      FROM users u
+      JOIN users ins ON ins.full_name = u.instructor AND ins.is_instructor = TRUE
+      WHERE u.instructor IS NOT NULL AND u.course IS NOT NULL
+      ON CONFLICT DO NOTHING
+    `).catch(() => {});
+
     // Student invitations sent manually by instructors
     await pool.query(`
       CREATE TABLE IF NOT EXISTS student_invitations (
@@ -2033,28 +2056,15 @@ app.post("/instructor/login", async (req, res) => {
 app.get("/instructor/students", async (req, res) => {
   try {
     const { instructor_id } = req.query;
-    if (!instructor_id)
-      return res.status(400).json({ error: "instructor_id is required" });
-
-    // Look up this instructor's full name, then match against students' instructor field
-    const instructorRow = await pool.query(
-      "SELECT COALESCE(first_name || ' ' || last_name, full_name) AS full_name FROM users WHERE id = $1 AND is_instructor = TRUE",
-      [instructor_id]
-    );
-    if (instructorRow.rows.length === 0)
-      return res.status(403).json({ error: "Not an instructor" });
-
-    const instructorName = instructorRow.rows[0].full_name;
-
+    if (!instructor_id) return res.status(400).json({ error: "instructor_id is required" });
     const result = await pool.query(
-      `SELECT id, COALESCE(first_name || ' ' || last_name, full_name) AS full_name,
-              email, course, instructor, approval_status, created_at
-       FROM users
-       WHERE instructor = $1 AND is_admin = FALSE AND is_instructor = FALSE
-       ORDER BY
-         CASE WHEN approval_status = 'pending' THEN 0 ELSE 1 END,
-         created_at DESC`,
-      [instructorName]
+      `SELECT u.id, COALESCE(u.first_name || ' ' || u.last_name, u.full_name) AS full_name,
+              u.email, sc.course, sc.status AS approval_status, sc.enrolled_at AS created_at, sc.id AS enrollment_id
+       FROM student_classes sc
+       JOIN users u ON u.id = sc.student_id
+       WHERE sc.instructor_id = $1
+       ORDER BY CASE WHEN sc.status = 'pending' THEN 0 ELSE 1 END, sc.enrolled_at DESC`,
+      [instructor_id]
     );
     res.json(result.rows);
   } catch (err) {
@@ -2063,25 +2073,27 @@ app.get("/instructor/students", async (req, res) => {
   }
 });
 
-// Approve a student
+// Approve a student (class-level)
 app.post("/instructor/approve/:userId", async (req, res) => {
   try {
     const { userId } = req.params;
+    const { instructor_id } = req.body ?? {};
+    // Update the specific class enrollment
+    if (instructor_id) {
+      await pool.query(
+        `UPDATE student_classes SET status = 'approved' WHERE student_id = $1 AND instructor_id = $2`,
+        [userId, instructor_id]
+      );
+    }
+    // Also approve at account level so student can log in
     const result = await pool.query(
       "UPDATE users SET approval_status = 'approved' WHERE id = $1 RETURNING email, COALESCE(first_name || ' ' || last_name, full_name) AS full_name",
       [userId]
     );
-    if (result.rows.length === 0)
-      return res.status(404).json({ error: "User not found" });
-
+    if (result.rows.length === 0) return res.status(404).json({ error: "User not found" });
     const { email, full_name } = result.rows[0];
-    if (EMAIL_READY) {
-      sendApprovalEmail(email, full_name).catch((e) =>
-        console.error("Approval email failed:", e.message)
-      );
-    }
-    const instructorId = req.body?.instructor_id;
-    if (instructorId) logActivity(instructorId, "student_approved", { student_name: full_name, student_email: email });
+    if (EMAIL_READY) sendApprovalEmail(email, full_name).catch((e) => console.error("Approval email failed:", e.message));
+    if (instructor_id) logActivity(instructor_id, "student_approved", { student_name: full_name, student_email: email });
     res.json({ ok: true });
   } catch (err) {
     console.error("Approve student error:", err.message);
@@ -2089,18 +2101,23 @@ app.post("/instructor/approve/:userId", async (req, res) => {
   }
 });
 
-// Reject a student
+// Reject a student (class-level)
 app.post("/instructor/reject/:userId", async (req, res) => {
   try {
     const { userId } = req.params;
+    const { instructor_id } = req.body ?? {};
+    if (instructor_id) {
+      await pool.query(
+        `UPDATE student_classes SET status = 'rejected' WHERE student_id = $1 AND instructor_id = $2`,
+        [userId, instructor_id]
+      );
+    }
     const result = await pool.query(
-      "UPDATE users SET approval_status = 'rejected' WHERE id = $1 RETURNING id, COALESCE(first_name || ' ' || last_name, full_name) AS full_name",
+      "SELECT COALESCE(first_name || ' ' || last_name, full_name) AS full_name FROM users WHERE id = $1",
       [userId]
     );
-    if (result.rows.length === 0)
-      return res.status(404).json({ error: "User not found" });
-    const instructorId = req.body?.instructor_id;
-    if (instructorId) logActivity(instructorId, "student_rejected", { student_name: result.rows[0].full_name });
+    if (result.rows.length === 0) return res.status(404).json({ error: "User not found" });
+    if (instructor_id) logActivity(instructor_id, "student_rejected", { student_name: result.rows[0].full_name });
     res.json({ ok: true });
   } catch (err) {
     console.error("Reject student error:", err.message);
@@ -2467,13 +2484,97 @@ app.get("/invite/:token", async (req, res) => {
   }
 });
 
+// Logged-in student joins a class via invite link
+app.post("/api/class-invite/join", async (req, res) => {
+  const { token, user_id } = req.body;
+  if (!token || !user_id) return res.status(400).json({ error: "token and user_id required" });
+  try {
+    const inv = await pool.query(
+      `SELECT ci.*, u.full_name AS instructor_name
+       FROM class_invitations ci JOIN users u ON u.id = ci.instructor_id
+       WHERE ci.token = $1 AND ci.active = TRUE`, [token]
+    );
+    if (!inv.rows.length) return res.status(404).json({ error: "Invitation not found or inactive" });
+    const { instructor_id, instructor_name, course } = inv.rows[0];
+    await pool.query(
+      `INSERT INTO student_classes (student_id, instructor_id, course, status)
+       VALUES ($1, $2, $3, 'pending') ON CONFLICT (student_id, instructor_id, course) DO NOTHING`,
+      [user_id, instructor_id, course]
+    );
+    // Update users.instructor/course for backward compat if not already set
+    await pool.query(
+      `UPDATE users SET instructor = COALESCE(instructor, $1), course = COALESCE(course, $2) WHERE id = $3`,
+      [instructor_name, course, user_id]
+    );
+    res.json({ ok: true, instructor_name, course });
+  } catch (err) {
+    console.error("Class join error:", err.message);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+// Get all classes for a student
+app.get("/api/student/:id/classes", async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT sc.id, sc.course, sc.status, sc.enrolled_at,
+              u.id AS instructor_id, u.full_name AS instructor_name
+       FROM student_classes sc
+       JOIN users u ON u.id = sc.instructor_id
+       WHERE sc.student_id = $1
+       ORDER BY sc.enrolled_at DESC`,
+      [req.params.id]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+// Student unenrolls from a class
+app.delete("/api/student/:id/classes/:classId", async (req, res) => {
+  try {
+    await pool.query(
+      `DELETE FROM student_classes WHERE id = $1 AND student_id = $2`,
+      [req.params.classId, req.params.id]
+    );
+    // Clear users.instructor/course if no approved classes remain
+    const remaining = await pool.query(
+      `SELECT id FROM student_classes WHERE student_id = $1 AND status = 'approved' LIMIT 1`,
+      [req.params.id]
+    );
+    if (!remaining.rows.length) {
+      const firstClass = await pool.query(
+        `SELECT sc.course, u.full_name AS instructor_name
+         FROM student_classes sc JOIN users u ON u.id = sc.instructor_id
+         WHERE sc.student_id = $1 ORDER BY sc.enrolled_at DESC LIMIT 1`,
+        [req.params.id]
+      );
+      if (firstClass.rows.length) {
+        await pool.query(`UPDATE users SET instructor = $1, course = $2 WHERE id = $3`,
+          [firstClass.rows[0].instructor_name, firstClass.rows[0].course, req.params.id]);
+      } else {
+        await pool.query(`UPDATE users SET instructor = NULL, course = NULL WHERE id = $1`, [req.params.id]);
+      }
+    }
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
 // ── Instructor: manual student management ─────────────────────────────────────
 app.patch("/instructor/students/:studentId/remove", async (req, res) => {
   try {
-    await pool.query(
-      "UPDATE users SET instructor = NULL, course = NULL, approval_status = 'pending' WHERE id = $1",
-      [req.params.studentId]
-    );
+    const { instructor_id } = req.body ?? {};
+    if (instructor_id) {
+      await pool.query(
+        `DELETE FROM student_classes WHERE student_id = $1 AND instructor_id = $2`,
+        [req.params.studentId, instructor_id]
+      );
+    } else {
+      await pool.query(`UPDATE users SET instructor = NULL, course = NULL, approval_status = 'pending' WHERE id = $1`, [req.params.studentId]);
+    }
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: "Server error" });
@@ -2549,9 +2650,15 @@ app.post("/api/invitation/accept", async (req, res) => {
     if (!inv.rows.length) return res.status(404).json({ error: "Invitation not found or already used" });
     const { instructor_name, course } = inv.rows[0];
 
+    const { instructor_id } = inv.rows[0];
     await pool.query(
       "UPDATE users SET instructor = $1, course = $2, approval_status = 'approved' WHERE id = $3",
       [instructor_name, course, user_id]
+    );
+    await pool.query(
+      `INSERT INTO student_classes (student_id, instructor_id, course, status)
+       VALUES ($1, $2, $3, 'approved') ON CONFLICT (student_id, instructor_id, course) DO UPDATE SET status = 'approved'`,
+      [user_id, instructor_id, course]
     );
     await pool.query(
       "UPDATE student_invitations SET status = 'accepted' WHERE token = $1",

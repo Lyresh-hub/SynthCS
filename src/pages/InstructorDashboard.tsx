@@ -156,7 +156,11 @@ export default function InstructorDashboard() {
   const handleApprove = async (studentId: string) => {
     setActionId(studentId);
     try {
-      const res = await fetch(`${BACKEND}/instructor/approve/${studentId}`, { method: "POST" });
+      const res = await fetch(`${BACKEND}/instructor/approve/${studentId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ instructor_id: instructorId }),
+      });
       if (res.ok) setStudents((p) => p.map((s) => s.id === studentId ? { ...s, approval_status: "approved" } : s));
     } finally { setActionId(null); }
   };
@@ -164,16 +168,24 @@ export default function InstructorDashboard() {
   const handleReject = async (studentId: string) => {
     setActionId(studentId);
     try {
-      const res = await fetch(`${BACKEND}/instructor/reject/${studentId}`, { method: "POST" });
+      const res = await fetch(`${BACKEND}/instructor/reject/${studentId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ instructor_id: instructorId }),
+      });
       if (res.ok) setStudents((p) => p.map((s) => s.id === studentId ? { ...s, approval_status: "rejected" } : s));
     } finally { setActionId(null); }
   };
 
   const handleRemoveStudent = async (studentId: string) => {
-    if (!confirm("Remove this student from your class? They will need to re-register.")) return;
+    if (!confirm("Remove this student from your class? They will need to re-enroll.")) return;
     setActionId(studentId);
     try {
-      const res = await fetch(`${BACKEND}/instructor/students/${studentId}/remove`, { method: "PATCH" });
+      const res = await fetch(`${BACKEND}/instructor/students/${studentId}/remove`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ instructor_id: instructorId }),
+      });
       if (res.ok) setStudents((p) => p.filter((s) => s.id !== studentId));
     } finally { setActionId(null); }
   };

@@ -32,6 +32,7 @@ import AdminClasses from "./pages/AdminClasses";
 import ValidationReport from "./pages/ValidationReport";
 import AcceptInvitation from "./pages/AcceptInvitation";
 import Classes from "./pages/Classes";
+import JoinClass from "./pages/JoinClass";
 
 // Bago mag-start ang memory router, tignan muna natin kung may espesyal na params sa URL.
 // Halimbawa: kapag nag-click ang user ng verification link sa email, ang URL ay
@@ -46,7 +47,11 @@ function getInitialPath() {
   if (params.get("role") === "instructor") return `/instructor/register`;
   if (window.location.pathname === "/accept-invitation" && params.get("token"))
     return `/accept-invitation?token=${encodeURIComponent(params.get("token")!)}`;
-  if (params.get("invite"))      return `/signup?invite=${encodeURIComponent(params.get("invite")!)}`;
+  if (params.get("invite")) {
+    const uid = localStorage.getItem("user_id");
+    if (uid) return `/join-class?token=${encodeURIComponent(params.get("invite")!)}`;
+    return `/signup?invite=${encodeURIComponent(params.get("invite")!)}`;
+  }
   if (params.get("oauth_error")) return `/signup?oauth_error=${encodeURIComponent(params.get("oauth_error")!)}`;
   if (params.get("error")) {
     const email = params.get("email");
@@ -145,6 +150,7 @@ export default function App() {
               <Route path="/saved-schemas" component={SavedSchemas} />
               <Route path="/downloads" component={Downloads} />
               <Route path="/classes" component={Classes} />
+              <Route path="/join-class" component={JoinClass} />
               <Route path="/preview" component={DataPreview} />
               <Route path="/validation-report" component={ValidationReport} />
               <Route path="/api-access" component={APIAccess} />
