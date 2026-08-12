@@ -677,6 +677,18 @@ async function initDB() {
       )
     `).catch(() => {});
 
+    // Instructor restrictions — custom keywords, allowed categories/purposes, quota
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS instructor_restrictions (
+        id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        instructor_id   UUID NOT NULL,
+        restriction_type VARCHAR(30) NOT NULL,
+        value           TEXT NOT NULL,
+        action          VARCHAR(20) DEFAULT 'flag',
+        created_at      TIMESTAMPTZ DEFAULT NOW()
+      )
+    `).catch(() => {});
+
     console.log("✅ Database connected — all tables ready.");
   } catch (err) {
     console.error("❌ Database connection failed:", err.message);
@@ -2466,6 +2478,80 @@ app.patch("/instructor/invites/:id/toggle", async (req, res) => {
     );
     res.json({ active: result.rows[0].active });
   } catch (err) { res.status(500).json({ error: "Server error" }); }
+});
+
+// ── Instructor Restrictions (keywords, categories, purposes, quota) ──────────
+
+app.get("/api/instructor/:id/restrictions", async (req, res) => {
+  try {
+    const result = await pool.query(
+      "SELECT * FROM instructor_restrictions WHERE instructor_id = $1 ORDER BY created_at ASC",
+      [req.params.id]
+    );
+    res.json(result.rows);
+  } catch { res.status(500).json({ error: "Server error" }); }
+});
+
+app.post("/api/instructor/:id/restrictions", async (req, res) => {
+  const { restriction_type, value, action } = req.body;
+  if (!restriction_type || !value?.trim()) return res.status(400).json({ error: "Missing fields" });
+  try {
+    const result = await pool.query(
+      "INSERT INTO instructor_restrictions (instructor_id, restriction_type, value, action) VALUES ($1, $2, $3, $4) RETURNING *",
+      [req.params.id, restriction_type, value.trim(), action || "flag"]
+    );
+    res.json(result.rows[0]);
+  } catch { res.status(500).json({ error: "Server error" }); }
+});
+
+app.delete("/api/instructor/:id/restrictions/:rId", async (req, res) => {
+  try {
+    await pool.query(
+      "DELETE FROM instructor_restrictions WHERE id = $1 AND instructor_id = $2",
+      [req.params.rId, req.params.id]
+    );
+    res.json({ ok: true });
+  } catch { res.status(500).json({ error: "Server error" }); }
+});
+
+// Students fetch their active class's restrictions before generating
+app.get("/api/class-restrictions", async (req, res) => {
+  const { instructor_id } = req.query;
+  if (!instructor_id) return res.status(400).json({ error: "instructor_id required" });
+  try {
+    const result = await pool.query(
+      "SELECT * FROM instructor_restrictions WHERE instructor_id = $1 ORDER BY created_at ASC",
+      [instructor_id]
+    );
+    res.json(result.rows);
+  } catch { res.status(500).json({ error: "Server error" }); }
+});
+
+// Daily generation count for quota enforcement
+app.get("/api/student/:id/daily-count", async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT COUNT(*) FROM activity_log
+       WHERE user_id = $1 AND action_type = 'schema_generated'
+       AND created_at >= NOW() - INTERVAL '1 day'`,
+      [req.params.id]
+    );
+    res.json({ count: parseInt(result.rows[0].count, 10) });
+  } catch { res.status(500).json({ error: "Server error" }); }
+});
+
+// Student manually flags a prompt due to custom keyword match
+app.post("/api/student/flag-prompt", async (req, res) => {
+  const { student_id, instructor_id, prompt_text, flag_reason } = req.body;
+  if (!student_id || !prompt_text) return res.status(400).json({ error: "Missing fields" });
+  try {
+    await pool.query(
+      "INSERT INTO flagged_prompts (student_id, instructor_id, prompt_text, flag_reason) VALUES ($1, $2, $3, $4)",
+      [student_id, instructor_id || null, prompt_text, flag_reason || "Custom keyword match"]
+    );
+    logActivity(student_id, "prompt_flagged", { prompt_text, flag_reason });
+    res.json({ ok: true });
+  } catch { res.status(500).json({ error: "Server error" }); }
 });
 
 app.get("/invite/:token", async (req, res) => {

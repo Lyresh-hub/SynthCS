@@ -3,7 +3,7 @@ import { useLocation } from "wouter";
 import {
   Database, TrendingUp, BookMarked, Download,
   Plus, Sparkles, ChevronDown, FileSpreadsheet,
-  FileJson, FileCode, GraduationCap, X,
+  FileJson, FileCode, GraduationCap, X, Check,
 } from "lucide-react";
 import { cn } from "../lib/utils";
 
@@ -83,29 +83,58 @@ export default function Dashboard() {
     try { return JSON.parse(raw); } catch { return null; }
   });
 
-  // Class info — read from localStorage immediately, then confirm/update from API
+  // All enrolled classes (for multi-class switcher)
+  type ClassEntry = { id: string; course: string; status: string; instructor_id: string; instructor_name: string };
+  const [allClasses, setAllClasses] = useState<ClassEntry[]>([]);
+  const [activeClassId, setActiveClassId] = useState<string>(() => localStorage.getItem("active_class_id") ?? "");
+  const [switcherOpen, setSwitcherOpen] = useState(false);
+
+  // Class info — derived from active class or primary class
   const [classInfo, setClassInfo] = useState<{ instructor: string; course: string } | null>(() => {
     const instructor = localStorage.getItem("instructor");
     if (instructor) return { instructor, course: localStorage.getItem("course") ?? "" };
     return null;
   });
+
   useEffect(() => {
     if (!userId) return;
-    fetch(`${NODE_API}/api/users/${userId}`)
+    fetch(`${NODE_API}/api/student/${userId}/classes`)
       .then((r) => r.json())
-      .then((u) => {
-        if (u?.instructor) {
-          setClassInfo({ instructor: u.instructor, course: u.course ?? "" });
-          localStorage.setItem("instructor", u.instructor);
-          if (u.course) localStorage.setItem("course", u.course);
+      .then((data: ClassEntry[]) => {
+        if (!Array.isArray(data)) return;
+        const approved = data.filter((c) => c.status === "approved");
+        setAllClasses(approved);
+
+        // Determine active class
+        const storedId = localStorage.getItem("active_class_id");
+        const active = approved.find((c) => c.id === storedId) ?? approved[0] ?? null;
+        if (active) {
+          setActiveClassId(active.id);
+          localStorage.setItem("active_class_id", active.id);
+          localStorage.setItem("active_instructor_id", active.instructor_id);
+          setClassInfo({ instructor: active.instructor_name, course: active.course });
+          localStorage.setItem("instructor", active.instructor_name);
+          localStorage.setItem("course", active.course);
         } else {
           setClassInfo(null);
           localStorage.removeItem("instructor");
           localStorage.removeItem("course");
+          localStorage.removeItem("active_class_id");
+          localStorage.removeItem("active_instructor_id");
         }
       })
       .catch(() => {});
   }, [userId]);
+
+  const handleSwitchClass = (cls: ClassEntry) => {
+    setActiveClassId(cls.id);
+    localStorage.setItem("active_class_id", cls.id);
+    localStorage.setItem("active_instructor_id", cls.instructor_id);
+    setClassInfo({ instructor: cls.instructor_name, course: cls.course });
+    localStorage.setItem("instructor", cls.instructor_name);
+    localStorage.setItem("course", cls.course);
+    setSwitcherOpen(false);
+  };
 
   // Para sa Quick Generate section — yung rows slider, selected schema, at output format
   const [rows, setRows]                 = useState(1000);
@@ -234,18 +263,52 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* Your Class card — always visible */}
+      {/* Your Class card — always visible, with switcher for multi-class students */}
       {classInfo ? (
-        <div className="flex items-center gap-4 bg-purple-50 border border-purple-100 rounded-xl px-5 py-3">
-          <div className="w-9 h-9 rounded-lg bg-purple-100 flex items-center justify-center flex-shrink-0">
-            <GraduationCap className="w-5 h-5 text-purple-600" />
+        <div className="relative">
+          <div className="flex items-center gap-4 bg-purple-50 border border-purple-100 rounded-xl px-5 py-3">
+            <div className="w-9 h-9 rounded-lg bg-purple-100 flex items-center justify-center flex-shrink-0">
+              <GraduationCap className="w-5 h-5 text-purple-600" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-xs text-purple-500 font-medium">
+                Active Class {allClasses.length > 1 && <span className="ml-1 text-purple-400">({allClasses.length} classes)</span>}
+              </p>
+              <p className="text-sm font-semibold text-purple-900 truncate">
+                {classInfo.course || "Class"} &mdash; <span className="font-normal">{classInfo.instructor}</span>
+              </p>
+            </div>
+            {allClasses.length > 1 && (
+              <button
+                onClick={() => setSwitcherOpen((o) => !o)}
+                className="flex items-center gap-1 text-xs font-medium text-purple-600 hover:text-purple-800 border border-purple-200 hover:border-purple-400 bg-white px-2.5 py-1.5 rounded-lg transition-colors flex-shrink-0"
+              >
+                Switch <ChevronDown className="w-3.5 h-3.5" />
+              </button>
+            )}
           </div>
-          <div className="flex-1 min-w-0">
-            <p className="text-xs text-purple-500 font-medium">Your Class</p>
-            <p className="text-sm font-semibold text-purple-900 truncate">
-              {classInfo.course || "Class"} &mdash; <span className="font-normal">{classInfo.instructor}</span>
-            </p>
-          </div>
+          {switcherOpen && allClasses.length > 1 && (
+            <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-xl shadow-lg z-20 overflow-hidden">
+              {allClasses.map((cls) => (
+                <button
+                  key={cls.id}
+                  onClick={() => handleSwitchClass(cls)}
+                  className={`w-full text-left px-4 py-3 text-sm flex items-center gap-3 transition-colors ${
+                    cls.id === activeClassId ? "bg-purple-50 text-purple-900 font-semibold" : "text-gray-700 hover:bg-gray-50"
+                  }`}
+                >
+                  <div className="w-7 h-7 rounded-md bg-purple-100 flex items-center justify-center flex-shrink-0">
+                    <GraduationCap className="w-3.5 h-3.5 text-purple-600" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="font-medium truncate">{cls.course}</div>
+                    <div className="text-xs text-gray-400 truncate">{cls.instructor_name}</div>
+                  </div>
+                  {cls.id === activeClassId && <Check className="w-4 h-4 text-purple-600 flex-shrink-0" />}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       ) : (
         <div className="flex items-center gap-4 bg-gray-50 border border-dashed border-gray-200 rounded-xl px-5 py-3">

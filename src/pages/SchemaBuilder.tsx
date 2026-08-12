@@ -463,6 +463,20 @@ export default function SchemaBuilder() {
   const [usageOther, setUsageOther]               = useState("");
   const [purposePendingAction, setPurposePendingAction] = useState<"template" | "expand" | "generate" | null>(null);
 
+  // Class restrictions — loaded from the active instructor on mount
+  type RestrictionEntry = { id: string; restriction_type: string; value: string; action: string };
+  const [classRestrictions, setClassRestrictions] = useState<RestrictionEntry[]>([]);
+  const [restrictionError, setRestrictionError]   = useState("");
+
+  useEffect(() => {
+    const instructorId = localStorage.getItem("active_instructor_id") || localStorage.getItem("instructor_id");
+    if (!instructorId) return;
+    fetch(`${NODE_API}/api/class-restrictions?instructor_id=${instructorId}`)
+      .then((r) => r.json())
+      .then((data) => { if (Array.isArray(data)) setClassRestrictions(data); })
+      .catch(() => {});
+  }, []);
+
   const CATEGORIES = [
     { label: "Healthcare / Medical",   keywords: ["patient","hospital","doctor","medical","disease","health","diagnosis","treatment","prescription","nurse","clinic","medication","symptom","surgery","pharmacy"] },
     { label: "Finance / Banking",      keywords: ["bank","loan","credit","payment","transaction","fraud","account","balance","interest","mortgage","insurance","invest","stock","financial","money","billing"] },
@@ -489,6 +503,37 @@ export default function SchemaBuilder() {
 
   const askPurposeThen = (action: "template" | "expand" | "generate") => {
     const prompt = llmPrompt.trim() || tables.flatMap((t) => t.fields.map((f) => f.name)).join(" ");
+    const lower  = prompt.toLowerCase();
+
+    // Check for blocked custom keywords
+    const blocked = classRestrictions.find(
+      (r) => r.restriction_type === "keyword" && r.action === "block" && lower.includes(r.value.toLowerCase())
+    );
+    if (blocked) {
+      setRestrictionError(`Your prompt contains a blocked keyword: "${blocked.value}". Please revise before generating.`);
+      return;
+    }
+
+    // Flag custom keywords (flag action) — create flagged_prompt entry
+    const flaggedKw = classRestrictions.find(
+      (r) => r.restriction_type === "keyword" && r.action === "flag" && lower.includes(r.value.toLowerCase())
+    );
+    if (flaggedKw) {
+      const studentId  = localStorage.getItem("user_id") || "";
+      const instructorId = localStorage.getItem("active_instructor_id") || "";
+      fetch(`${NODE_API}/api/student/flag-prompt`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          student_id: studentId,
+          instructor_id: instructorId,
+          prompt_text: prompt,
+          flag_reason: `Custom keyword match: "${flaggedKw.value}"`,
+        }),
+      }).catch(() => {});
+    }
+
+    setRestrictionError("");
     const detected = detectCategory(prompt);
     setDetectedCategory(detected);
     setSelectedCategory(detected);
@@ -500,7 +545,23 @@ export default function SchemaBuilder() {
     setShowPurposeModal(true);
   };
 
-  const confirmPurpose = () => {
+  const confirmPurpose = async () => {
+    // Quota check
+    const quotaRule = classRestrictions.find((r) => r.restriction_type === "quota");
+    const studentId = localStorage.getItem("user_id");
+    if (quotaRule && studentId) {
+      try {
+        const res = await fetch(`${NODE_API}/api/student/${studentId}/daily-count`);
+        const { count } = await res.json();
+        const limit = parseInt(quotaRule.value, 10);
+        if (count >= limit) {
+          setRestrictionError(`You have reached your daily generation limit of ${limit} dataset${limit !== 1 ? "s" : ""}. Try again tomorrow.`);
+          setShowPurposeModal(false);
+          return;
+        }
+      } catch { /* quota check failed silently — allow generation */ }
+    }
+
     const finalCategory = selectedCategory === "Other" ? (categoryOther.trim() || "Other") : selectedCategory;
     const finalUsage    = selectedUsage    === "Other" ? (usageOther.trim()    || "Other") : selectedUsage;
     const combined = `${finalCategory} — ${finalUsage}`;
@@ -1941,14 +2002,23 @@ export default function SchemaBuilder() {
             </div>
 
             {/* ── Step 1: Category ── */}
-            {purposeStep === 1 && (
+            {purposeStep === 1 && (() => {
+              const allowedCats = classRestrictions.filter((r) => r.restriction_type === "allowed_category").map((r) => r.value);
+              const visibleCats = allowedCats.length > 0
+                ? CATEGORIES.filter((c) => allowedCats.includes(c.label) || c.label === "Other")
+                : CATEGORIES;
+              return (
               <>
                 <div>
                   <h3 className="text-base font-semibold text-gray-900">What type of data is this?</h3>
-                  <p className="text-sm text-gray-500 mt-0.5">We detected a category based on your description. Confirm or change it.</p>
+                  <p className="text-sm text-gray-500 mt-0.5">
+                    {allowedCats.length > 0
+                      ? "Your instructor has restricted which categories are available for this class."
+                      : "We detected a category based on your description. Confirm or change it."}
+                  </p>
                 </div>
                 <div className="grid grid-cols-2 gap-2">
-                  {CATEGORIES.map((cat) => (
+                  {visibleCats.map((cat) => (
                     <button key={cat.label} onClick={() => { setSelectedCategory(cat.label); setCategoryOther(""); }}
                       className={`text-left px-3 py-2.5 rounded-xl border text-sm font-medium transition-colors flex items-center justify-between gap-2 ${
                         selectedCategory === cat.label
@@ -1988,17 +2058,27 @@ export default function SchemaBuilder() {
                   </button>
                 </div>
               </>
-            )}
+              );
+            })()}
 
             {/* ── Step 2: Usage ── */}
-            {purposeStep === 2 && (
+            {purposeStep === 2 && (() => {
+              const allowedPurposes = classRestrictions.filter((r) => r.restriction_type === "allowed_purpose").map((r) => r.value);
+              const visibleUsages = allowedPurposes.length > 0
+                ? USAGES.filter((u) => allowedPurposes.includes(u) || u === "Other")
+                : USAGES;
+              return (
               <>
                 <div>
                   <h3 className="text-base font-semibold text-gray-900">What will you use this dataset for?</h3>
-                  <p className="text-sm text-gray-500 mt-0.5">Select how you intend to use the generated data.</p>
+                  <p className="text-sm text-gray-500 mt-0.5">
+                    {allowedPurposes.length > 0
+                      ? "Your instructor has restricted which purposes are allowed for this class."
+                      : "Select how you intend to use the generated data."}
+                  </p>
                 </div>
                 <div className="space-y-2">
-                  {USAGES.map((u) => (
+                  {visibleUsages.map((u) => (
                     <button key={u} onClick={() => { setSelectedUsage(u); setUsageOther(""); }}
                       className={`w-full text-left px-4 py-2.5 rounded-xl border text-sm font-medium transition-colors ${
                         selectedUsage === u
@@ -2037,7 +2117,8 @@ export default function SchemaBuilder() {
                   </div>
                 </div>
               </>
-            )}
+              );
+            })()}
           </div>
         </div>
       )}
@@ -2077,6 +2158,18 @@ export default function SchemaBuilder() {
             <div className="mx-4 mb-3 flex items-start gap-2.5 bg-red-50 border border-red-200 rounded-lg px-3 py-2.5">
               <AlertCircle className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5" />
               <p className="text-xs text-red-700 leading-relaxed">{sanitizeErrorMsg(llmError)}</p>
+            </div>
+          )}
+          {restrictionError && (
+            <div className="mx-4 mb-3 flex items-start gap-2.5 bg-red-50 border border-red-300 rounded-lg px-3 py-2.5">
+              <AlertCircle className="w-4 h-4 text-red-600 flex-shrink-0 mt-0.5" />
+              <div className="flex-1">
+                <p className="text-xs font-semibold text-red-800">Blocked by instructor restriction</p>
+                <p className="text-xs text-red-700 mt-0.5 leading-relaxed">{restrictionError}</p>
+              </div>
+              <button onClick={() => setRestrictionError("")} className="text-red-400 hover:text-red-600 flex-shrink-0">
+                <X className="w-3.5 h-3.5" />
+              </button>
             </div>
           )}
           {pendingReview && (

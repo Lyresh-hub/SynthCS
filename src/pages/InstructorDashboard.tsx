@@ -3,7 +3,7 @@ import { useLocation } from "wouter";
 import {
   LogOut, Clock, CheckCircle, XCircle, Users, AlertTriangle,
   Activity, Link as LinkIcon, Plus, Trash2, UserMinus, UserPlus, Copy, Check,
-  MessageSquare, Search, ChevronDown, ChevronUp, ShieldAlert,
+  MessageSquare, Search, ChevronDown, ChevronUp, ShieldAlert, Shield, Ban,
 } from "lucide-react";
 import { NODE_API as BACKEND } from "../lib/config";
 
@@ -47,7 +47,22 @@ type Invite = {
   created_at: string;
 };
 
-type Tab = "pending" | "flagged" | "activity" | "students" | "invites" | "prompts";
+type Tab = "pending" | "flagged" | "activity" | "students" | "invites" | "prompts" | "restrictions";
+
+type Restriction = {
+  id: string;
+  restriction_type: "keyword" | "allowed_category" | "allowed_purpose" | "quota";
+  value: string;
+  action: "flag" | "block";
+  created_at: string;
+};
+
+const ALL_CATEGORIES = [
+  "Healthcare / Medical", "Finance / Banking", "E-Commerce / Retail",
+  "Education / Academic", "Human Resources", "Logistics / Supply Chain",
+  "Government / Public Records", "Technology / Software", "Other",
+];
+const ALL_PURPOSES = ["Homework", "Project", "Research", "Testing / Evaluation"];
 
 const FRONTEND = "https://synthcs.site";
 
@@ -85,6 +100,14 @@ export default function InstructorDashboard() {
   const [promptSearch,   setPromptSearch]   = useState("");
 
   const [expandedRow, setExpandedRow] = useState<string | null>(null);
+
+  // Restrictions tab state
+  const [restrictions,        setRestrictions]        = useState<Restriction[]>([]);
+  const [loadingRestrictions, setLoadingRestrictions] = useState(false);
+  const [newKeyword,          setNewKeyword]          = useState("");
+  const [newKeywordAction,    setNewKeywordAction]    = useState<"flag" | "block">("flag");
+  const [quotaInput,          setQuotaInput]          = useState("");
+  const [savingRestriction,   setSavingRestriction]   = useState(false);
 
   const SUSPICIOUS_KEYWORDS = [
     "fake", "forged", "counterfeit", "illegal", "fraud", "stolen", "laundering",
@@ -147,11 +170,25 @@ export default function InstructorDashboard() {
     } finally { setLoadingPrompts(false); }
   }, [instructorId]);
 
+  const fetchRestrictions = useCallback(async () => {
+    setLoadingRestrictions(true);
+    try {
+      const res = await fetch(`${BACKEND}/api/instructor/${instructorId}/restrictions`);
+      if (res.ok) {
+        const data: Restriction[] = await res.json();
+        setRestrictions(data);
+        const quota = data.find((r) => r.restriction_type === "quota");
+        if (quota) setQuotaInput(quota.value);
+      }
+    } finally { setLoadingRestrictions(false); }
+  }, [instructorId]);
+
   useEffect(() => { fetchStudents(); }, [fetchStudents]);
-  useEffect(() => { if (tab === "flagged")  fetchFlagged();  }, [tab, fetchFlagged]);
-  useEffect(() => { if (tab === "activity") fetchActivity(); }, [tab, fetchActivity]);
-  useEffect(() => { if (tab === "invites")  fetchInvites();  }, [tab, fetchInvites]);
-  useEffect(() => { if (tab === "prompts")  fetchPrompts();  }, [tab, fetchPrompts]);
+  useEffect(() => { if (tab === "flagged")       fetchFlagged();       }, [tab, fetchFlagged]);
+  useEffect(() => { if (tab === "activity")      fetchActivity();      }, [tab, fetchActivity]);
+  useEffect(() => { if (tab === "invites")       fetchInvites();       }, [tab, fetchInvites]);
+  useEffect(() => { if (tab === "prompts")       fetchPrompts();       }, [tab, fetchPrompts]);
+  useEffect(() => { if (tab === "restrictions")  fetchRestrictions();  }, [tab, fetchRestrictions]);
 
   const handleApprove = async (studentId: string) => {
     setActionId(studentId);
@@ -255,6 +292,77 @@ export default function InstructorDashboard() {
     setTimeout(() => setCopiedId(null), 2000);
   };
 
+  const handleAddKeyword = async () => {
+    if (!newKeyword.trim()) return;
+    setSavingRestriction(true);
+    try {
+      const res = await fetch(`${BACKEND}/api/instructor/${instructorId}/restrictions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ restriction_type: "keyword", value: newKeyword.trim(), action: newKeywordAction }),
+      });
+      if (res.ok) { const r = await res.json(); setRestrictions((p) => [...p, r]); setNewKeyword(""); }
+    } finally { setSavingRestriction(false); }
+  };
+
+  const handleToggleCategory = async (cat: string, isChecked: boolean) => {
+    if (isChecked) {
+      const res = await fetch(`${BACKEND}/api/instructor/${instructorId}/restrictions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ restriction_type: "allowed_category", value: cat }),
+      });
+      if (res.ok) { const r = await res.json(); setRestrictions((p) => [...p, r]); }
+    } else {
+      const existing = restrictions.find((r) => r.restriction_type === "allowed_category" && r.value === cat);
+      if (!existing) return;
+      await fetch(`${BACKEND}/api/instructor/${instructorId}/restrictions/${existing.id}`, { method: "DELETE" });
+      setRestrictions((p) => p.filter((r) => r.id !== existing.id));
+    }
+  };
+
+  const handleTogglePurpose = async (purpose: string, isChecked: boolean) => {
+    if (isChecked) {
+      const res = await fetch(`${BACKEND}/api/instructor/${instructorId}/restrictions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ restriction_type: "allowed_purpose", value: purpose }),
+      });
+      if (res.ok) { const r = await res.json(); setRestrictions((p) => [...p, r]); }
+    } else {
+      const existing = restrictions.find((r) => r.restriction_type === "allowed_purpose" && r.value === purpose);
+      if (!existing) return;
+      await fetch(`${BACKEND}/api/instructor/${instructorId}/restrictions/${existing.id}`, { method: "DELETE" });
+      setRestrictions((p) => p.filter((r) => r.id !== existing.id));
+    }
+  };
+
+  const handleSaveQuota = async () => {
+    const n = parseInt(quotaInput, 10);
+    if (isNaN(n) || n < 0) return;
+    setSavingRestriction(true);
+    try {
+      const existing = restrictions.find((r) => r.restriction_type === "quota");
+      if (existing) {
+        await fetch(`${BACKEND}/api/instructor/${instructorId}/restrictions/${existing.id}`, { method: "DELETE" });
+        setRestrictions((p) => p.filter((r) => r.id !== existing.id));
+      }
+      if (n > 0) {
+        const res = await fetch(`${BACKEND}/api/instructor/${instructorId}/restrictions`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ restriction_type: "quota", value: String(n) }),
+        });
+        if (res.ok) { const r = await res.json(); setRestrictions((p) => [...p, r]); }
+      }
+    } finally { setSavingRestriction(false); }
+  };
+
+  const handleDeleteRestriction = async (id: string) => {
+    await fetch(`${BACKEND}/api/instructor/${instructorId}/restrictions/${id}`, { method: "DELETE" });
+    setRestrictions((p) => p.filter((r) => r.id !== id));
+  };
+
   const handleSignOut = () => {
     ["user_id","user_name","is_admin","is_instructor","last_path"].forEach((k) => localStorage.removeItem(k));
     setLocation("/login");
@@ -264,12 +372,13 @@ export default function InstructorDashboard() {
   const flaggedCount = flagged.filter((f) => f.status === "pending").length;
 
   const TABS: { id: Tab; label: string; icon: React.ReactNode; badge?: number }[] = [
-    { id: "pending",  label: "Approvals",       icon: <Clock className="w-3.5 h-3.5" />,         badge: pendingCount },
-    { id: "flagged",  label: "Flagged Prompts",  icon: <AlertTriangle className="w-3.5 h-3.5" />, badge: flaggedCount },
-    { id: "activity", label: "Activity",         icon: <Activity className="w-3.5 h-3.5" /> },
-    { id: "students", label: "Students",         icon: <Users className="w-3.5 h-3.5" /> },
-    { id: "invites",  label: "Invite Links",   icon: <LinkIcon className="w-3.5 h-3.5" /> },
-    { id: "prompts",  label: "Prompt History", icon: <MessageSquare className="w-3.5 h-3.5" /> },
+    { id: "pending",      label: "Approvals",       icon: <Clock className="w-3.5 h-3.5" />,         badge: pendingCount },
+    { id: "flagged",      label: "Flagged Prompts",  icon: <AlertTriangle className="w-3.5 h-3.5" />, badge: flaggedCount },
+    { id: "activity",     label: "Activity",         icon: <Activity className="w-3.5 h-3.5" /> },
+    { id: "students",     label: "Students",         icon: <Users className="w-3.5 h-3.5" /> },
+    { id: "invites",      label: "Invite Links",     icon: <LinkIcon className="w-3.5 h-3.5" /> },
+    { id: "prompts",      label: "Prompt History",   icon: <MessageSquare className="w-3.5 h-3.5" /> },
+    { id: "restrictions", label: "Restrictions",     icon: <Shield className="w-3.5 h-3.5" /> },
   ];
 
   return (
@@ -578,6 +687,193 @@ export default function InstructorDashboard() {
                 );
               })()}
             </div>
+          </div>
+        )}
+
+        {tab === "restrictions" && (
+          <div className="space-y-5">
+            {loadingRestrictions ? (
+              <div className="py-16 text-center text-sm text-gray-400">Loading…</div>
+            ) : (
+              <>
+                {/* System Keywords */}
+                <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+                  <div className="px-5 py-4 border-b border-gray-100 flex items-center gap-2">
+                    <ShieldAlert className="w-4 h-4 text-red-500" />
+                    <p className="text-sm font-semibold text-gray-800">System-level Trigger Words</p>
+                    <span className="ml-auto text-xs text-gray-400 bg-gray-100 px-2 py-0.5 rounded-full">Read-only</span>
+                  </div>
+                  <div className="px-5 py-4">
+                    <p className="text-xs text-gray-500 mb-3">
+                      These keywords are automatically detected in all student prompts. Prompts containing them are flagged for your review.
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      {SUSPICIOUS_KEYWORDS.map((kw) => (
+                        <span key={kw} className="px-2.5 py-1 rounded-full text-xs font-medium bg-red-50 text-red-700 border border-red-200">
+                          {kw}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Custom Keywords */}
+                <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+                  <div className="px-5 py-4 border-b border-gray-100 flex items-center gap-2">
+                    <Plus className="w-4 h-4 text-purple-500" />
+                    <p className="text-sm font-semibold text-gray-800">Custom Trigger Words</p>
+                  </div>
+                  <div className="px-5 py-4 space-y-4">
+                    <p className="text-xs text-gray-500">
+                      Add words specific to your course. <strong>Flag</strong> → prompt is flagged for your review but generation proceeds. <strong>Block</strong> → student cannot generate with this keyword.
+                    </p>
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        value={newKeyword}
+                        onChange={(e) => setNewKeyword(e.target.value)}
+                        onKeyDown={(e) => e.key === "Enter" && handleAddKeyword()}
+                        placeholder="e.g. SSN, credit card, patient record…"
+                        className="flex-1 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
+                      />
+                      <select
+                        value={newKeywordAction}
+                        onChange={(e) => setNewKeywordAction(e.target.value as "flag" | "block")}
+                        className="border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-purple-500"
+                      >
+                        <option value="flag">Flag</option>
+                        <option value="block">Block</option>
+                      </select>
+                      <button onClick={handleAddKeyword} disabled={savingRestriction || !newKeyword.trim()}
+                        className="flex items-center gap-1.5 px-4 py-2 bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition-colors">
+                        <Plus className="w-4 h-4" /> Add
+                      </button>
+                    </div>
+                    {restrictions.filter((r) => r.restriction_type === "keyword").length === 0 ? (
+                      <p className="text-xs text-gray-400 text-center py-3">No custom keywords added yet.</p>
+                    ) : (
+                      <div className="space-y-2">
+                        {restrictions.filter((r) => r.restriction_type === "keyword").map((r) => (
+                          <div key={r.id} className="flex items-center justify-between px-3 py-2 rounded-lg bg-gray-50 border border-gray-100">
+                            <div className="flex items-center gap-2">
+                              {r.action === "block"
+                                ? <Ban className="w-3.5 h-3.5 text-red-500" />
+                                : <AlertTriangle className="w-3.5 h-3.5 text-amber-500" />}
+                              <span className="text-sm font-medium text-gray-800">{r.value}</span>
+                              <span className={`text-xs px-2 py-0.5 rounded-full font-medium border ${
+                                r.action === "block"
+                                  ? "bg-red-50 text-red-700 border-red-200"
+                                  : "bg-amber-50 text-amber-700 border-amber-200"
+                              }`}>{r.action === "block" ? "Block" : "Flag"}</span>
+                            </div>
+                            <button onClick={() => handleDeleteRestriction(r.id)}
+                              className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors">
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Allowed Categories */}
+                <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+                  <div className="px-5 py-4 border-b border-gray-100">
+                    <p className="text-sm font-semibold text-gray-800">Allowed Data Categories</p>
+                    <p className="text-xs text-gray-500 mt-0.5">
+                      Check the categories your students are allowed to generate. If none are checked, all categories are allowed.
+                    </p>
+                  </div>
+                  <div className="px-5 py-4">
+                    <div className="grid grid-cols-2 gap-2">
+                      {ALL_CATEGORIES.map((cat) => {
+                        const isAllowed = restrictions.some((r) => r.restriction_type === "allowed_category" && r.value === cat);
+                        return (
+                          <label key={cat} className="flex items-center gap-2.5 px-3 py-2.5 rounded-lg border border-gray-100 hover:bg-gray-50 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={isAllowed}
+                              onChange={(e) => handleToggleCategory(cat, e.target.checked)}
+                              className="w-4 h-4 accent-purple-600 cursor-pointer"
+                            />
+                            <span className="text-sm text-gray-700">{cat}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                    {restrictions.some((r) => r.restriction_type === "allowed_category") && (
+                      <div className="mt-3 bg-purple-50 border border-purple-100 rounded-lg px-3 py-2 text-xs text-purple-700">
+                        Students can only generate datasets in the checked categories. Uncheck all to lift this restriction.
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Allowed Purposes */}
+                <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+                  <div className="px-5 py-4 border-b border-gray-100">
+                    <p className="text-sm font-semibold text-gray-800">Allowed Declared Purposes</p>
+                    <p className="text-xs text-gray-500 mt-0.5">
+                      Check the purposes students are allowed to declare. If none are checked, all purposes are allowed.
+                    </p>
+                  </div>
+                  <div className="px-5 py-4">
+                    <div className="grid grid-cols-2 gap-2">
+                      {ALL_PURPOSES.map((purpose) => {
+                        const isAllowed = restrictions.some((r) => r.restriction_type === "allowed_purpose" && r.value === purpose);
+                        return (
+                          <label key={purpose} className="flex items-center gap-2.5 px-3 py-2.5 rounded-lg border border-gray-100 hover:bg-gray-50 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={isAllowed}
+                              onChange={(e) => handleTogglePurpose(purpose, e.target.checked)}
+                              className="w-4 h-4 accent-purple-600 cursor-pointer"
+                            />
+                            <span className="text-sm text-gray-700">{purpose}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                    {restrictions.some((r) => r.restriction_type === "allowed_purpose") && (
+                      <div className="mt-3 bg-purple-50 border border-purple-100 rounded-lg px-3 py-2 text-xs text-purple-700">
+                        Students must declare one of the checked purposes. Uncheck all to lift this restriction.
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Daily Generation Quota */}
+                <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+                  <div className="px-5 py-4 border-b border-gray-100">
+                    <p className="text-sm font-semibold text-gray-800">Daily Generation Quota</p>
+                    <p className="text-xs text-gray-500 mt-0.5">
+                      Limit how many datasets a student can generate per day. Set to 0 for no limit.
+                    </p>
+                  </div>
+                  <div className="px-5 py-4 flex items-center gap-3">
+                    <input
+                      type="number"
+                      min={0}
+                      max={100}
+                      value={quotaInput}
+                      onChange={(e) => setQuotaInput(e.target.value)}
+                      placeholder="0 = unlimited"
+                      className="w-32 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
+                    />
+                    <button onClick={handleSaveQuota} disabled={savingRestriction}
+                      className="flex items-center gap-1.5 px-4 py-2 bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition-colors">
+                      <Check className="w-4 h-4" /> Save Quota
+                    </button>
+                    {restrictions.find((r) => r.restriction_type === "quota") && (
+                      <span className="text-xs text-green-600 font-medium">
+                        Active: {restrictions.find((r) => r.restriction_type === "quota")?.value} datasets/day
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </>
+            )}
           </div>
         )}
 
