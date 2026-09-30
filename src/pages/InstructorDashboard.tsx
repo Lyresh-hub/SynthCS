@@ -67,11 +67,21 @@ const ALL_PURPOSES = ["Homework", "Project", "Research", "Testing / Evaluation"]
 const FRONTEND = "https://synthcs.site";
 
 const ACTION_LABELS: Record<string, { label: string; color: string }> = {
-  schema_generated:   { label: "Generated schema",   color: "text-purple-600 bg-purple-50 border-purple-100" },
+  dataset_search:     { label: "Searched datasets",   color: "text-amber-700 bg-amber-50 border-amber-100" },
+  ai_search:          { label: "AI search",           color: "text-indigo-600 bg-indigo-50 border-indigo-100" },
+  schema_generated:   { label: "Generated schema",    color: "text-purple-600 bg-purple-50 border-purple-100" },
   schema_saved:       { label: "Saved schema",        color: "text-blue-600 bg-blue-50 border-blue-100" },
+  dataset_uploaded:   { label: "Uploaded CSV",        color: "text-cyan-700 bg-cyan-50 border-cyan-100" },
+  dataset_generated:  { label: "Generated dataset",   color: "text-emerald-700 bg-emerald-50 border-emerald-100" },
   dataset_downloaded: { label: "Downloaded dataset",  color: "text-green-600 bg-green-50 border-green-100" },
   prompt_flagged:     { label: "Prompt flagged",      color: "text-red-600 bg-red-50 border-red-100" },
 };
+
+const formatActivityTime = (iso: string) =>
+  new Date(iso).toLocaleString("en-US", {
+    year: "numeric", month: "short", day: "numeric",
+    hour: "2-digit", minute: "2-digit", second: "2-digit",
+  });
 
 export default function InstructorDashboard() {
   const [, setLocation] = useLocation();
@@ -88,6 +98,7 @@ export default function InstructorDashboard() {
   const [loadingStudents, setLoadingStudents] = useState(true);
   const [loadingFlagged,  setLoadingFlagged]  = useState(false);
   const [loadingActivity, setLoadingActivity] = useState(false);
+  const [activityOrder,   setActivityOrder]   = useState<"newest" | "oldest">("newest");
   const [loadingInvites,  setLoadingInvites]  = useState(false);
 
   type PromptEntry = {
@@ -481,6 +492,21 @@ export default function InstructorDashboard() {
             ) : activity.length === 0 ? (
               <EmptyState icon={<Activity className="w-5 h-5 text-gray-300" />} text="No activity recorded yet." />
             ) : (
+              <>
+              <div className="flex items-center justify-between gap-3 px-5 py-3 border-b border-gray-100">
+                <p className="text-xs text-gray-500">{activity.length} recorded {activity.length === 1 ? "activity" : "activities"}</p>
+                <div className="inline-flex rounded-lg border border-gray-200 overflow-hidden text-xs">
+                  {(["newest", "oldest"] as const).map((o) => (
+                    <button
+                      key={o}
+                      onClick={() => setActivityOrder(o)}
+                      className={`px-3 py-1.5 font-medium transition-colors ${activityOrder === o ? "bg-gray-900 text-white" : "bg-white text-gray-500 hover:bg-gray-50"}`}
+                    >
+                      {o === "newest" ? "Newest first" : "Oldest first"}
+                    </button>
+                  ))}
+                </div>
+              </div>
               <div className="overflow-x-auto">
                 <table className="w-full text-sm min-w-[640px]">
                   <thead>
@@ -493,7 +519,12 @@ export default function InstructorDashboard() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-50">
-                    {activity.map((a) => {
+                    {[...activity]
+                      .sort((x, y) => {
+                        const diff = new Date(x.created_at).getTime() - new Date(y.created_at).getTime();
+                        return activityOrder === "oldest" ? diff : -diff;
+                      })
+                      .map((a) => {
                       const meta = ACTION_LABELS[a.action_type] ?? { label: a.action_type, color: "text-gray-500 bg-gray-50 border-gray-100" };
                       const promptText = String(a.details.prompt_text ?? "");
                       const purpose    = String(a.details.purpose   ?? "");
@@ -501,12 +532,14 @@ export default function InstructorDashboard() {
                       const suspicious = promptText && isSuspicious(promptText);
                       const isExpanded = expandedRow === a.id;
                       const summaryText =
-                        (a.action_type === "schema_generated" || a.action_type === "prompt_flagged")
+                        promptText
                           ? promptText
                           : a.action_type === "schema_saved"
                           ? String(a.details.schema_name ?? "")
-                          : a.action_type === "dataset_downloaded"
+                          : a.action_type === "dataset_downloaded" || a.action_type === "dataset_generated"
                           ? `${a.details.table_name ?? ""} · ${a.details.rows != null ? Number(a.details.rows).toLocaleString() : "?"} rows`
+                          : a.action_type === "dataset_uploaded"
+                          ? String(a.details.file_name ?? "")
                           : "—";
 
                       return (
@@ -546,7 +579,7 @@ export default function InstructorDashboard() {
                               )}
                             </td>
                             <td className="px-5 py-3 text-xs text-gray-400 whitespace-nowrap">
-                              {new Date(a.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+                              {formatActivityTime(a.created_at)}
                             </td>
                             <td className="px-3 py-3 text-gray-300">
                               {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
@@ -558,7 +591,7 @@ export default function InstructorDashboard() {
                                 <div className="space-y-2 text-xs">
                                   {promptText && (
                                     <div>
-                                      <p className="font-semibold text-gray-600 mb-1">Full prompt / description</p>
+                                      <p className="font-semibold text-gray-600 mb-1">Original prompt (as typed by the student)</p>
                                       <p className="text-gray-700 leading-relaxed whitespace-pre-wrap bg-white border border-gray-100 rounded-lg px-3 py-2">
                                         {promptText}
                                       </p>
@@ -576,12 +609,25 @@ export default function InstructorDashboard() {
                                       <p className="text-purple-700 font-medium">{purpose}</p>
                                     </div>
                                   )}
-                                  {a.action_type === "dataset_downloaded" && (
+                                  {(a.action_type === "dataset_downloaded" || a.action_type === "dataset_generated") && (
                                     <div className="text-gray-500">
                                       Table: <strong>{String(a.details.table_name ?? "—")}</strong> ·{" "}
                                       Rows: <strong>{a.details.rows != null ? Number(a.details.rows).toLocaleString() : "—"}</strong>
+                                      {a.details.source ? <> · Source: <strong>{String(a.details.source)}</strong></> : null}
+                                      {a.details.kaggle_ref ? <> · Ref: <strong>{String(a.details.kaggle_ref)}</strong></> : null}
                                     </div>
                                   )}
+                                  {a.action_type === "dataset_uploaded" && (
+                                    <div className="text-gray-500">
+                                      File: <strong>{String(a.details.file_name ?? "—")}</strong>
+                                    </div>
+                                  )}
+                                  {a.action_type === "prompt_flagged" && a.details.flag_reason ? (
+                                    <div className="text-red-600">
+                                      Flag reason: <strong>{String(a.details.flag_reason)}</strong>
+                                    </div>
+                                  ) : null}
+                                  <div className="text-gray-400">{formatActivityTime(a.created_at)}</div>
                                   {suspicious && (
                                     <div className="flex items-start gap-2 bg-red-50 border border-red-200 rounded-lg px-3 py-2 text-red-700">
                                       <ShieldAlert className="w-4 h-4 flex-shrink-0 mt-0.5" />
@@ -598,11 +644,12 @@ export default function InstructorDashboard() {
                   </tbody>
                 </table>
               </div>
+              </>
             )}
           </div>
         )}
 
-        {tab === "students" && (
+        {tab ==="students" && (
           <div className="space-y-4">
             <div className="bg-white rounded-xl border border-gray-100 shadow-sm px-5 py-4">
               <p className="text-sm font-semibold text-gray-800 mb-3 flex items-center gap-2">

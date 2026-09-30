@@ -876,6 +876,8 @@ export default function SchemaBuilder() {
       });
       if (!res.ok) throw new Error(await parsePythonError(res));
       const data = await res.json();
+      const uploaderId = localStorage.getItem("user_id");
+      if (uploaderId) fetch(`${NODE_API}/api/activity/log`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ user_id: uploaderId, action_type: "dataset_uploaded", details: { file_name: file.name, table_name: data.table_name ?? null } }) }).catch(() => {});
 
       const realSchema: OriginalField[] = data.schema.map((f: any) => ({
         name: f.name, type: f.type, nullable: f.nullable, sample_values: f.sample_values ?? [],
@@ -976,7 +978,7 @@ export default function SchemaBuilder() {
       const safetyRes = await fetch(`${NODE_API}/api/llm/check-prompt`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: llmPrompt.trim(), user_id: userId }),
+        body: JSON.stringify({ prompt: llmPrompt, user_id: userId, context: "ai_search" }),
       });
       if (!safetyRes.ok) {
         const data = await safetyRes.json();
@@ -1304,7 +1306,7 @@ export default function SchemaBuilder() {
       const safetyRes = await fetch(`${NODE_API}/api/llm/check-prompt`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: searchQuery.trim(), user_id: userId }),
+        body: JSON.stringify({ prompt: searchQuery, user_id: userId, context: "dataset_search" }),
       });
       if (!safetyRes.ok) {
         const data = await safetyRes.json();
@@ -1321,23 +1323,32 @@ export default function SchemaBuilder() {
     setSizeFilter("any");
     setSelectedExtIds(new Set());
     setExpandedExtIds(new Set());
-    setLoadingMsg("Searching all dataset sources…");
+    const isDirectRef =
+      searchQuery.toLowerCase().includes("kaggle.com") ||
+      searchQuery.toLowerCase().includes("huggingface.co") ||
+      /^[a-zA-Z0-9_\-]+\/[a-zA-Z0-9_\-]+$/.test(searchQuery.trim()) ||
+      /^c\/[a-zA-Z0-9_\-]+$/i.test(searchQuery.trim());
+
+    setLoadingMsg(isDirectRef ? "Looking up dataset directly…" : "Searching all dataset sources…");
     setPhase("loading");
     try {
-      // Ask the LLM to expand the query into related search terms (best-effort)
+      // Ask the LLM to expand the query into related search terms (best-effort),
+      // but skip if user provided a direct URL or dataset slug
       let expandedTerms: string[] = [];
-      try {
-        const expandRes = await fetch(`${NODE_API}/api/llm/expand-search-query`, {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ query: searchQuery }),
-          signal: AbortSignal.timeout(2000),
-        });
-        if (expandRes.ok) {
-          const data = await expandRes.json();
-          expandedTerms = data.terms ?? [];
+      if (!isDirectRef) {
+        try {
+          const expandRes = await fetch(`${NODE_API}/api/llm/expand-search-query`, {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ query: searchQuery }),
+            signal: AbortSignal.timeout(2000),
+          });
+          if (expandRes.ok) {
+            const data = await expandRes.json();
+            expandedTerms = data.terms ?? [];
+          }
+        } catch {
+          // Silent fallback — domain map in Python will still kick in
         }
-      } catch {
-        // Silent fallback — domain map in Python will still kick in
       }
 
       const res = await fetch(`${PYTHON_API}/api/smart-search`, {
@@ -1345,7 +1356,11 @@ export default function SchemaBuilder() {
         body: JSON.stringify({ prompt: searchQuery, expanded_terms: expandedTerms }),
       });
       if (!res.ok) throw new Error(await parsePythonError(res));
-      setSearchResults((await res.json()).datasets ?? []);
+      const datasets = (await res.json()).datasets ?? [];
+      setSearchResults(datasets);
+      if (isDirectRef && datasets.length > 0 && datasets[0].source) {
+        setExtSourceFilter(datasets[0].source);
+      }
       setPhase("results");
     } catch (e: any) {
       setErrorMsg(e.message ?? "Search failed. Is the Python service running on port 8000?");
@@ -1584,7 +1599,7 @@ export default function SchemaBuilder() {
       if (userId) {
         await fetch(`${NODE_API}/api/datasets`, {
           method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ user_id: userId, name: getActiveTable()?.name ?? "dataset", kaggle_ref: "", python_dataset_id: data.dataset_id, row_count: rowCount, source: "llm" }),
+          body: JSON.stringify({ user_id: userId, name: getActiveTable()?.name ?? "dataset", kaggle_ref: "", python_dataset_id: data.dataset_id, row_count: rowCount, source: "llm", purpose: sessionStorage.getItem("generation_purpose"), category: sessionStorage.getItem("generation_category") }),
         }).catch(() => {});
       }
       sessionStorage.setItem("preview_params", JSON.stringify({
@@ -1653,7 +1668,7 @@ export default function SchemaBuilder() {
       if (userId) {
         await fetch(`${NODE_API}/api/datasets`, {
           method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ user_id: userId, name: at.name, kaggle_ref: "", python_dataset_id: expandData.dataset_id, row_count: rowCount, source: "llm" }),
+          body: JSON.stringify({ user_id: userId, name: at.name, kaggle_ref: "", python_dataset_id: expandData.dataset_id, row_count: rowCount, source: "llm", purpose: sessionStorage.getItem("generation_purpose"), category: sessionStorage.getItem("generation_category") }),
         }).catch(() => {});
       }
 
@@ -1734,7 +1749,7 @@ export default function SchemaBuilder() {
       if (userId) {
         await fetch(`${NODE_API}/api/datasets`, {
           method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ user_id: userId, name: getActiveTable()?.name ?? "dataset", kaggle_ref: kaggleRef, python_dataset_id: activeDatasetId, row_count: rowCount, source: selectedDataSource }),
+          body: JSON.stringify({ user_id: userId, name: getActiveTable()?.name ?? "dataset", kaggle_ref: kaggleRef, python_dataset_id: activeDatasetId, row_count: rowCount, source: selectedDataSource, purpose: sessionStorage.getItem("generation_purpose"), category: sessionStorage.getItem("generation_category") }),
         }).catch(() => {});
       }
       sessionStorage.setItem("preview_params", JSON.stringify({ id: activeDatasetId, name: getActiveTable()?.name ?? "dataset", rows: rowCount, ref: kaggleRef }));
@@ -2525,7 +2540,7 @@ export default function SchemaBuilder() {
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && handleSearch()}
-              placeholder="e.g. employee salary, student records, medical diagnosis…"
+              placeholder="Search topics (e.g. employee salary) or paste Kaggle URL / slug (e.g. zillow/zecon)..."
               className="flex-1 text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500"
             />
             <button
@@ -2535,6 +2550,9 @@ export default function SchemaBuilder() {
               <Search className="w-4 h-4" /> Search
             </button>
           </div>
+          <p className="text-[11px] text-gray-400 mt-1">
+            <span className="font-semibold text-gray-500">Direct Search:</span> Paste any Kaggle dataset URL or slug (e.g. <code className="bg-gray-100 px-1 py-0.5 rounded text-gray-600 font-mono text-[10px]">owner/dataset-name</code> or <code className="bg-gray-100 px-1 py-0.5 rounded text-gray-600 font-mono text-[10px]">c/competition-name</code>) to look it up directly.
+          </p>
 
           {/* Source filter chips + sort/size controls — appear after results load */}
           {phase === "results" && searchResults.length > 0 && (() => {

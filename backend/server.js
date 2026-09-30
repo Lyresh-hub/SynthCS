@@ -1580,7 +1580,7 @@ async function runSafetyCheck(prompt, user_id, apiKey) {
   const keywordFlagged = isInappropriatePrompt(prompt);
   let aiFlagReason = null;
 
-  if (!keywordFlagged) {
+  if (!keywordFlagged && apiKey) {
     try {
       const safetyClient = new Anthropic({ apiKey });
       const safetyMsg = await safetyClient.messages.create({
@@ -1668,12 +1668,16 @@ Prompt: ${prompt.trim()}`
 // ── Check prompt safety (called before dataset search) ───────────────────────
 app.post("/api/llm/check-prompt", async (req, res) => {
   const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) return res.json({ safe: true }); // no key = no check, don't block
-
-  const { prompt, user_id } = req.body;
+  const { prompt, user_id, context } = req.body;
   if (!prompt?.trim()) return res.json({ safe: true });
 
+  // no key = no AI check, keyword check still runs
   const result = await runSafetyCheck(prompt.trim(), user_id, apiKey);
+  // Record every search the student runs, with the prompt exactly as typed.
+  // Flagged searches are already logged as prompt_flagged inside runSafetyCheck.
+  if (result.safe && user_id) {
+    logActivity(user_id, context === "ai_search" ? "ai_search" : "dataset_search", { prompt_text: prompt });
+  }
   if (result.safe) return res.json({ safe: true });
   return res.status(403).json(result);
 });
@@ -1777,7 +1781,7 @@ Description: ${prompt.trim()}`;
     // raw = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
     const schema = JSON.parse(raw);
     if (!schema.table_name || !Array.isArray(schema.fields)) throw new Error("Invalid schema shape");
-    if (user_id) logActivity(user_id, "schema_generated", { prompt_text: prompt.trim(), table_name: schema.table_name, purpose: purpose ?? null, category: category ?? null });
+    if (user_id) logActivity(user_id, "schema_generated", { prompt_text: prompt, table_name: schema.table_name, purpose: purpose ?? null, category: category ?? null });
 
     schema.fields = schema.fields.map((f) => {
       const c = f.constraints ?? {};
@@ -1934,7 +1938,7 @@ const PYTHON_DATASETS_DIR = path.join(__dirname, "python", "temp_datasets");
 
 app.post("/api/datasets", async (req, res) => {
   try {
-    const { user_id, name, kaggle_ref, python_dataset_id, row_count, source } = req.body;
+    const { user_id, name, kaggle_ref, python_dataset_id, row_count, source, purpose, category } = req.body;
     if (!user_id || !name)
       return res.status(400).json({ error: "user_id and name are required" });
 
@@ -1943,6 +1947,10 @@ app.post("/api/datasets", async (req, res) => {
        VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
       [user_id, name, kaggle_ref || null, python_dataset_id || null, row_count || 0, source || "llm"]
     );
+    logActivity(user_id, "dataset_generated", {
+      table_name: name, rows: row_count || 0, source: source || "llm",
+      kaggle_ref: kaggle_ref || null, purpose: purpose ?? null, category: category ?? null,
+    });
     res.status(201).json(result.rows[0]);
   } catch (err) {
     console.error("Register dataset error:", err.message);
@@ -2366,14 +2374,22 @@ app.get("/instructor/activity", async (req, res) => {
     const ins = await pool.query("SELECT full_name FROM users WHERE id = $1", [instructor_id]);
     if (!ins.rows.length) return res.status(404).json({ error: "Instructor not found" });
     const instructorName = ins.rows[0].full_name;
+    // Students enrolled in any of this instructor's classes (multi-class), plus legacy single-instructor link
     const result = await pool.query(
       `SELECT al.*, u.full_name AS student_name, u.email AS student_email
        FROM activity_log al
        JOIN users u ON u.id = al.user_id
-       WHERE u.instructor = $1 AND u.is_instructor = FALSE
+       WHERE u.is_instructor = FALSE
+         AND (
+           u.instructor = $1
+           OR EXISTS (
+             SELECT 1 FROM student_classes sc
+             WHERE sc.student_id = u.id AND sc.instructor_id = $2 AND sc.status = 'approved'
+           )
+         )
        ORDER BY al.created_at DESC
-       LIMIT 200`,
-      [instructorName]
+       LIMIT 1000`,
+      [instructorName, instructor_id]
     );
     res.json(result.rows);
   } catch (err) {
@@ -2391,6 +2407,14 @@ app.get("/instructor/prompt-history", async (req, res) => {
     if (!ins.rows.length) return res.status(404).json({ error: "Instructor not found" });
     const instructorName = ins.rows[0].full_name;
 
+    const inClass = `(
+      u.instructor = $1
+      OR EXISTS (
+        SELECT 1 FROM student_classes sc
+        WHERE sc.student_id = u.id AND sc.instructor_id = $2 AND sc.status = 'approved'
+      )
+    )`;
+
     // Flagged prompts
     const flagged = await pool.query(
       `SELECT fp.id, u.full_name AS student_name, u.email AS student_email,
@@ -2398,12 +2422,12 @@ app.get("/instructor/prompt-history", async (req, res) => {
               'flagged' AS source
        FROM flagged_prompts fp
        JOIN users u ON u.id = fp.student_id
-       WHERE u.instructor = $1
+       WHERE ${inClass}
        ORDER BY fp.created_at DESC`,
-      [instructorName]
+      [instructorName, instructor_id]
     );
 
-    // Successful schema generation prompts from activity_log
+    // Searches and successful schema generation prompts from activity_log
     const generated = await pool.query(
       `SELECT al.id, u.full_name AS student_name, u.email AS student_email,
               al.details->>'prompt_text' AS prompt_text,
@@ -2411,11 +2435,11 @@ app.get("/instructor/prompt-history", async (req, res) => {
               'generated' AS source
        FROM activity_log al
        JOIN users u ON u.id = al.user_id
-       WHERE u.instructor = $1
-         AND al.action_type = 'schema_generated'
+       WHERE ${inClass}
+         AND al.action_type IN ('schema_generated', 'dataset_search', 'ai_search')
          AND al.details->>'prompt_text' IS NOT NULL
        ORDER BY al.created_at DESC`,
-      [instructorName]
+      [instructorName, instructor_id]
     );
 
     // Merge and sort by created_at descending
