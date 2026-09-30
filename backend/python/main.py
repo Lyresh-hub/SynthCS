@@ -45,8 +45,11 @@ from pydantic import BaseModel
 # Load Kaggle credentials from the local .env before anything else
 load_dotenv(Path(__file__).parent / ".env")
 
-from kaggle_service import search_datasets, download_dataset
+import re
+from kaggle_service import search_datasets, download_dataset, parse_kaggle_ref
 from analyzer import analyze_dataset
+from dataset_importer import process_uploaded_file, SUPPORTED_EXTENSIONS
+from relation_detector import build_related_tables, list_tabular_files
 from generator import generate_synthetic_data, expand_template_with_ctgan
 import huggingface_service
 import uci_service
@@ -116,11 +119,112 @@ class AnomalyConfig(BaseModel):
 
 class GenerateRequest(BaseModel):
     dataset_id: str
+    review_id:  str | None = None   # flagged-prompt review → dataset locked until approved
     changes:    list[FieldChange]
     row_count:  int
     temporal:   TemporalConfig         = TemporalConfig()
     rules:      list[RelationshipRule] = []
     anomaly:    AnomalyConfig          = AnomalyConfig()
+
+
+# ── Related-table detection ──────────────────────────────────────────────────
+
+def _with_related(resp: dict[str, Any], root: str, primary_source: str | None,
+                  exclude: set[str] | None = None) -> dict[str, Any]:
+    """
+    If the dataset folder holds several tables (multi-CSV archive, multi-sheet
+    workbook, …), attach related_tables + auto-detected relationships so the
+    frontend can load them into the multi-table editor. Single-table datasets
+    are returned unchanged. Detection never blocks the download.
+    """
+    try:
+        files = [p for p in list_tabular_files(root) if os.path.basename(p) not in (exclude or set())]
+        related = build_related_tables(files, primary_source)
+        if related:
+            resp.update(related)
+    except Exception as e:
+        print(f"[related_tables] detection failed: {e}")
+    return resp
+
+
+# ── Instructor review lock ───────────────────────────────────────────────────
+# When a student's prompt is flagged, the frontend sends the review_id (the
+# flagged_prompts row in Node) with every generation request. The dataset
+# folder then gets a review.json lock, and every endpoint that serves the
+# data (preview, validate, downloads) asks Node for the review's status first:
+#   pending  → 423 Locked       (nothing is served)
+#   approved → served normally  (cached in review.json)
+#   rejected → 403 + files deleted
+# If Node can't be reached we fail closed (503) — never serve locked data.
+
+_NODE_API_URL = (os.environ.get("NODE_API_URL")
+                 or ("https://nodejs-production-7171.up.railway.app" if os.environ.get("SPACE_ID")
+                     else "http://localhost:5000")).rstrip("/")
+_REVIEW_FILE = "review.json"
+
+
+def _lock_for_review(dataset_path: str, review_id: str | None) -> None:
+    if not review_id:
+        return
+    import json as _json
+    os.makedirs(dataset_path, exist_ok=True)
+    lock_path = os.path.join(dataset_path, _REVIEW_FILE)
+    reviews: dict[str, str] = {}
+    if os.path.exists(lock_path):
+        with open(lock_path, encoding="utf-8") as f:
+            reviews = _json.load(f).get("reviews", {})
+    reviews.setdefault(review_id, "pending")
+    with open(lock_path, "w", encoding="utf-8") as f:
+        _json.dump({"reviews": reviews}, f)
+
+
+def _fetch_review_status(review_id: str) -> str:
+    import json as _json
+    import urllib.parse
+    import urllib.request
+    url = f"{_NODE_API_URL}/api/reviews/{urllib.parse.quote(review_id)}/status"
+    with urllib.request.urlopen(url, timeout=8) as r:
+        return str(_json.load(r).get("status", "pending"))
+
+
+def _require_review_access(dataset_id: str) -> None:
+    """Raise unless every review attached to this dataset has been approved."""
+    import json as _json
+    import shutil
+    dataset_path = os.path.join(DATASETS_DIR, dataset_id)
+    lock_path = os.path.join(dataset_path, _REVIEW_FILE)
+    if not os.path.exists(lock_path):
+        return
+    with open(lock_path, encoding="utf-8") as f:
+        reviews: dict[str, str] = _json.load(f).get("reviews", {})
+
+    # Always ask Node (no caching) so the instructor's latest decision wins,
+    # even if they reject after first approving.
+    for review_id in list(reviews):
+        try:
+            status = _fetch_review_status(review_id)
+        except Exception as e:
+            print(f"[review-lock] status check failed for {review_id}: {e}")
+            raise HTTPException(status_code=503, detail={
+                "locked": True, "review_status": "unknown",
+                "message": "Could not verify your instructor's approval right now. Please try again shortly.",
+            })
+        if status == "rejected":
+            shutil.rmtree(dataset_path, ignore_errors=True)
+            raise HTTPException(status_code=403, detail={
+                "locked": True, "review_status": "rejected",
+                "message": "Your instructor rejected the flagged request. This dataset is not available.",
+            })
+        if status != "approved":
+            raise HTTPException(status_code=423, detail={
+                "locked": True, "review_status": "pending",
+                "message": "This dataset is locked while your instructor reviews your flagged prompt. "
+                           "You can view and download it once it is approved.",
+            })
+
+
+def _locked_response(dataset_id: str) -> dict[str, Any]:
+    return {"dataset_id": dataset_id, "locked": True, "review_status": "pending"}
 
 
 # ── Routes ───────────────────────────────────────────────────────────────────
@@ -176,11 +280,11 @@ def kaggle_download(req: DownloadRequest) -> dict[str, Any]:
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Schema analysis failed: {e}")
 
-    return {
+    return _with_related({
         "dataset_id": dataset_id,
         "csv_file": os.path.basename(csv_path),
         "schema": schema,
-    }
+    }, dest, csv_path)
 
 
 # ── Hugging Face ─────────────────────────────────────────────────────────────
@@ -205,7 +309,7 @@ def hf_download(req: DownloadRequest) -> dict[str, Any]:
         schema = analyze_dataset(csv_path)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Schema analysis failed: {e}")
-    return {"dataset_id": dataset_id, "csv_file": os.path.basename(csv_path), "schema": schema}
+    return _with_related({"dataset_id": dataset_id, "csv_file": os.path.basename(csv_path), "schema": schema}, dest, csv_path)
 
 
 # ── UCI ML Repository ─────────────────────────────────────────────────────────
@@ -230,7 +334,7 @@ def uci_download(req: DownloadRequest) -> dict[str, Any]:
         schema = analyze_dataset(csv_path)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Schema analysis failed: {e}")
-    return {"dataset_id": dataset_id, "csv_file": os.path.basename(csv_path), "schema": schema}
+    return _with_related({"dataset_id": dataset_id, "csv_file": os.path.basename(csv_path), "schema": schema}, dest, csv_path)
 
 
 # ── OpenML ────────────────────────────────────────────────────────────────────
@@ -255,7 +359,7 @@ def openml_download(req: DownloadRequest) -> dict[str, Any]:
         schema = analyze_dataset(csv_path)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Schema analysis failed: {e}")
-    return {"dataset_id": dataset_id, "csv_file": os.path.basename(csv_path), "schema": schema}
+    return _with_related({"dataset_id": dataset_id, "csv_file": os.path.basename(csv_path), "schema": schema}, dest, csv_path)
 
 
 # ── Data.gov.ph ───────────────────────────────────────────────────────────────
@@ -280,7 +384,7 @@ def datagov_ph_download(req: DownloadRequest) -> dict[str, Any]:
         schema = analyze_dataset(csv_path)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Schema analysis failed: {e}")
-    return {"dataset_id": dataset_id, "csv_file": os.path.basename(csv_path), "schema": schema}
+    return _with_related({"dataset_id": dataset_id, "csv_file": os.path.basename(csv_path), "schema": schema}, dest, csv_path)
 
 
 # ── PSA ───────────────────────────────────────────────────────────────────────
@@ -305,7 +409,7 @@ def psa_download(req: DownloadRequest) -> dict[str, Any]:
         schema = analyze_dataset(csv_path)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Schema analysis failed: {e}")
-    return {"dataset_id": dataset_id, "csv_file": os.path.basename(csv_path), "schema": schema}
+    return _with_related({"dataset_id": dataset_id, "csv_file": os.path.basename(csv_path), "schema": schema}, dest, csv_path)
 
 
 # ── User-uploaded dataset ─────────────────────────────────────────────────────
@@ -313,39 +417,46 @@ def psa_download(req: DownloadRequest) -> dict[str, Any]:
 @app.post("/api/upload-dataset")
 async def upload_dataset(file: UploadFile = File(...)) -> dict[str, Any]:
     """
-    Accept a user-uploaded CSV, analyze its schema, and return the same
-    {dataset_id, table_name, schema} shape as the download endpoints so the
-    frontend can load it into the schema editor immediately.
+    Accept user-uploaded datasets in diverse formats:
+      - Archive: .zip, .tar, .tar.gz, .tgz, .gz
+      - Delimited text: .csv, .tsv, .tab, .txt
+      - Excel workbooks: .xlsx, .xls
+      - Parquet: .parquet
+      - JSON: .json, .jsonl
+    Extracts/converts the tabular data into canonical dataset.csv, analyzes schema,
+    and returns {dataset_id, table_name, schema} so the frontend loads it immediately.
     """
-    if not (file.filename or "").lower().endswith(".csv"):
-        raise HTTPException(status_code=400, detail="Only CSV files are supported.")
+    filename = file.filename or "uploaded_dataset"
+    ext = os.path.splitext(filename)[1].lower()
+    is_tar_gz = filename.lower().endswith(".tar.gz")
+
+    if ext not in SUPPORTED_EXTENSIONS and not is_tar_gz:
+        supported_str = ", ".join(sorted(SUPPORTED_EXTENSIONS))
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported file format '{ext}'. Supported formats: {supported_str}",
+        )
 
     dataset_id = str(uuid.uuid4())
     dest = os.path.join(DATASETS_DIR, dataset_id)
-    os.makedirs(dest, exist_ok=True)
-    csv_path = os.path.join(dest, "dataset.csv")
 
-    content = await file.read()
-    with open(csv_path, "wb") as f:
-        f.write(content)
-
-    # Cap at 20 000 rows — same limit as other sources
     try:
-        import pandas as pd
-        df = pd.read_csv(csv_path)
-        if len(df) > 20_000:
-            df = df.sample(20_000, random_state=42).reset_index(drop=True)
-            df.to_csv(csv_path, index=False)
+        content = await file.read()
+        csv_path, table_name = process_uploaded_file(content, filename, dest)
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Could not read CSV: {e}")
+        raise HTTPException(status_code=400, detail=f"Could not process uploaded file: {e}")
 
     try:
         schema = analyze_dataset(csv_path)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Schema analysis failed: {e}")
 
-    table_name = os.path.splitext(file.filename or "uploaded_dataset")[0]
-    return {"dataset_id": dataset_id, "table_name": table_name, "schema": schema}
+    return _with_related(
+        {"dataset_id": dataset_id, "table_name": table_name, "schema": schema},
+        dest, table_name, exclude={"dataset.csv"},
+    )
 
 
 # ── Kaggle generate ───────────────────────────────────────────────────────────
@@ -364,6 +475,7 @@ def generate(req: GenerateRequest):
     if not (1_000 <= req.row_count <= 100_000):
         raise HTTPException(status_code=400, detail="row_count must be between 1000 and 100000.")
 
+    _lock_for_review(dataset_path, req.review_id)
     changes = [c.model_dump() for c in req.changes]
 
     try:
@@ -394,6 +506,10 @@ def generate(req: GenerateRequest):
     except Exception:
         pass  # post-processing failure must not block the response
 
+    # Locked for instructor review → don't hand the generated file back
+    if os.path.exists(os.path.join(dataset_path, _REVIEW_FILE)):
+        return _locked_response(req.dataset_id)
+
     return FileResponse(
         path=output_path,
         media_type="text/csv",
@@ -404,6 +520,7 @@ def generate(req: GenerateRequest):
 @app.get("/api/preview/{dataset_id}")
 def preview_dataset(dataset_id: str, limit: int = 100):
     """Return the first `limit` rows of a generated CSV as JSON for in-app preview."""
+    _require_review_access(dataset_id)
     dataset_path = os.path.join(DATASETS_DIR, dataset_id)
     # Fall back to template.csv when synthetic_output.csv not yet created (template-only view)
     output_path = os.path.join(dataset_path, "synthetic_output.csv")
@@ -463,6 +580,7 @@ class SchemaField(BaseModel):
 class SchemaGenerateRequest(BaseModel):
     table_name: str
     fields:     list[SchemaField]
+    review_id:  str | None = None   # flagged-prompt review → dataset locked until approved
 
 
 class MultiTableFieldDef(BaseModel):
@@ -473,6 +591,7 @@ class MultiTableFieldDef(BaseModel):
     constraints: FieldConstraints = FieldConstraints()
     fk_table:    str | None       = None   # referenced table name
     fk_field:    str | None       = None   # referenced field name
+    is_pk:       bool             = False  # primary key — values forced unique
 
 
 class MultiTableDef(BaseModel):
@@ -484,6 +603,7 @@ class MultiTableDef(BaseModel):
 class MultiTableRequest(BaseModel):
     tables:  list[MultiTableDef]
     format:  str = "csv"   # "csv" | "json" | "xlsx"
+    review_id:  str | None = None   # flagged-prompt review → dataset locked until approved
 
 
 class ExpandFieldDef(BaseModel):
@@ -493,6 +613,7 @@ class ExpandFieldDef(BaseModel):
 
 class ExpandRequest(BaseModel):
     dataset_id: str
+    review_id:  str | None = None   # flagged-prompt review → dataset locked until approved
     row_count:  int
     fields:     list[ExpandFieldDef]   = []
     temporal:   TemporalConfig         = TemporalConfig()
@@ -519,6 +640,7 @@ class ExtraFieldDef(BaseModel):
 
 class HybridGenerateRequest(BaseModel):
     dataset_id:   str
+    review_id:  str | None = None   # flagged-prompt review → dataset locked until approved
     changes:      list[FieldChange]
     row_count:    int
     extra_fields: list[ExtraFieldDef]  = []
@@ -581,9 +703,12 @@ def generate_from_schema(req: SchemaGenerateRequest):
 
         template_path = os.path.join(dest, "template.csv")
         df.to_csv(template_path, index=False)
+        _lock_for_review(dest, req.review_id)
+        locked = bool(req.review_id)
 
+        # While locked for instructor review, no generated rows leave the server
         preview_df   = df.head(20)
-        preview_rows = preview_df.where(preview_df.notna(), None).to_dict(orient="records")
+        preview_rows = [] if locked else preview_df.where(preview_df.notna(), None).to_dict(orient="records")
 
         entity_meta = [
             {
@@ -591,7 +716,7 @@ def generate_from_schema(req: SchemaGenerateRequest):
                 "file":    f"{name}_master.csv",
                 "rows":    len(tbl),
                 "columns": tbl.columns.tolist(),
-                "preview": tbl.head(5).where(tbl.head(5).notna(), None).to_dict(orient="records"),
+                "preview": [] if locked else tbl.head(5).where(tbl.head(5).notna(), None).to_dict(orient="records"),
             }
             for name, tbl in entity_tables.items()
         ]
@@ -602,6 +727,7 @@ def generate_from_schema(req: SchemaGenerateRequest):
             "columns":       df.columns.tolist(),
             "preview":       preview_rows,
             "entity_tables": entity_meta,
+            "locked":        locked,
         }
     except HTTPException:
         raise
@@ -1103,6 +1229,7 @@ def generate_from_schema(req: SchemaGenerateRequest):
 @app.get("/api/download-entity/{dataset_id}/{table_name}")
 def download_entity_table(dataset_id: str, table_name: str):
     """Download a generated entity master table (e.g. professor_master.csv)."""
+    _require_review_access(dataset_id)
     safe_name = table_name.replace("/", "").replace("\\", "").replace("..", "")
     if not safe_name.endswith(".csv"):
         safe_name += "_master.csv"
@@ -1115,6 +1242,7 @@ def download_entity_table(dataset_id: str, table_name: str):
 @app.get("/api/download-template/{dataset_id}")
 def download_template(dataset_id: str, format: str = "csv"):
     """Download the 200-row template in CSV, JSON, or XLSX format."""
+    _require_review_access(dataset_id)
     import io
     import pandas as pd
     from fastapi.responses import StreamingResponse
@@ -1237,6 +1365,22 @@ def generate_multi_table(req: MultiTableRequest):
                 orig_f.constraints, orig_f.name, orig_f.description,
             )
 
+        # Primary keys must be unique so child FKs sample distinct parents
+        for f in tbl.fields:
+            if not f.is_pk or f.fk_table or f.name not in df.columns:
+                continue
+            col = df[f.name]
+            if col.notna().all() and col.nunique() == n_rows:
+                continue
+            if f.field_type in ("integer", "float"):
+                start = int(f.constraints.min_val) if f.constraints.min_val is not None else 1
+                df[f.name] = range(start, start + n_rows)
+            elif f.field_type == "uuid":
+                df[f.name] = [str(uuid.uuid4()) for _ in range(n_rows)]
+            else:
+                prefix = re.sub(r"[^A-Za-z]", "", f.name).upper()[:3] or "ID"
+                df[f.name] = [f"{prefix}{str(i + 1).zfill(len(str(n_rows)))}" for i in range(n_rows)]
+
         # Restore original column order
         col_order = [f.name for f in tbl.fields if f.name in df.columns]
         extra     = [c for c in df.columns if c not in col_order]
@@ -1281,6 +1425,7 @@ def generate_multi_table(req: MultiTableRequest):
     dataset_id = str(uuid.uuid4())
     dest = os.path.join(DATASETS_DIR, dataset_id)
     os.makedirs(dest, exist_ok=True)
+    _lock_for_review(dest, req.review_id)
 
     primary_table = generation_order[0] if generation_order else req.tables[0].name
     total_rows    = 0
@@ -1310,6 +1455,7 @@ def generate_multi_table(req: MultiTableRequest):
 @app.get("/api/download-multi/{dataset_id}")
 def download_multi_table(dataset_id: str, format: str = "csv"):
     """Download all tables for a multi-table dataset as a ZIP or XLSX."""
+    _require_review_access(dataset_id)
     import io
     import zipfile
     import pandas as pd
@@ -1384,6 +1530,7 @@ def expand_with_ctgan(req: ExpandRequest):
     if not (1_000 <= req.row_count <= 100_000):
         raise HTTPException(status_code=400, detail="row_count must be between 1,000 and 100,000.")
 
+    _lock_for_review(dataset_path, req.review_id)
     try:
         expand_template_with_ctgan(dataset_path, req.row_count)
     except Exception as e:
@@ -1568,15 +1715,27 @@ def _expand_query(prompt: str) -> list[str]:
 
 @app.post("/api/smart-search")
 def smart_search(req: SmartSearchRequest) -> dict[str, Any]:
-    # Fires 6 sources × up to 8 search terms simultaneously (48 tasks max).
-    # ThreadPoolExecutor capped at 12 workers to keep Railway/Render memory reasonable.
-    # 22-second overall timeout: if a source hangs, we return whatever we have.
-    # Results are deduplicated by "source:ref" key, then sorted by download count.
-    #
-    # Term expansion: the Node.js backend passes LLM-generated terms via expanded_terms.
-    # If provided, those come first (higher quality) and the domain-map terms fill the rest.
-    # If not provided, _expand_query() does the expansion with the domain synonym map above.
     from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as _FT
+    from collections import defaultdict as _dd
+
+    raw_prompt = req.prompt.strip()
+
+    # 1. Direct Kaggle URL or Slug check
+    parsed_kaggle = parse_kaggle_ref(raw_prompt)
+    direct_kaggle_results = []
+    if parsed_kaggle:
+        try:
+            k_matches = search_datasets(raw_prompt)
+            for ds in k_matches:
+                ds["source"] = "kaggle"
+                ds["sourceLabel"] = "Kaggle"
+                ds["sourceIcon"] = "🏆"
+                direct_kaggle_results.append(ds)
+            # If user pasted a full URL, return immediately — they want this exact dataset
+            if "kaggle.com" in raw_prompt.lower() and direct_kaggle_results:
+                return {"datasets": direct_kaggle_results}
+        except Exception as e:
+            print(f"[smart_search] Direct Kaggle lookup error: {e}")
 
     sources = {
         "kaggle":      ("Kaggle",       "🏆", search_datasets),
@@ -1587,22 +1746,28 @@ def smart_search(req: SmartSearchRequest) -> dict[str, Any]:
         "psa":         ("PSA",          "📋", psa_service.search_datasets),
     }
 
-    # Use LLM-expanded terms if provided; merge with domain-map expansion
-    base_terms = _expand_query(req.prompt)
-    if req.expanded_terms:
-        # Deduplicate: LLM terms first (higher quality), then domain map terms
-        seen: set[str] = set()
-        merged: list[str] = []
-        for t in req.expanded_terms + base_terms:
-            tl = t.lower().strip()
-            if tl and tl not in seen:
-                seen.add(tl)
-                merged.append(tl)
-        search_terms = merged[:10]
-    else:
-        search_terms = base_terms
-    seen_refs: set[str]  = set()
-    results:   list[dict] = []
+    # Ensure the user's RAW prompt is always searched first (highest priority)
+    base_terms = _expand_query(raw_prompt)
+    search_terms: list[str] = [raw_prompt]
+    seen_terms: set[str] = {raw_prompt.lower()}
+
+    # Merge expanded terms after the raw prompt
+    for t in (req.expanded_terms or []) + base_terms:
+        tl = t.lower().strip()
+        if tl and tl not in seen_terms:
+            seen_terms.add(tl)
+            search_terms.append(tl)
+
+    search_terms = search_terms[:8]
+
+    seen_refs: set[str] = set()
+    results: list[dict] = []
+
+    # Include any direct Kaggle matches found earlier
+    for ds in direct_kaggle_results:
+        key = f"{ds['source']}:{ds['ref']}"
+        seen_refs.add(key)
+        results.append(ds)
 
     def _search_one(source_id: str, source_label: str, source_icon: str, search_fn, term: str):
         try:
@@ -1611,13 +1776,12 @@ def smart_search(req: SmartSearchRequest) -> dict[str, Any]:
                 ds["source"]      = source_id
                 ds["sourceLabel"] = source_label
                 ds["sourceIcon"]  = source_icon
-            return datasets[:5]
+            return datasets[:8]
         except Exception as e:
             print(f"[smart_search] {source_id}/{term!r} error: {e}")
             return []
 
-    # Fan out: every source × every search term (up to 8 terms × 6 sources = 48 tasks max)
-    # Workers cap keeps Railway/Render memory reasonable
+    # Fan out: every source × every search term
     with ThreadPoolExecutor(max_workers=12) as executor:
         futures: dict = {}
         for sid, (lbl, ico, fn) in sources.items():
@@ -1647,22 +1811,48 @@ def smart_search(req: SmartSearchRequest) -> dict[str, Any]:
                     except Exception:
                         pass
 
-    # Sort within each source by download count, then interleave sources so
-    # every source that found results gets representation in the final list.
-    # Without this, Kaggle/HuggingFace (high download counts) fill all 24
-    # slots and UCI/OpenML (downloadCount always 0) never appear.
-    from collections import defaultdict as _dd
+    # Relevance scoring function
+    def _relevance_score(ds: dict) -> float:
+        score = 0.0
+        ref_l = str(ds.get("ref", "")).lower()
+        title_l = str(ds.get("title", "")).lower()
+        prompt_l = raw_prompt.lower()
+
+        # Direct ref/slug match has highest priority
+        if ref_l == prompt_l or (parsed_kaggle and parsed_kaggle.get("ref", "").lower() in ref_l):
+            score += 10_000_000
+        elif prompt_l in title_l:
+            score += 500_000
+        elif prompt_l in ref_l:
+            score += 200_000
+
+        # Sub-word keyword matching
+        words = [w for w in re.findall(r"[a-z0-9]+", prompt_l) if len(w) >= 3 and w not in _STOP_WORDS]
+        for w in words:
+            if w in title_l:
+                score += 50_000
+            if w in ref_l:
+                score += 20_000
+
+        # Secondary factor: downloads (capped so popularity doesn't drown relevance)
+        score += min(float(ds.get("downloadCount", 0) or 0), 50_000)
+        return score
+
     by_source: dict = _dd(list)
     for r in results:
         by_source[r["source"]].append(r)
+
+    # Sort each source by relevance score
     for src in by_source:
-        by_source[src].sort(key=lambda x: x.get("downloadCount", 0), reverse=True)
+        by_source[src].sort(key=_relevance_score, reverse=True)
 
     diverse: list[dict] = []
     for src in ["kaggle", "huggingface", "uci", "openml", "datagov_ph", "psa"]:
-        diverse.extend(by_source[src][:4])
+        limit = 10 if src == "kaggle" else 6
+        diverse.extend(by_source[src][:limit])
 
-    return {"datasets": diverse[:24]}
+    diverse.sort(key=_relevance_score, reverse=True)
+    return {"datasets": diverse[:36]}
 
 
 # ── Hybrid generate (CTGAN real fields + schema-based LLM fields) ─────────────
@@ -1683,6 +1873,7 @@ def generate_hybrid(req: HybridGenerateRequest):
     if not (1_000 <= req.row_count <= 100_000):
         raise HTTPException(status_code=400, detail="row_count must be between 1,000 and 100,000.")
 
+    _lock_for_review(dataset_path, req.review_id)
     changes = [c.model_dump() for c in req.changes]
 
     try:
@@ -1723,6 +1914,10 @@ def generate_hybrid(req: HybridGenerateRequest):
     except Exception:
         pass
 
+    # Locked for instructor review → don't hand the generated file back
+    if os.path.exists(os.path.join(dataset_path, _REVIEW_FILE)):
+        return _locked_response(req.dataset_id)
+
     return FileResponse(
         path=output_path,
         media_type="text/csv",
@@ -1732,6 +1927,7 @@ def generate_hybrid(req: HybridGenerateRequest):
 
 @app.get("/api/validate/{dataset_id}")
 def validate_dataset(dataset_id: str):
+    _require_review_access(dataset_id)
     # Computes 4 quality metrics — all between 0 and 1 (higher = better).
     #
     # 1. Wasserstein Distance: per numeric column, how similar are the value
@@ -1930,6 +2126,7 @@ def validate_dataset(dataset_id: str):
 @app.get("/api/download/{dataset_id}")
 def download_saved(dataset_id: str):
     """Serve a previously generated CSV file by dataset_id."""
+    _require_review_access(dataset_id)
     dataset_path = os.path.join(DATASETS_DIR, dataset_id)
     output_path  = os.path.join(dataset_path, "synthetic_output.csv")
     if not os.path.exists(output_path):

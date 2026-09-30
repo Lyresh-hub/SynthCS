@@ -4,6 +4,7 @@ import { Download, FileSpreadsheet, Search, Trash2, Clock, RefreshCw, Eye } from
 import ConfirmDialog from "../components/ConfirmDialog";
 
 import { NODE_API, PYTHON_API } from "../lib/config";
+import { reportEvent } from "../lib/activity";
 
 // TypeScript type para sa hugis ng dataset data mula sa backend
 interface Dataset {
@@ -185,12 +186,24 @@ export default function Downloads() {
               </thead>
               <tbody>
                 {filtered.map((ds) => (
-                  <tr key={ds.id} className="border-b border-gray-50 hover:bg-gray-50 transition-colors">
+                  <tr key={ds.id} className={`border-b border-gray-50 transition-colors ${ds.status === "rejected" ? "opacity-60" : "hover:bg-gray-50"}`}>
                     <td className="py-3 px-4">
                       <div className="flex items-center gap-2">
                         <FileSpreadsheet className="w-4 h-4 text-gray-400 flex-shrink-0" />
                         <div>
-                          <p className="font-medium text-gray-800 text-xs truncate max-w-[180px]">{ds.name}</p>
+                          <div className="flex items-center gap-1.5">
+                            <p className="font-medium text-gray-800 text-xs truncate max-w-[180px]">{ds.name}</p>
+                            {ds.status === "pending_review" && (
+                              <span className="text-[10px] font-medium text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded-full whitespace-nowrap">
+                                🔒 Pending approval
+                              </span>
+                            )}
+                            {ds.status === "rejected" && (
+                              <span className="text-[10px] font-medium text-red-700 bg-red-50 border border-red-200 px-1.5 py-0.5 rounded-full whitespace-nowrap">
+                                ⛔ Rejected
+                              </span>
+                            )}
+                          </div>
                           {ds.kaggle_ref && (
                             <p className="text-[10px] text-gray-400 mt-0.5">{ds.kaggle_ref}</p>
                           )}
@@ -211,7 +224,15 @@ export default function Downloads() {
                     </td>
                     <td className="py-3 px-4">
                       <div className="flex items-center gap-1.5 justify-end">
-                        {ds.python_dataset_id ? (
+                        {ds.status === "pending_review" ? (
+                          <span className="text-xs text-amber-600" title="Your instructor must approve the flagged prompt before this dataset can be accessed">
+                            Locked until approved
+                          </span>
+                        ) : ds.status === "rejected" ? (
+                          <span className="text-xs text-red-500" title="Your instructor rejected the flagged prompt">
+                            Access denied
+                          </span>
+                        ) : ds.python_dataset_id ? (
                           <>
                             {/* Preview button — nagbubukas ng DataPreview page */}
                             <button
@@ -225,6 +246,7 @@ export default function Downloads() {
                             <a
                               href={`${PYTHON_API}/api/download/${ds.python_dataset_id}`}
                               download
+                              onClick={() => reportEvent("dataset_downloaded", { table_name: ds.name, rows: ds.row_count, dataset_id: ds.id, source: ds.source })}
                               className="flex items-center gap-1 px-2.5 py-1 border border-gray-200 rounded-md text-xs font-medium text-gray-600 hover:bg-gray-50 transition-colors"
                             >
                               <Download className="w-3 h-3" /> Download

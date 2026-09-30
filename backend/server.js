@@ -12,6 +12,9 @@ const jwt = require("jsonwebtoken");
 // Gmail API (sends via HTTPS — no SMTP ports needed)
 const pool = require("./db");
 const Anthropic = require("@anthropic-ai/sdk");
+const moderation = require("./moderation");
+const { AsyncLocalStorage } = require("async_hooks");
+const { createLogger, CLIENT_ACTIONS, describe: describeLog } = require("./logger");
 // const Groq = require("groq-sdk"); // kept for reference
 
 require("dotenv").config({ path: path.join(__dirname, ".env") });
@@ -353,7 +356,7 @@ async function sendPromptApprovedEmail(to, studentName, promptText, instructorNa
       <h2 style="color:#059669;margin-bottom:8px">Your prompt has been approved!</h2>
       <p style="color:#374151;font-size:15px;line-height:1.6">
         Hi <strong>${studentName}</strong>, <strong>${approvedBy}</strong> has approved your flagged prompt.
-        You can now resubmit it in SynthCS to generate your dataset.
+        Any dataset you generated from it is now unlocked — you can preview and download it from My Downloads in SynthCS.
       </p>
       <div style="background:#d1fae5;border:1px solid #a7f3d0;border-radius:8px;padding:16px;margin:16px 0;font-size:14px;color:#065f46">
         ${promptText}
@@ -417,15 +420,17 @@ async function sendPromptRejectedEmail(to, studentName, promptText, instructorNa
   });
 }
 
+const { logEvent } = createLogger(pool);
+
+// Existing call sites keep using logActivity(userId, action, details);
+// level, category and message are filled in from the catalog in logger.js
 async function logActivity(userId, actionType, details = {}) {
-  try {
-    await pool.query(
-      "INSERT INTO activity_log (user_id, action_type, details) VALUES ($1, $2, $3)",
-      [userId, actionType, JSON.stringify(details)]
-    );
-  } catch (e) {
-    console.error("Activity log error:", e.message);
-  }
+  await logEvent({ action: actionType, userId, details });
+}
+
+// Email failures are WARN: the action itself succeeded, only the notification didn't
+function reportEmailFailure(emailType, err, userId = null) {
+  logEvent({ action: "email_failed", userId, details: { email_type: emailType, error: err?.message ?? String(err) } });
 }
 
 const app = express();
@@ -434,6 +439,49 @@ app.use(cors({
   credentials: true,
 }));
 app.use(express.json());
+
+// ── Request logging (CloudWatch-style) ────────────────────────────────────────
+// Every request runs inside a small context. console.error() calls made while
+// handling it are remembered, so when the request ends with a 5xx we can log an
+// ERROR with the route, status, duration, user, and the actual error message.
+// Requests slower than SLOW_REQUEST_MS are logged as WARN.
+const requestContext = new AsyncLocalStorage();
+const SLOW_REQUEST_MS = 20_000;
+const _consoleError = console.error.bind(console);
+console.error = (...args) => {
+  const ctx = requestContext.getStore();
+  const first = String(args[0] ?? "");
+  if (ctx && !first.startsWith("[log]")) {
+    ctx.lastError = args.map((a) => (a instanceof Error ? a.message : typeof a === "string" ? a : JSON.stringify(a))).join(" ").slice(0, 300);
+  }
+  _consoleError(...args);
+};
+
+app.use((req, res, next) => {
+  if (req.method === "OPTIONS") return next();
+  const ctx = { start: Date.now() };
+  res.on("finish", () => {
+    const duration_ms = Date.now() - ctx.start;
+    const route = (req.route?.path ? `${req.baseUrl}${req.route.path}` : req.path).slice(0, 120);
+    if (route === "/api/activity/log") return;
+    const candidate = req.body?.user_id || req.body?.student_id || req.query?.user_id || req.query?.instructor_id || req.body?.instructor_id || null;
+    const userId = typeof candidate === "string" && /^[0-9a-f-]{36}$/i.test(candidate) ? candidate : null;
+    if (res.statusCode >= 500) {
+      logEvent({ action: "http_error", userId, details: { method: req.method, route, status: res.statusCode, duration_ms, error: ctx.lastError ?? null } });
+    } else if (duration_ms > SLOW_REQUEST_MS && !route.startsWith("/api/llm/")) {
+      logEvent({ action: "slow_request", userId, details: { method: req.method, route, status: res.statusCode, duration_ms } });
+    }
+  });
+  requestContext.run(ctx, next);
+});
+
+process.on("unhandledRejection", (reason) => {
+  logEvent({ action: "unhandled_error", details: { kind: "promise rejection", error: reason?.message ?? String(reason) } });
+});
+process.on("uncaughtException", (err) => {
+  logEvent({ action: "unhandled_error", details: { kind: "exception", error: err?.message ?? String(err), stack: String(err?.stack ?? "").slice(0, 1500) } })
+    .finally(() => setTimeout(() => process.exit(1), 500));
+});
 
 // Session — only used during the OAuth handshake (10-minute window)
 app.use(session({
@@ -602,6 +650,8 @@ async function initDB() {
       )
     `);
     await pool.query(`ALTER TABLE datasets ADD COLUMN IF NOT EXISTS source VARCHAR(20) DEFAULT 'llm'`).catch(() => {});
+    // Flagged-prompt review this dataset is locked behind (status: pending_review → ready | rejected)
+    await pool.query(`ALTER TABLE datasets ADD COLUMN IF NOT EXISTS review_id UUID`).catch(() => {});
 
     // Flagged prompts — instructor review queue
     await pool.query(`
@@ -617,6 +667,8 @@ async function initDB() {
         created_at   TIMESTAMPTZ DEFAULT NOW()
       )
     `).catch(() => {});
+    // Exactly what triggered the flag: matched words per level + AI verdict
+    await pool.query(`ALTER TABLE flagged_prompts ADD COLUMN IF NOT EXISTS detection JSONB`).catch(() => {});
 
     // Class invitation links — per instructor + course
     await pool.query(`
@@ -675,6 +727,27 @@ async function initDB() {
         details     JSONB DEFAULT '{}',
         created_at  TIMESTAMPTZ DEFAULT NOW()
       )
+    `).catch(() => {});
+    // Structured logs: severity level, category, readable message, source; system events have no user
+    await pool.query(`ALTER TABLE activity_log ALTER COLUMN user_id DROP NOT NULL`).catch(() => {});
+    await pool.query(`ALTER TABLE activity_log ADD COLUMN IF NOT EXISTS level VARCHAR(10) DEFAULT 'INFO'`).catch(() => {});
+    await pool.query(`ALTER TABLE activity_log ADD COLUMN IF NOT EXISTS category VARCHAR(30)`).catch(() => {});
+    await pool.query(`ALTER TABLE activity_log ADD COLUMN IF NOT EXISTS message TEXT`).catch(() => {});
+    await pool.query(`ALTER TABLE activity_log ADD COLUMN IF NOT EXISTS source VARCHAR(20) DEFAULT 'server'`).catch(() => {});
+    await pool.query(`CREATE INDEX IF NOT EXISTS activity_log_created_idx ON activity_log (created_at DESC)`).catch(() => {});
+    await pool.query(`CREATE INDEX IF NOT EXISTS activity_log_level_idx ON activity_log (level, created_at DESC)`).catch(() => {});
+    // Older rows: fill level/category from the action so filters work on history too
+    await pool.query(`
+      UPDATE activity_log SET
+        level = CASE WHEN action_type IN ('prompt_flagged') THEN 'WARN' ELSE 'INFO' END,
+        category = CASE
+          WHEN action_type IN ('dataset_search','ai_search') THEN 'search'
+          WHEN action_type IN ('schema_generated','schema_saved','dataset_generated') THEN 'generation'
+          WHEN action_type IN ('dataset_downloaded','dataset_uploaded') THEN 'dataset'
+          WHEN action_type IN ('prompt_flagged','prompt_approved','prompt_rejected') THEN 'moderation'
+          WHEN action_type IN ('student_approved','student_rejected') THEN 'class'
+          ELSE 'other' END
+      WHERE category IS NULL
     `).catch(() => {});
 
     // Instructor restrictions — custom keywords, allowed categories/purposes, quota
@@ -778,7 +851,8 @@ if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
 }
 
 // ── Auth helpers ──────────────────────────────────────────────────────────────
-function oauthSuccessRedirect(res, user) {
+function oauthSuccessRedirect(res, user, method = "OAuth") {
+  logActivity(user.id, "login_success", { method });
   const params = new URLSearchParams({
     user_id:   user.id,
     user_name: user.full_name,
@@ -827,12 +901,11 @@ app.post("/signup", async (req, res) => {
       [first_name, last_name, full_name, email, hashed, !EMAIL_READY, EMAIL_READY ? token : null, EMAIL_READY ? new Date(Date.now() + 24 * 60 * 60 * 1000) : null, course || null, instructor || null]
     );
     const user = result.rows[0];
+    logActivity(user.id, "signup", { role: "student", course: course || null, instructor: instructor || null });
 
     if (EMAIL_READY) {
       res.status(201).json({ pending_verification: true, email });
-      sendVerificationEmail(email, token).catch((e) =>
-        console.error("Email send failed:", e.message)
-      );
+      sendVerificationEmail(email, token).catch((e) => reportEmailFailure("Verification email", e, user.id));
       return;
     }
 
@@ -857,17 +930,16 @@ app.post("/instructor/signup", async (req, res) => {
     const hashed = await bcrypt.hash(password, 10);
     const token  = crypto.randomUUID();
 
-    await pool.query(
+    const created = await pool.query(
       `INSERT INTO users (first_name, last_name, full_name, email, password, email_verified, verification_token, verification_token_expires, is_instructor, approval_status)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, TRUE, 'approved')`,
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, TRUE, 'approved') RETURNING id`,
       [first_name, last_name, full_name, email, hashed, !EMAIL_READY, EMAIL_READY ? token : null, EMAIL_READY ? new Date(Date.now() + 24 * 60 * 60 * 1000) : null]
     );
+    logActivity(created.rows[0].id, "signup", { role: "instructor" });
 
     if (EMAIL_READY) {
       res.status(201).json({ pending_verification: true, email });
-      sendVerificationEmail(email, token).catch((e) =>
-        console.error("Instructor email send failed:", e.message)
-      );
+      sendVerificationEmail(email, token).catch((e) => reportEmailFailure("Instructor verification email", e, created.rows[0].id));
       return;
     }
 
@@ -903,6 +975,7 @@ app.get("/verify-email", async (req, res) => {
       "UPDATE users SET email_verified = TRUE, verification_token = NULL, verification_token_expires = NULL WHERE id = $1",
       [user.id]
     );
+    logActivity(user.id, "email_verified");
     res.redirect(`${FRONTEND_URL}/login?verified=1`);
   } catch (err) {
     console.error("Verify email error:", err.message);
@@ -944,6 +1017,7 @@ app.post("/forgot-password", async (req, res) => {
     const result = await pool.query("SELECT * FROM users WHERE email = $1", [email]);
     if (result.rows.length === 0) return res.json({ ok: true }); // don't leak existence
 
+    logActivity(result.rows[0].id, "password_reset_requested");
     const code    = Math.floor(100000 + Math.random() * 900000).toString();
     const expires = new Date(Date.now() + 1 * 60 * 1000); // 1 minute — same as frontend timer
     await pool.query(
@@ -953,7 +1027,7 @@ app.post("/forgot-password", async (req, res) => {
 
     if (EMAIL_READY) {
       sendPasswordResetEmail(email, code).catch((e) =>
-        console.error("Password reset email failed:", e.message)
+        reportEmailFailure("Password reset email", e)
       );
     }
     res.json({ ok: true });
@@ -1015,25 +1089,39 @@ app.post("/login", async (req, res) => {
       return res.status(403).json({ error: "Only Gordon College email addresses (@gordoncollege.edu.ph) are allowed." });
 
     const result = await pool.query("SELECT * FROM users WHERE email = $1", [email]);
-    if (result.rows.length === 0)
+    if (result.rows.length === 0) {
+      logActivity(null, "login_failed", { email, reason: "no account with this email" });
       return res.status(401).json({ error: "Invalid email or password" });
+    }
 
     const user = result.rows[0];
-    if (!user.password || !(await bcrypt.compare(password, user.password)))
+    const denyLogin = (reason) => logActivity(user.id, "login_failed", { email, reason });
+    if (!user.password || !(await bcrypt.compare(password, user.password))) {
+      denyLogin("wrong password");
       return res.status(401).json({ error: "Invalid email or password" });
+    }
 
-    if (!user.email_verified)
+    if (!user.email_verified) {
+      denyLogin("email not verified");
       return res.status(403).json({ error: "unverified", message: "Please verify your email before logging in." });
+    }
 
-    if (user.is_banned)
+    if (user.is_banned) {
+      denyLogin("account banned");
       return res.status(403).json({ error: "banned", message: `Your account has been permanently banned. Reason: ${user.ban_reason || "Violation of Terms of Service"}` });
+    }
 
-    if (!user.is_admin && user.approval_status === 'terminated')
+    if (!user.is_admin && user.approval_status === 'terminated') {
+      denyLogin("class access terminated");
       return res.status(403).json({ error: "terminated", message: "Your class access has been terminated by the administrator. Please contact your instructor for assistance." });
+    }
 
-    if (!user.is_admin && !user.is_instructor && user.approval_status !== 'approved')
+    if (!user.is_admin && !user.is_instructor && user.approval_status !== 'approved') {
+      denyLogin("awaiting instructor approval");
       return res.status(403).json({ error: "pending_approval", message: "Your account is awaiting instructor approval." });
+    }
 
+    logActivity(user.id, "login_success", { method: "password", role: user.is_admin ? "admin" : user.is_instructor ? "instructor" : "student" });
     res.json({ id: user.id, first_name: user.first_name, last_name: user.last_name, full_name: user.full_name, email: user.email, is_admin: user.is_admin || false, is_instructor: user.is_instructor || false, tour_done: user.tour_done || false, instructor: user.instructor ?? null });
   } catch (err) {
     console.error("Login error:", err.message);
@@ -1050,7 +1138,7 @@ app.get("/auth/github", (req, res, next) => {
 
 app.get("/auth/github/callback",
   passport.authenticate("github", { failureRedirect: `${FRONTEND_URL}/?oauth_error=GitHub+login+failed` }),
-  (req, res) => oauthSuccessRedirect(res, req.user)
+  (req, res) => oauthSuccessRedirect(res, req.user, "GitHub")
 );
 
 // ── Google OAuth ──────────────────────────────────────────────────────────────
@@ -1062,7 +1150,7 @@ app.get("/auth/google", (req, res, next) => {
 
 app.get("/auth/google/callback",
   passport.authenticate("google", { failureRedirect: `${FRONTEND_URL}/?oauth_error=Google+login+failed` }),
-  (req, res) => oauthSuccessRedirect(res, req.user)
+  (req, res) => oauthSuccessRedirect(res, req.user, "Google")
 );
 
 // ── User profile ──────────────────────────────────────────────────────────────
@@ -1335,7 +1423,7 @@ app.patch("/api/admin/users/:id/schedule-deletion", requireAdmin, async (req, re
         await pool.query("UPDATE user_archive SET notified_at = NOW() WHERE user_id = $1", [req.params.id]);
         notified = true;
       } catch (e) {
-        console.error("Deletion warning email failed:", e.message);
+        reportEmailFailure("Deletion warning email", e);
       }
     }
 
@@ -1555,106 +1643,68 @@ function normalizeFieldType(fieldName, currentType) {
   return currentType;
 }
 
-// Keywords that indicate attempts to generate harmful, fraudulent, or privacy-violating datasets
-const INAPPROPRIATE_KEYWORDS = [
-  "real student id", "real ids", "real government id", "real social security",
-  "fake id card", "fake ids", "fake government id", "fake transcript", "fake diploma",
-  "fake academic record", "fake survey result", "fabricated result",
-  "credit card number", "cvv", "card number with cvv", "bank account number",
-  "routing number", "stolen", "fraud dataset", "scam dataset",
-  "ssn", "social security number", "patient record", "medical record with name",
-  "home address list", "personal address", "phone number list", "doxxing", " dox ",
-  "weapon", "bomb making", "drug synthesis", "narcotics", "terrorism",
-  "child abuse", "minor exploit", "malware", "virus payload", "ransomware",
-  "real payroll", "employee salary dump", "password list", "credential dump",
-  "phishing", "identity theft",
-];
+// ── Flagging pipeline — see moderation.js for exactly what triggers a flag ────
+// Level 1 instructor words + Level 3 system words are deterministic rules on the
+// raw prompt; Level 2 is the AI reading the prompt for intent. All three run; the
+// rules are the fallback when the AI errors, times out, or misses a word.
 
-function isInappropriatePrompt(prompt) {
-  const lower = prompt.toLowerCase();
-  return INAPPROPRIATE_KEYWORDS.some((kw) => lower.includes(kw));
+async function loadClassRestrictions(instructorId) {
+  if (!instructorId) return [];
+  const r = await pool.query(
+    "SELECT restriction_type, value, action FROM instructor_restrictions WHERE instructor_id = $1 AND restriction_type = 'keyword'",
+    [instructorId]
+  );
+  return r.rows;
 }
 
-// ── Shared safety-check helper (used by both generate-schema and check-prompt) ──
-async function runSafetyCheck(prompt, user_id, apiKey) {
-  const keywordFlagged = isInappropriatePrompt(prompt);
-  let aiFlagReason = null;
+// The AI being down is a system WARN — log it at most every 30 minutes, not on every prompt
+let lastAiUnavailableLog = 0;
+function noteAiUnavailable(reason) {
+  if (Date.now() - lastAiUnavailableLog < 30 * 60 * 1000) return;
+  lastAiUnavailableLog = Date.now();
+  logEvent({ action: "ai_detection_unavailable", details: { error: reason ?? null } });
+}
 
-  if (!keywordFlagged && apiKey) {
+// Runs all three levels without side effects. Used by the safety check and the instructor's "Test a prompt" tool.
+async function evaluatePrompt(prompt, { apiKey, restrictions = [], fieldNames = [], useAi = true } = {}) {
+  const { normalized, matches } = moderation.detect(prompt, { restrictions, fieldNames });
+  const ai = useAi ? await moderation.aiDetect(prompt, apiKey) : { status: "skipped" };
+  if (ai.status === "unavailable") noteAiUnavailable(ai.reason);
+  const decision = moderation.decide(matches, ai);
+  return { prompt, normalized, matches, ai, ...decision };
+}
+
+// ── Shared safety check (check-prompt, generate-schema, generation-time check) ─
+async function runSafetyCheck(prompt, user_id, apiKey, instructor_id, { useAi = true, fieldNames = [] } = {}) {
+  let instructor = null;
+  let restrictions = [];
+  if (user_id) {
     try {
-      const safetyClient = new Anthropic({ apiKey });
-      const safetyMsg = await safetyClient.messages.create({
-        model: "claude-haiku-4-5-20251001",
-        max_tokens: 128,
-        messages: [{
-          role: "user",
-          content: `You are a content moderator for an academic synthetic data generator used by college students.
-Classify this dataset schema prompt as SAFE or UNSAFE.
-
-UNSAFE means: requests for real personal data, fraud/scam datasets, weapon/drug/terrorism data,
-fake government IDs/transcripts/credentials, data designed to harm, harass, or deceive real people.
-
-Academic prompts about healthcare, finance, education, retail, etc. are SAFE.
-
-Respond with ONLY valid JSON: {"safe": true} or {"safe": false, "reason": "one sentence"}
-
-Prompt: ${prompt.trim()}`
-        }],
-      });
-      const raw = safetyMsg.content[0].text.trim().replace(/^```(?:json)?\s*/i,"").replace(/\s*```$/,"");
-      const classification = JSON.parse(raw);
-      if (classification.safe === false) aiFlagReason = classification.reason || "Flagged by AI safety check";
+      instructor = await resolveReviewInstructor(user_id, instructor_id);
+      restrictions = await loadClassRestrictions(instructor?.id);
     } catch (e) {
-      console.error("AI safety check error:", e.message);
+      console.error("Restriction lookup error:", e.message);
     }
   }
 
-  const shouldFlag = keywordFlagged || !!aiFlagReason;
-  if (!shouldFlag) return { safe: true };
+  const detection = await evaluatePrompt(prompt, { apiKey, restrictions, fieldNames, useAi });
+  if (!detection.flag) return { safe: true, detection };
+
+  if (detection.block) {
+    if (user_id) logActivity(user_id, "prompt_blocked", { prompt_text: prompt, blocked_terms: detection.blocked_terms, triggers: detection.matches });
+    return {
+      safe: false, error: "blocked_keyword", detection,
+      message: `Your prompt contains a word your instructor has blocked (${detection.blocked_terms.map((t) => `"${t}"`).join(", ")}). Please revise it.`,
+    };
+  }
 
   if (user_id) {
     try {
-      const approved = await pool.query(
-        "SELECT id FROM flagged_prompts WHERE student_id = $1 AND prompt_text = $2 AND status = 'approved'",
-        [user_id, prompt.trim()]
-      );
-      if (approved.rows.length > 0) return { safe: true }; // whitelisted
-
-      const student = await pool.query(
-        "SELECT full_name, email, instructor FROM users WHERE id = $1",
-        [user_id]
-      );
-      const instructorName = student.rows[0]?.instructor;
-      let instructorId = null;
-      let instructorEmail = null;
-      if (instructorName) {
-        const ins = await pool.query(
-          "SELECT id, email FROM users WHERE is_instructor = TRUE AND full_name = $1 LIMIT 1",
-          [instructorName]
-        );
-        if (ins.rows.length > 0) { instructorId = ins.rows[0].id; instructorEmail = ins.rows[0].email; }
-      }
-
-      const flagReason = aiFlagReason || "Matched inappropriate keyword list";
-      await pool.query(
-        "INSERT INTO flagged_prompts (student_id, instructor_id, prompt_text, flag_reason) VALUES ($1, $2, $3, $4)",
-        [user_id, instructorId, prompt.trim(), flagReason]
-      );
-      logActivity(user_id, "prompt_flagged", { prompt_text: prompt.trim(), flag_reason: flagReason });
-
-      if (instructorEmail) {
-        sendFlaggedPromptEmail(instructorEmail, instructorName, student.rows[0].full_name, prompt.trim())
-          .catch((e) => console.error("Flagged prompt email failed:", e.message));
-      }
-
-      return {
-        safe: false,
-        error: "pending_review",
-        message: "Your search query has been flagged and sent to your instructor for review. You will receive an email once it is approved.",
-      };
+      return await openReview(user_id, prompt.trim(), detection.reason, instructor?.id ?? instructor_id, detection);
     } catch (e) {
       console.error("Flagging error:", e.message);
-      return { safe: true }; // don't block on DB errors
+      // Fail closed: a flagged prompt must never slip through unreviewed
+      return { safe: false, error: "review_unavailable", message: "Your prompt needs instructor review, but the review queue is unavailable right now. Please try again shortly." };
     }
   }
 
@@ -1662,23 +1712,90 @@ Prompt: ${prompt.trim()}`
     safe: false,
     error: "inappropriate_prompt",
     message: "Your query was flagged as inappropriate and cannot be processed.",
+    detection,
   };
+}
+
+// ── Instructor review transaction: Pending → Approved / Rejected ──────────────
+// A flagged prompt opens (or reuses) a review. The student may keep working,
+// but every dataset produced under that review is locked — no preview, export
+// or download — until the instructor approves it. A rejected review keeps the
+// data locked for good, and resubmitting the same prompt is refused.
+const PENDING_REVIEW_MESSAGE =
+  "Your prompt was flagged and sent to your instructor for review. You can keep building your dataset, but it will stay locked (no preview, export, or download) until your instructor approves it.";
+
+async function resolveReviewInstructor(studentId, preferredInstructorId) {
+  // 1. The class the student is currently working in (multi-class enrollment)
+  if (preferredInstructorId) {
+    const r = await pool.query(
+      `SELECT u.id, u.email, u.full_name FROM student_classes sc JOIN users u ON u.id = sc.instructor_id
+       WHERE sc.student_id = $1 AND sc.instructor_id = $2 AND sc.status = 'approved' LIMIT 1`,
+      [studentId, preferredInstructorId]
+    );
+    if (r.rows.length) return r.rows[0];
+  }
+  // 2. Legacy single-instructor link on the user record
+  const legacy = await pool.query(
+    `SELECT i.id, i.email, i.full_name FROM users s JOIN users i ON i.full_name = s.instructor AND i.is_instructor = TRUE
+     WHERE s.id = $1 LIMIT 1`,
+    [studentId]
+  );
+  if (legacy.rows.length) return legacy.rows[0];
+  // 3. Any class the student is approved in
+  const any = await pool.query(
+    `SELECT u.id, u.email, u.full_name FROM student_classes sc JOIN users u ON u.id = sc.instructor_id
+     WHERE sc.student_id = $1 AND sc.status = 'approved' ORDER BY sc.enrolled_at DESC LIMIT 1`,
+    [studentId]
+  );
+  return any.rows[0] ?? null;
+}
+
+async function openReview(studentId, promptText, flagReason, preferredInstructorId, detection = null) {
+  const prior = await pool.query(
+    `SELECT id, status FROM flagged_prompts WHERE student_id = $1 AND prompt_text = $2
+     ORDER BY created_at DESC LIMIT 1`,
+    [studentId, promptText]
+  );
+  const last = prior.rows[0];
+  if (last?.status === "approved") return { safe: true };                       // already cleared by instructor
+  if (last?.status === "pending")  return { safe: true, review_id: last.id, message: PENDING_REVIEW_MESSAGE };
+  if (last?.status === "rejected") {
+    logActivity(studentId, "prompt_resubmitted_rejected", { prompt_text: promptText, review_id: last.id });
+    return { safe: false, error: "prompt_rejected", message: "Your instructor already rejected this prompt. It cannot be used to generate a dataset." };
+  }
+
+  const instructor = await resolveReviewInstructor(studentId, preferredInstructorId);
+  const inserted = await pool.query(
+    "INSERT INTO flagged_prompts (student_id, instructor_id, prompt_text, flag_reason, detection) VALUES ($1, $2, $3, $4, $5) RETURNING id",
+    [studentId, instructor?.id ?? null, promptText, flagReason, detection ? JSON.stringify(detection) : null]
+  );
+  logActivity(studentId, "prompt_flagged", { prompt_text: promptText, flag_reason: flagReason, triggers: detection?.matches ?? [], ai: detection?.ai ?? null });
+
+  if (instructor?.email) {
+    const student = await pool.query("SELECT full_name FROM users WHERE id = $1", [studentId]);
+    sendFlaggedPromptEmail(instructor.email, instructor.full_name, student.rows[0]?.full_name, promptText)
+      .catch((e) => reportEmailFailure("Flagged prompt email", e));
+  }
+  return { safe: true, review_id: inserted.rows[0].id, message: PENDING_REVIEW_MESSAGE };
 }
 
 // ── Check prompt safety (called before dataset search) ───────────────────────
 app.post("/api/llm/check-prompt", async (req, res) => {
   const apiKey = process.env.ANTHROPIC_API_KEY;
-  const { prompt, user_id, context } = req.body;
+  const { prompt, user_id, context, instructor_id } = req.body;
   if (!prompt?.trim()) return res.json({ safe: true });
 
   // no key = no AI check, keyword check still runs
-  const result = await runSafetyCheck(prompt.trim(), user_id, apiKey);
+  const result = await runSafetyCheck(prompt.trim(), user_id, apiKey, instructor_id);
   // Record every search the student runs, with the prompt exactly as typed.
   // Flagged searches are already logged as prompt_flagged inside runSafetyCheck.
-  if (result.safe && user_id) {
+  if (result.safe && !result.review_id && user_id) {
     logActivity(user_id, context === "ai_search" ? "ai_search" : "dataset_search", { prompt_text: prompt });
   }
-  if (result.safe) return res.json({ safe: true });
+  if (result.safe) {
+    // review_id present → allowed to continue, but everything produced is locked until approved
+    return res.json({ safe: true, review_id: result.review_id ?? null, pending_review: !!result.review_id, message: result.message });
+  }
   return res.status(403).json(result);
 });
 
@@ -1686,11 +1803,12 @@ app.post("/api/llm/generate-schema", async (req, res) => {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) return res.status(503).json({ error: "ANTHROPIC_API_KEY not configured." });
 
-  const { prompt, user_id, purpose, category } = req.body;
+  const { prompt, user_id, purpose, category, instructor_id } = req.body;
   if (!prompt?.trim()) return res.status(400).json({ error: "prompt is required" });
 
   // ── Moderation: delegate to shared safety-check helper ──────────────────────
-  const safetyResult = await runSafetyCheck(prompt.trim(), user_id, apiKey);
+  // Flagged prompts still get a schema, but carry a review_id that locks the dataset
+  const safetyResult = await runSafetyCheck(prompt.trim(), user_id, apiKey, instructor_id);
   if (!safetyResult.safe) {
     return res.status(403).json({
       error: safetyResult.error,
@@ -1797,7 +1915,7 @@ Description: ${prompt.trim()}`;
       };
     });
 
-    res.json(schema);
+    res.json({ ...schema, review_id: safetyResult.review_id ?? null, review_message: safetyResult.message ?? null });
   } catch (err) {
     console.error("LLM schema error:", err.message);
     res.status(500).json({ error: err.message });
@@ -1935,21 +2053,53 @@ Valid types: ${VALID_TYPES.join(", ")}`;
 
 // ── Dataset endpoints ─────────────────────────────────────────────────────────
 const PYTHON_DATASETS_DIR = path.join(__dirname, "python", "temp_datasets");
+const REVIEW_TO_DATASET_STATUS = { pending: "pending_review", approved: "ready", rejected: "rejected" };
+
+// Review status — the Python service calls this before serving a locked dataset,
+// and the Schema Builder polls it to show when the lock is lifted.
+app.get("/api/reviews/:id/status", async (req, res) => {
+  try {
+    const r = await pool.query(
+      "SELECT status, reviewed_at FROM flagged_prompts WHERE id = $1",
+      [req.params.id]
+    );
+    if (!r.rows.length) return res.status(404).json({ error: "Review not found" });
+    res.json({ status: r.rows[0].status, reviewed_at: r.rows[0].reviewed_at });
+  } catch (err) {
+    // Malformed UUIDs land here too
+    res.status(404).json({ error: "Review not found" });
+  }
+});
 
 app.post("/api/datasets", async (req, res) => {
   try {
-    const { user_id, name, kaggle_ref, python_dataset_id, row_count, source, purpose, category } = req.body;
+    const { user_id, name, kaggle_ref, python_dataset_id, row_count, source, purpose, category, review_id } = req.body;
     if (!user_id || !name)
       return res.status(400).json({ error: "user_id and name are required" });
 
+    // Datasets produced under a flagged prompt start locked until the instructor decides
+    let status = "ready";
+    let reviewId = null;
+    if (review_id) {
+      const review = await pool.query(
+        "SELECT status FROM flagged_prompts WHERE id = $1 AND student_id = $2",
+        [review_id, user_id]
+      );
+      if (review.rows.length) {
+        reviewId = review_id;
+        status = REVIEW_TO_DATASET_STATUS[review.rows[0].status] ?? "pending_review";
+      }
+    }
+
     const result = await pool.query(
-      `INSERT INTO datasets (user_id, name, kaggle_ref, python_dataset_id, row_count, source)
-       VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
-      [user_id, name, kaggle_ref || null, python_dataset_id || null, row_count || 0, source || "llm"]
+      `INSERT INTO datasets (user_id, name, kaggle_ref, python_dataset_id, row_count, source, status, review_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+      [user_id, name, kaggle_ref || null, python_dataset_id || null, row_count || 0, source || "llm", status, reviewId]
     );
     logActivity(user_id, "dataset_generated", {
       table_name: name, rows: row_count || 0, source: source || "llm",
       kaggle_ref: kaggle_ref || null, purpose: purpose ?? null, category: category ?? null,
+      dataset_id: result.rows[0].id, locked: status === "pending_review", review_id: reviewId,
     });
     res.status(201).json(result.rows[0]);
   } catch (err) {
@@ -1976,9 +2126,13 @@ app.get("/api/datasets/:userId", async (req, res) => {
 app.delete("/api/datasets/:id", async (req, res) => {
   try {
     const result = await pool.query(
-      "DELETE FROM datasets WHERE id = $1 RETURNING python_dataset_id",
+      "DELETE FROM datasets WHERE id = $1 RETURNING python_dataset_id, user_id, name, row_count",
       [req.params.id]
     );
+    if (result.rowCount > 0) {
+      const d = result.rows[0];
+      logActivity(d.user_id, "dataset_deleted", { table_name: d.name, rows: d.row_count, dataset_id: req.params.id });
+    }
     if (result.rowCount > 0 && result.rows[0].python_dataset_id) {
       const dir = path.join(PYTHON_DATASETS_DIR, result.rows[0].python_dataset_id);
       if (fs.existsSync(dir)) fs.rmSync(dir, { recursive: true, force: true });
@@ -2058,13 +2212,18 @@ app.post("/instructor/login", async (req, res) => {
       return res.status(400).json({ error: "email and password are required" });
 
     const result = await pool.query("SELECT * FROM instructors WHERE email = $1", [email]);
-    if (result.rows.length === 0)
+    if (result.rows.length === 0) {
+      logActivity(null, "login_failed", { email, reason: "no instructor account with this email" });
       return res.status(401).json({ error: "Invalid email or password" });
+    }
 
     const instructor = result.rows[0];
-    if (!(await bcrypt.compare(password, instructor.password)))
+    if (!(await bcrypt.compare(password, instructor.password))) {
+      logActivity(null, "login_failed", { email, reason: "wrong password (instructor)" });
       return res.status(401).json({ error: "Invalid email or password" });
+    }
 
+    logActivity(instructor.id, "login_success", { method: "password", role: "instructor" });
     res.json({ id: instructor.id, name: instructor.name, email: instructor.email });
   } catch (err) {
     console.error("Instructor login error:", err.message);
@@ -2112,7 +2271,7 @@ app.post("/instructor/approve/:userId", async (req, res) => {
     );
     if (result.rows.length === 0) return res.status(404).json({ error: "User not found" });
     const { email, full_name } = result.rows[0];
-    if (EMAIL_READY) sendApprovalEmail(email, full_name).catch((e) => console.error("Approval email failed:", e.message));
+    if (EMAIL_READY) sendApprovalEmail(email, full_name).catch((e) => reportEmailFailure("Approval email", e));
     if (instructor_id) logActivity(instructor_id, "student_approved", { student_name: full_name, student_email: email });
     res.json({ ok: true });
   } catch (err) {
@@ -2271,7 +2430,9 @@ app.patch("/api/user/tour-done", async (req, res) => {
 app.post("/api/activity/log", async (req, res) => {
   const { user_id, action_type, details } = req.body;
   if (!user_id || !action_type) return res.status(400).json({ error: "user_id and action_type required" });
-  await logActivity(user_id, action_type, details || {});
+  if (!CLIENT_ACTIONS.has(action_type)) return res.status(400).json({ error: "Unknown action_type" });
+  const safeDetails = details && typeof details === "object" ? details : {};
+  await logEvent({ action: action_type, userId: user_id, details: { ...safeDetails, client: String(req.get("user-agent") ?? "").slice(0, 160) }, source: "browser" });
   res.json({ ok: true });
 });
 
@@ -2283,7 +2444,8 @@ app.get("/instructor/flagged-prompts", async (req, res) => {
     const ins = await pool.query("SELECT full_name FROM users WHERE id = $1", [instructor_id]);
     if (!ins.rows.length) return res.status(404).json({ error: "Instructor not found" });
     const result = await pool.query(
-      `SELECT fp.*, u.full_name AS student_name, u.email AS student_email
+      `SELECT fp.*, u.full_name AS student_name, u.email AS student_email,
+              (SELECT COUNT(*)::int FROM datasets d WHERE d.review_id = fp.id) AS locked_datasets
        FROM flagged_prompts fp
        JOIN users u ON u.id = fp.student_id
        WHERE fp.instructor_id = $1
@@ -2307,6 +2469,8 @@ app.post("/instructor/flagged-prompts/:id/approve", async (req, res) => {
     );
     if (!result.rows.length) return res.status(404).json({ error: "Not found" });
     const { student_id, prompt_text } = result.rows[0];
+    // Unlock every dataset produced under this review
+    await pool.query("UPDATE datasets SET status = 'ready' WHERE review_id = $1", [req.params.id]);
     const [student, instructor] = await Promise.all([
       pool.query("SELECT email, full_name FROM users WHERE id = $1", [student_id]),
       instructor_id ? pool.query("SELECT full_name FROM users WHERE id = $1", [instructor_id]) : Promise.resolve({ rows: [] }),
@@ -2314,7 +2478,7 @@ app.post("/instructor/flagged-prompts/:id/approve", async (req, res) => {
     const instructorName = instructor.rows[0]?.full_name ?? null;
     if (student.rows.length && EMAIL_READY) {
       sendPromptApprovedEmail(student.rows[0].email, student.rows[0].full_name, prompt_text, instructorName)
-        .catch((e) => console.error("Prompt approved email failed:", e.message));
+        .catch((e) => reportEmailFailure("Prompt approved email", e));
     }
     if (instructor_id) logActivity(instructor_id, "prompt_approved", { student_name: student.rows[0]?.full_name, prompt_text });
     res.json({ ok: true });
@@ -2334,6 +2498,9 @@ app.post("/instructor/flagged-prompts/:id/reject", async (req, res) => {
     );
     if (!result.rows.length) return res.status(404).json({ error: "Not found" });
     const { student_id, prompt_text } = result.rows[0];
+
+    // Datasets produced under this review stay locked for good (Python deletes the files on next access)
+    await pool.query("UPDATE datasets SET status = 'rejected' WHERE review_id = $1", [req.params.id]);
 
     // Apply a strike and check for ban
     await pool.query(
@@ -2355,13 +2522,114 @@ app.post("/instructor/flagged-prompts/:id/reject", async (req, res) => {
     const instructorName = instructorRes.rows[0]?.full_name ?? null;
     if (student && EMAIL_READY) {
       sendPromptRejectedEmail(student.email, student.full_name, prompt_text, instructorName, student.strike_count)
-        .catch((e) => console.error("Prompt rejected email failed:", e.message));
+        .catch((e) => reportEmailFailure("Prompt rejected email", e));
     }
 
     if (instructor_id) logActivity(instructor_id, "prompt_rejected", { student_name: student?.full_name, prompt_text });
     res.json({ ok: true });
   } catch (err) {
     console.error("Reject prompt error:", err.message);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+// Rule-level trigger words found in a prompt (for highlighting in instructor views)
+function promptTriggers(promptText, restrictions) {
+  if (!promptText) return [];
+  return moderation.detect(String(promptText), { restrictions }).matches
+    .filter((m) => m.action !== "exempt")
+    .map((m) => ({ level: m.level, term: m.term, matched: m.matched, category: m.category }));
+}
+
+// ── Log explorer (instructor + admin) ─────────────────────────────────────────
+// Filters: level=INFO,WARN,ERROR · category=auth|search|… · since=1h|24h|7d|30d|all
+//          q=free text (message, action, student name/email) · limit (max 1000)
+// Returns { logs, counts: {INFO, WARN, ERROR} } — counts ignore the level filter,
+// like the stat panels on a Grafana dashboard.
+const SINCE_INTERVALS = { "1h": "1 hour", "24h": "24 hours", "7d": "7 days", "30d": "30 days" };
+
+async function queryLogs(scopeSql, scopeParams, query, restrictions = []) {
+  const where = [scopeSql];
+  const params = [...scopeParams];
+  const add = (sql, value) => { params.push(value); where.push(sql.replace("?", `$${params.length}`)); };
+
+  if (SINCE_INTERVALS[query.since]) where.push(`al.created_at >= NOW() - INTERVAL '${SINCE_INTERVALS[query.since]}'`);
+  if (query.category) add("al.category = ?", String(query.category));
+  if (query.user_id) add("al.user_id = ?", String(query.user_id));
+  if (query.q) {
+    params.push(`%${String(query.q).slice(0, 100)}%`);
+    const n = `$${params.length}`;
+    where.push(`(al.message ILIKE ${n} OR al.action_type ILIKE ${n} OR u.full_name ILIKE ${n} OR u.email ILIKE ${n} OR al.details::text ILIKE ${n})`);
+  }
+  const baseWhere = where.join(" AND ");
+
+  const levels = String(query.level ?? "").split(",").map((l) => l.trim().toUpperCase()).filter((l) => ["INFO", "WARN", "ERROR"].includes(l));
+  const levelSql = levels.length ? ` AND al.level = ANY($${params.length + 1})` : "";
+  const limit = Math.min(Math.max(parseInt(query.limit, 10) || 500, 1), 1000);
+
+  const [logs, counts] = await Promise.all([
+    pool.query(
+      `SELECT al.id, al.user_id, al.action_type, al.details, al.created_at,
+              COALESCE(al.level, 'INFO') AS level, COALESCE(al.category, 'other') AS category, al.message, al.source,
+              u.full_name AS actor_name, u.email AS actor_email,
+              CASE WHEN al.user_id IS NULL THEN 'system' WHEN u.is_admin THEN 'admin' WHEN u.is_instructor THEN 'instructor' ELSE 'student' END AS actor_role
+       FROM activity_log al
+       LEFT JOIN users u ON u.id = al.user_id
+       WHERE ${baseWhere}${levelSql}
+       ORDER BY al.created_at DESC
+       LIMIT ${limit}`,
+      levels.length ? [...params, levels] : params
+    ),
+    pool.query(
+      `SELECT COALESCE(al.level, 'INFO') AS level, COUNT(*)::int AS n
+       FROM activity_log al LEFT JOIN users u ON u.id = al.user_id
+       WHERE ${baseWhere} GROUP BY 1`,
+      params
+    ),
+  ]);
+
+  const tally = { INFO: 0, WARN: 0, ERROR: 0 };
+  for (const r of counts.rows) tally[r.level] = r.n;
+  return {
+    logs: logs.rows.map((row) => ({
+      ...row,
+      message: row.message || describeLog(row.action_type, row.details).message,
+      triggers: promptTriggers(row.details?.prompt_text, restrictions),
+    })),
+    counts: tally,
+  };
+}
+
+// Instructor scope: their students (any class, legacy link included), their own actions,
+// and system-wide WARN/ERROR events (e.g. the generation service going down)
+app.get("/instructor/logs", async (req, res) => {
+  const { instructor_id } = req.query;
+  if (!instructor_id) return res.status(400).json({ error: "instructor_id required" });
+  try {
+    const ins = await pool.query("SELECT full_name FROM users WHERE id = $1", [instructor_id]);
+    if (!ins.rows.length) return res.status(404).json({ error: "Instructor not found" });
+    const scope = `(
+      al.user_id = $2
+      OR (u.is_instructor = FALSE AND (
+        u.instructor = $1
+        OR EXISTS (SELECT 1 FROM student_classes sc WHERE sc.student_id = u.id AND sc.instructor_id = $2 AND sc.status = 'approved')
+      ))
+      OR (al.user_id IS NULL AND al.category = 'system' AND al.level IN ('WARN', 'ERROR'))
+    )`;
+    const restrictions = await loadClassRestrictions(instructor_id);
+    res.json(await queryLogs(scope, [ins.rows[0].full_name, instructor_id], req.query, restrictions));
+  } catch (err) {
+    console.error("Instructor logs error:", err.message);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+// Admin scope: everything, including anonymous failed logins and all system events
+app.get("/api/admin/logs", requireAdmin, async (req, res) => {
+  try {
+    res.json(await queryLogs("TRUE", [], req.query));
+  } catch (err) {
+    console.error("Admin logs error:", err.message);
     res.status(500).json({ error: "Server error" });
   }
 });
@@ -2391,7 +2659,9 @@ app.get("/instructor/activity", async (req, res) => {
        LIMIT 1000`,
       [instructorName, instructor_id]
     );
-    res.json(result.rows);
+    // Same detector as the live check, so the red "suspicious" rows match what actually gets flagged
+    const restrictions = await loadClassRestrictions(instructor_id);
+    res.json(result.rows.map((row) => ({ ...row, triggers: promptTriggers(row.details?.prompt_text, restrictions) })));
   } catch (err) {
     console.error("Activity feed error:", err.message);
     res.status(500).json({ error: "Server error" });
@@ -2447,7 +2717,8 @@ app.get("/instructor/prompt-history", async (req, res) => {
       (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
     );
 
-    res.json(combined);
+    const restrictions = await loadClassRestrictions(instructor_id);
+    res.json(combined.map((row) => ({ ...row, triggers: promptTriggers(row.prompt_text, restrictions) })));
   } catch (err) {
     console.error("Prompt history error:", err.message);
     res.status(500).json({ error: "Server error" });
@@ -2464,6 +2735,7 @@ app.post("/instructor/invite", async (req, res) => {
       "INSERT INTO class_invitations (instructor_id, course, token) VALUES ($1, $2, $3) RETURNING *",
       [instructor_id, course, token]
     );
+    logActivity(instructor_id, "invite_created", { course });
     res.status(201).json(result.rows[0]);
   } catch (err) {
     console.error("Create invite error:", err.message);
@@ -2524,16 +2796,18 @@ app.post("/api/instructor/:id/restrictions", async (req, res) => {
       "INSERT INTO instructor_restrictions (instructor_id, restriction_type, value, action) VALUES ($1, $2, $3, $4) RETURNING *",
       [req.params.id, restriction_type, value.trim(), action || "flag"]
     );
+    logActivity(req.params.id, "restriction_added", { restriction_type, value: value.trim(), action: action || "flag" });
     res.json(result.rows[0]);
   } catch { res.status(500).json({ error: "Server error" }); }
 });
 
 app.delete("/api/instructor/:id/restrictions/:rId", async (req, res) => {
   try {
-    await pool.query(
-      "DELETE FROM instructor_restrictions WHERE id = $1 AND instructor_id = $2",
+    const removed = await pool.query(
+      "DELETE FROM instructor_restrictions WHERE id = $1 AND instructor_id = $2 RETURNING restriction_type, value",
       [req.params.rId, req.params.id]
     );
+    if (removed.rowCount) logActivity(req.params.id, "restriction_removed", removed.rows[0]);
     res.json({ ok: true });
   } catch { res.status(500).json({ error: "Server error" }); }
 });
@@ -2564,17 +2838,59 @@ app.get("/api/student/:id/daily-count", async (req, res) => {
   } catch { res.status(500).json({ error: "Server error" }); }
 });
 
+// ── Moderation endpoints ──────────────────────────────────────────────────────
+
+// Generation-time check (Levels 1 + 3, no AI — the prompt was already AI-checked at search time).
+// Scans the prompt AND the dataset's column names against the class's trigger words.
+app.post("/api/moderation/check-generation", async (req, res) => {
+  const { student_id, instructor_id, prompt, field_names } = req.body;
+  if (!student_id) return res.status(400).json({ error: "student_id required" });
+  const fieldNames = Array.isArray(field_names) ? field_names.map(String) : [];
+  const text = String(prompt ?? "").trim() || fieldNames.join(" ");
+  if (!text) return res.json({ ok: true, review_id: null });
+  try {
+    const result = await runSafetyCheck(text, student_id, null, instructor_id, { useAi: false, fieldNames });
+    if (!result.safe) return res.status(403).json(result);
+    res.json({ ok: true, review_id: result.review_id ?? null, message: result.message ?? null, reason: result.detection?.reason ?? null });
+  } catch (e) {
+    console.error("check-generation error:", e.message);
+    res.status(500).json({ error: "review_unavailable", message: "Could not check your prompt right now. Please try again." });
+  }
+});
+
+// The Level 3 list shown to instructors — the same list the detector uses
+app.get("/api/moderation/system-triggers", (_req, res) => {
+  res.json(moderation.SYSTEM_TRIGGERS.map((t) => ({
+    term: t.term, category: t.category, examples: t.examples,
+    context_rule: t.exempt ? "Not flagged when the prompt is clearly about real fishing/fisheries — unless it also mentions emails, links, passwords, accounts, etc." : null,
+  })));
+});
+
+// Instructor "Test a prompt" tool — runs all three levels and explains the result. Nothing is saved.
+app.post("/api/moderation/test", async (req, res) => {
+  const { prompt, instructor_id, use_ai = true, field_names } = req.body;
+  if (!String(prompt ?? "").trim()) return res.status(400).json({ error: "prompt required" });
+  try {
+    const restrictions = await loadClassRestrictions(instructor_id);
+    const result = await evaluatePrompt(String(prompt), {
+      apiKey: process.env.ANTHROPIC_API_KEY, restrictions, useAi: !!use_ai,
+      fieldNames: Array.isArray(field_names) ? field_names.map(String) : [],
+    });
+    res.json(result);
+  } catch (e) {
+    console.error("moderation test error:", e.message);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
 // Student manually flags a prompt due to custom keyword match
 app.post("/api/student/flag-prompt", async (req, res) => {
   const { student_id, instructor_id, prompt_text, flag_reason } = req.body;
   if (!student_id || !prompt_text) return res.status(400).json({ error: "Missing fields" });
   try {
-    await pool.query(
-      "INSERT INTO flagged_prompts (student_id, instructor_id, prompt_text, flag_reason) VALUES ($1, $2, $3, $4)",
-      [student_id, instructor_id || null, prompt_text, flag_reason || "Custom keyword match"]
-    );
-    logActivity(student_id, "prompt_flagged", { prompt_text, flag_reason });
-    res.json({ ok: true });
+    const result = await openReview(student_id, prompt_text.trim(), flag_reason || "Custom keyword match", instructor_id);
+    if (!result.safe) return res.status(403).json(result);
+    res.json({ ok: true, review_id: result.review_id ?? null, message: result.message ?? null });
   } catch { res.status(500).json({ error: "Server error" }); }
 });
 
@@ -2616,6 +2932,7 @@ app.post("/api/class-invite/join", async (req, res) => {
       `UPDATE users SET instructor = COALESCE(instructor, $1), course = COALESCE(course, $2) WHERE id = $3`,
       [instructor_name, course, user_id]
     );
+    logActivity(user_id, "class_join_requested", { course, instructor_name, instructor_id, via: "invite link" });
     res.json({ ok: true, instructor_name, course });
   } catch (err) {
     console.error("Class join error:", err.message);
@@ -2644,10 +2961,11 @@ app.get("/api/student/:id/classes", async (req, res) => {
 // Student unenrolls from a class
 app.delete("/api/student/:id/classes/:classId", async (req, res) => {
   try {
-    await pool.query(
-      `DELETE FROM student_classes WHERE id = $1 AND student_id = $2`,
+    const left = await pool.query(
+      `DELETE FROM student_classes WHERE id = $1 AND student_id = $2 RETURNING course, instructor_id`,
       [req.params.classId, req.params.id]
     );
+    if (left.rowCount) logActivity(req.params.id, "student_unenrolled", { course: left.rows[0].course, instructor_id: left.rows[0].instructor_id });
     // Clear users.instructor/course if no approved classes remain
     const remaining = await pool.query(
       `SELECT id FROM student_classes WHERE student_id = $1 AND status = 'approved' LIMIT 1`,
@@ -2774,6 +3092,7 @@ app.post("/api/invitation/accept", async (req, res) => {
       "UPDATE student_invitations SET status = 'accepted' WHERE token = $1",
       [token]
     );
+    logActivity(user_id, "class_join_requested", { course, instructor_name, instructor_id, via: "email invitation (auto-approved)" });
 
     res.json({ ok: true, instructor_name, course });
   } catch (err) {
@@ -2862,11 +3181,62 @@ app.get("/api/admin/activity", async (req, res) => {
   }
 });
 
+// ── Python generation service health monitor ──────────────────────────────────
+// Pings the Python service every few minutes and logs only state CHANGES:
+// ERROR when it goes down, INFO when it recovers, WARN when it is very slow.
+const PYTHON_API_URL = (process.env.PYTHON_API_URL
+  || (process.env.RAILWAY_ENVIRONMENT || process.env.NODE_ENV === "production"
+      ? "https://whysoserious1012-synthcs.hf.space" : "http://localhost:8000")).replace(/\/$/, "");
+const pythonHealth = { up: null, downSince: null, lastSlowLog: 0 };
+
+async function checkPythonHealth() {
+  const started = Date.now();
+  try {
+    const r = await fetch(`${PYTHON_API_URL}/`, { signal: AbortSignal.timeout(30_000) });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const duration_ms = Date.now() - started;
+    if (pythonHealth.up === false) {
+      logEvent({ action: "python_service_recovered", details: { url: PYTHON_API_URL, downtime_s: Math.round((Date.now() - pythonHealth.downSince) / 1000) } });
+    }
+    if (duration_ms > 10_000 && Date.now() - pythonHealth.lastSlowLog > 60 * 60 * 1000) {
+      pythonHealth.lastSlowLog = Date.now();
+      logEvent({ action: "python_service_slow", details: { url: PYTHON_API_URL, duration_ms } });
+    }
+    pythonHealth.up = true;
+    pythonHealth.downSince = null;
+  } catch (e) {
+    if (pythonHealth.up !== false) {
+      pythonHealth.downSince = Date.now();
+      logEvent({ action: "python_service_down", details: { url: PYTHON_API_URL, error: e.message } });
+    }
+    pythonHealth.up = false;
+  }
+}
+
+// Keep WARN/ERROR for a year, routine INFO for 180 days
+async function applyLogRetention() {
+  try {
+    const r = await pool.query(
+      `DELETE FROM activity_log
+       WHERE (level = 'INFO' AND created_at < NOW() - INTERVAL '180 days')
+          OR (level IN ('WARN','ERROR') AND created_at < NOW() - INTERVAL '365 days')`
+    );
+    if (r.rowCount > 0) logEvent({ action: "log_retention", details: { removed: r.rowCount } });
+  } catch (e) {
+    console.error("Log retention error:", e.message);
+  }
+}
+
 initDB().then(() => {
   cleanupExpiredDatasets();
   setInterval(cleanupExpiredDatasets, 60 * 60 * 1000);
+  applyLogRetention();
+  setInterval(applyLogRetention, 24 * 60 * 60 * 1000);
+  checkPythonHealth();
+  setInterval(checkPythonHealth, 5 * 60 * 1000);
 
   app.listen(PORT, () => {
     console.log(`🚀 Server running on http://localhost:${PORT}`);
+    logEvent({ action: "server_started", details: { port: Number(PORT), node: process.version } });
   });
 });

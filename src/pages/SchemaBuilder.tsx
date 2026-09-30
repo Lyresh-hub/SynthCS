@@ -1,4 +1,4 @@
-import { useState, useEffect, Fragment } from "react";
+import { useState, useEffect, useRef, Fragment } from "react";
 import { useLocation } from "wouter";
 import { pushNotification } from "../lib/notifications";
 import {
@@ -8,6 +8,7 @@ import {
 import GeneratingLoader from "../components/GeneratingLoader";
 
 import { NODE_API, PYTHON_API } from "../lib/config";
+import { reportEvent, SLOW_GENERATION_MS } from "../lib/activity";
 
 /** Parse an error response from the Python backend.
  *  HF Spaces returns an HTML 500 page when the container crashes — detect that
@@ -120,6 +121,17 @@ interface Field {
   mergedFrom?:   string;    // source label of dataset that contributed this field → blue
   fk_table?:     string;    // FK: referenced table name
   fk_field?:     string;    // FK: referenced field name
+  is_pk?:        boolean;   // primary key — generated values are kept unique
+}
+
+// Returned by the Python download/upload endpoints when a dataset holds several tables
+interface RelatedTable {
+  name: string; row_count: number; primary_key: string | null;
+  schema: { name: string; type: string; constraints?: Record<string, any>; is_pk?: boolean; fk_table?: string; fk_field?: string }[];
+}
+interface DetectedRelation {
+  child_table: string; child_field: string; parent_table: string; parent_field: string;
+  match_rate: number; confidence: "high" | "medium" | "low";
 }
 
 interface SmartResult extends KaggleDataset {
@@ -248,6 +260,30 @@ function makeField(overrides: Partial<Field> & { name: string; type: string }): 
     expanded: false,
     ...overrides,
   };
+}
+
+// Turns auto-detected related tables into editor tables with PK/FK links and
+// constraints profiled from the real data. primaryExtras (e.g. LLM-added
+// fields) are appended to the table the CTGAN path was built from.
+function tablesFromRelated(related: RelatedTable[], primaryName: string, primaryExtras: Field[] = []): Table[] {
+  return related.map((t, i) => ({
+    id: `rel${i}`,
+    name: t.name,
+    rowCount: Math.min(Math.max(t.row_count, 100), 10_000),
+    fields: [
+      ...t.schema.map((f, j) => {
+        const { null_rate = 0, ...c } = f.constraints ?? {};
+        return makeField({
+          id: `rel${i}_${j}`, name: f.name, type: f.type,
+          originalName: f.name, originalType: f.type,
+          null_rate: Math.round(Number(null_rate) || 0),
+          constraints: { ...emptyConstraints(), ...c },
+          fk_table: f.fk_table, fk_field: f.fk_field, is_pk: !!f.is_pk,
+        });
+      }),
+      ...(t.name === primaryName ? primaryExtras : []),
+    ],
+  }));
 }
 
 // ── Entity auto-detection: split a flat LLM schema into related tables ────────
@@ -421,11 +457,102 @@ export default function SchemaBuilder() {
   const [llmPrompt, setLlmPrompt]   = useState("");
   const [llmLoading, setLlmLoading] = useState(false);
   const [llmError, setLlmError]     = useState("");
+
+  // ── Activity log: failures and slow runs, with the step they happened in ──
+  // loadingMsg always names the step in progress ("Training CTGAN…", "Searching…"),
+  // so it becomes the log's "stage". Upload failures are their own (WARN) event.
+  const lastStepRef   = useRef("");
+  const failureKind   = useRef<"generation" | "upload">("generation");
+  const stepStartRef  = useRef<number | null>(null);
+  useEffect(() => { if (loadingMsg) lastStepRef.current = loadingMsg; }, [loadingMsg]);
+  useEffect(() => {
+    if (phase === "generating") { stepStartRef.current = Date.now(); return; }
+    if (stepStartRef.current !== null) {
+      const duration_ms = Date.now() - stepStartRef.current;
+      stepStartRef.current = null;
+      if (duration_ms > SLOW_GENERATION_MS) {
+        reportEvent("generation_slow", { stage: lastStepRef.current, duration_ms, rows: rowCount, tables: tables.length, outcome: phase === "error" ? "failed" : "finished" });
+      }
+    }
+  }, [phase]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (phase !== "error" || !errorMsg) return;
+    if (failureKind.current === "upload") {
+      reportEvent("dataset_upload_failed", { file_name: lastStepRef.current.replace(/^Reading (.*) and detecting tables…$/, "$1"), error: errorMsg });
+      failureKind.current = "generation";
+      return;
+    }
+    reportEvent("generation_failed", { stage: lastStepRef.current, error: errorMsg, mode, rows: rowCount, tables: tables.length, dataset_ref: kaggleRef || null });
+  }, [phase, errorMsg]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (llmError) reportEvent("generation_failed", { stage: "AI schema generation", error: llmError, prompt_text: llmPrompt });
+  }, [llmError]); // eslint-disable-line react-hooks/exhaustive-deps
   const [smartResults, setSmartResults]         = useState<SmartResult[]>([]);
   const [selectedSmartIds, setSelectedSmartIds] = useState<Set<string>>(new Set());
   const [detectedExtras, setDetectedExtras]     = useState<string[]>([]);
   const [strikeWarning, setStrikeWarning] = useState<{ strikes: number; banned: boolean } | null>(null);
-  const [pendingReview, setPendingReview] = useState(false);
+  // Instructor review of a flagged prompt: Pending → Approved / Rejected.
+  // While a review is open, every dataset generated in this session is locked
+  // (no preview, export, or download) until the instructor approves it.
+  const [reviewId, setReviewId]         = useState<string | null>(() => sessionStorage.getItem("sb_review_id"));
+  const [reviewStatus, setReviewStatus] = useState<"pending" | "approved" | "rejected" | null>(() => (sessionStorage.getItem("sb_review_id") ? "pending" : null));
+  const [reviewError, setReviewError]   = useState("");
+  const pendingReview = !!reviewId && reviewStatus === "pending";
+
+  const startReview = (id: string, promptText: string) => {
+    sessionStorage.setItem("sb_review_id", id);
+    sessionStorage.setItem("sb_review_prompt", promptText.trim());
+    setReviewId(id);
+    setReviewStatus("pending");
+    setReviewError("");
+  };
+  const clearReview = () => {
+    sessionStorage.removeItem("sb_review_id");
+    sessionStorage.removeItem("sb_review_prompt");
+    setReviewId(null);
+    setReviewStatus(null);
+  };
+  // Instructor of the class the student is currently working in
+  const activeInstructorId = localStorage.getItem("active_instructor_id") || localStorage.getItem("instructor_id") || undefined;
+
+  // Poll the review so the lock banner updates as soon as the instructor decides
+  useEffect(() => {
+    if (!reviewId) return;
+    let stopped = false;
+    const check = () =>
+      fetch(`${NODE_API}/api/reviews/${reviewId}/status`)
+        .then((r) => (r.ok ? r.json() : null))
+        .then((d) => { if (!stopped && d?.status) setReviewStatus(d.status); })
+        .catch(() => {});
+    check();
+    const t = setInterval(check, 20_000);
+    return () => { stopped = true; clearInterval(t); };
+  }, [reviewId]);
+
+  // Rejected → throw away everything built from the rejected prompt so it can't be regenerated
+  useEffect(() => {
+    if (reviewStatus !== "rejected") return;
+    setTables([]);
+    setDatasetId("");
+    setTemplateDatasetId("");
+    setPhase("idle");
+  }, [reviewStatus]);
+
+  // Handles the check-prompt / generate-schema answer: a review_id means "continue, but locked".
+  // A clean answer only lifts the lock when it's for a different prompt than the one under review
+  // (a custom-keyword review on the same prompt must stay in force).
+  const applyReviewResult = (data: any, promptText: string) => {
+    if (data?.review_id) startReview(data.review_id, promptText);
+    else if (promptText.trim() !== (sessionStorage.getItem("sb_review_prompt") ?? "")) clearReview();
+  };
+
+  // Handles a 403 from the safety check. Returns true when the flow must stop.
+  const handleSafetyRefusal = (data: any): boolean => {
+    if (data?.error === "banned") { setStrikeWarning({ strikes: data.strikes ?? 3, banned: true }); return true; }
+    if (data?.error === "inappropriate_prompt") { setStrikeWarning({ strikes: data.strikes ?? 1, banned: data.banned ?? false }); return true; }
+    if (data?.error === "prompt_rejected" || data?.error === "review_unavailable" || data?.error === "blocked_keyword") { setReviewError(data.message); return true; }
+    return false;
+  };
 
   const [templateDatasetId,   setTemplateDatasetId]   = useState("");
   const [templateColumns,     setTemplateColumns]     = useState<string[]>([]);
@@ -468,6 +595,23 @@ export default function SchemaBuilder() {
   const [classRestrictions, setClassRestrictions] = useState<RestrictionEntry[]>([]);
   const [restrictionError, setRestrictionError]   = useState("");
 
+  // Relationships auto-detected between the tables of a downloaded/uploaded dataset
+  const [detectedRelations, setDetectedRelations] = useState<DetectedRelation[]>([]);
+
+  // Loads every table of a multi-table dataset into the editor. Returns false
+  // (and clears old relations) when the dataset only has one table.
+  const applyRelatedTables = (data: any, primaryExtras: Field[] = []): boolean => {
+    if (!Array.isArray(data?.related_tables) || data.related_tables.length < 2) {
+      setDetectedRelations([]);
+      return false;
+    }
+    const loaded = tablesFromRelated(data.related_tables, data.primary_table, primaryExtras);
+    setTables(loaded);
+    setActiveTableId(loaded[0].id);
+    setDetectedRelations(data.relationships ?? []);
+    return true;
+  };
+
   useEffect(() => {
     const instructorId = localStorage.getItem("active_instructor_id") || localStorage.getItem("instructor_id");
     if (!instructorId) return;
@@ -501,36 +645,37 @@ export default function SchemaBuilder() {
     return best.label;
   };
 
-  const askPurposeThen = (action: "template" | "expand" | "generate") => {
-    const prompt = llmPrompt.trim() || tables.flatMap((t) => t.fields.map((f) => f.name)).join(" ");
-    const lower  = prompt.toLowerCase();
+  const askPurposeThen = async (action: "template" | "expand" | "generate") => {
+    const fieldNames = tables.flatMap((t) => t.fields.map((f) => f.name));
+    // The student's own words: the AI description, or the dataset search they ran
+    const studentPrompt = llmPrompt.trim() || searchQuery.trim();
+    const prompt = studentPrompt || fieldNames.join(" ");
 
-    // Check for blocked custom keywords
-    const blocked = classRestrictions.find(
-      (r) => r.restriction_type === "keyword" && r.action === "block" && lower.includes(r.value.toLowerCase())
-    );
-    if (blocked) {
-      setRestrictionError(`Your prompt contains a blocked keyword: "${blocked.value}". Please revise before generating.`);
-      return;
-    }
-
-    // Flag custom keywords (flag action) — create flagged_prompt entry
-    const flaggedKw = classRestrictions.find(
-      (r) => r.restriction_type === "keyword" && r.action === "flag" && lower.includes(r.value.toLowerCase())
-    );
-    if (flaggedKw) {
-      const studentId  = localStorage.getItem("user_id") || "";
-      const instructorId = localStorage.getItem("active_instructor_id") || "";
-      fetch(`${NODE_API}/api/student/flag-prompt`, {
+    // Server-side check of the PROMPT and the DATASET's column names against the
+    // class's trigger words (Level 1) and the system trigger words (Level 3).
+    // Block → stop. Flag → open the instructor review BEFORE generating, so the
+    // dataset is locked from the start instead of checked afterwards.
+    try {
+      const res = await fetch(`${NODE_API}/api/moderation/check-generation`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          student_id: studentId,
-          instructor_id: instructorId,
-          prompt_text: prompt,
-          flag_reason: `Custom keyword match: "${flaggedKw.value}"`,
+          student_id: localStorage.getItem("user_id") || "",
+          instructor_id: activeInstructorId,
+          prompt: studentPrompt,
+          field_names: fieldNames,
         }),
-      }).catch(() => {});
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setRestrictionError(data.message || "Your prompt could not be checked. Please try again.");
+        return;
+      }
+      if (data.review_id) startReview(data.review_id, studentPrompt || prompt);
+    } catch {
+      // Fail closed — an unchecked prompt could skip instructor review
+      setRestrictionError("Your prompt could not be checked right now. Please make sure you're online and try again.");
+      return;
     }
 
     setRestrictionError("");
@@ -556,6 +701,7 @@ export default function SchemaBuilder() {
         const limit = parseInt(quotaRule.value, 10);
         if (count >= limit) {
           setRestrictionError(`You have reached your daily generation limit of ${limit} dataset${limit !== 1 ? "s" : ""}. Try again tomorrow.`);
+          reportEvent("quota_reached", { limit, count });
           setShowPurposeModal(false);
           return;
         }
@@ -779,7 +925,7 @@ export default function SchemaBuilder() {
           fetch(`${PYTHON_API}/api/generate-from-schema`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(buildPayload(t)),
+            body: JSON.stringify({ ...buildPayload(t), review_id: reviewId ?? undefined }),
           }).then(async (r) => {
             if (r.ok) return r.json();
             const body = await r.text().catch(() => "");
@@ -825,9 +971,11 @@ export default function SchemaBuilder() {
             },
             fk_table: f.fk_table ?? null,
             fk_field: f.fk_field ?? null,
+            is_pk:    !!f.is_pk,
           })),
           row_count: t.rowCount ?? rowCount,
         })),
+        review_id: reviewId ?? undefined,
       };
       const res = await fetch(`${PYTHON_API}/api/generate-multi-table`, {
         method: "POST",
@@ -844,7 +992,12 @@ export default function SchemaBuilder() {
       }));
       pushNotification({ title: data.primary_table, message: `${data.total_rows.toLocaleString()} rows · ${data.table_names.length} tables`, dataset_id: data.dataset_id });
       const userId = localStorage.getItem("user_id");
-      if (userId) fetch(`${NODE_API}/api/activity/log`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ user_id: userId, action_type: "dataset_downloaded", details: { table_name: data.primary_table, rows: data.total_rows, tables: data.table_names.length, purpose: sessionStorage.getItem("generation_purpose") ?? null, category: sessionStorage.getItem("generation_category") ?? null } }) }).catch(() => {});
+      if (userId) {
+        await fetch(`${NODE_API}/api/datasets`, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ user_id: userId, name: data.primary_table, kaggle_ref: "", python_dataset_id: data.dataset_id, row_count: data.total_rows, source: "multi-table", purpose: sessionStorage.getItem("generation_purpose"), category: sessionStorage.getItem("generation_category"), review_id: reviewId }),
+        }).catch(() => {});
+      }
       localStorage.setItem("last_path", "/schema-builder"); setLocation("/preview");
     } catch (e: any) {
       setErrorMsg(e.message ?? "Multi-table generation failed.");
@@ -865,7 +1018,8 @@ export default function SchemaBuilder() {
 
   // ── Import user's own CSV ────────────────────────────────────────────────
   const handleUploadDataset = async (file: File) => {
-    setLoadingMsg("Analyzing your CSV…");
+    failureKind.current = "upload";
+    setLoadingMsg(`Reading ${file.name} and detecting tables…`);
     setPhase("loading");
     try {
       const form = new FormData();
@@ -876,8 +1030,11 @@ export default function SchemaBuilder() {
       });
       if (!res.ok) throw new Error(await parsePythonError(res));
       const data = await res.json();
-      const uploaderId = localStorage.getItem("user_id");
-      if (uploaderId) fetch(`${NODE_API}/api/activity/log`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ user_id: uploaderId, action_type: "dataset_uploaded", details: { file_name: file.name, table_name: data.table_name ?? null } }) }).catch(() => {});
+      reportEvent("dataset_uploaded", {
+        file_name: file.name, file_size_kb: Math.round(file.size / 1024), table_name: data.table_name ?? null,
+        columns: data.schema?.length ?? 0, tables: data.related_tables?.length || 1,
+        relationships: data.relationships?.length ?? 0,
+      });
 
       const realSchema: OriginalField[] = data.schema.map((f: any) => ({
         name: f.name, type: f.type, nullable: f.nullable, sample_values: f.sample_values ?? [],
@@ -889,7 +1046,9 @@ export default function SchemaBuilder() {
       setDatasetId(data.dataset_id);
       setKaggleRef("");
       setMode("kaggle");
-      setTables([{ id: "1", name: data.table_name || "uploaded_dataset", fields }]);
+      if (!applyRelatedTables(data)) {
+        setTables([{ id: "1", name: data.table_name || "uploaded_dataset", fields }]);
+      }
       setPhase("schema");
     } catch (e: any) {
       setErrorMsg(e.message ?? "Upload failed.");
@@ -916,17 +1075,15 @@ export default function SchemaBuilder() {
       const res  = await fetch(`${NODE_API}/api/llm/generate-schema`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: llmPrompt, user_id: userId, purpose: sessionStorage.getItem("generation_purpose") ?? undefined, category: sessionStorage.getItem("generation_category") ?? undefined }),
+        body: JSON.stringify({ prompt: llmPrompt, user_id: userId, instructor_id: activeInstructorId, purpose: sessionStorage.getItem("generation_purpose") ?? undefined, category: sessionStorage.getItem("generation_category") ?? undefined }),
         signal: llmCtrl.signal,
       });
       const data = await res.json();
       if (!res.ok) {
-        if (data.error === "banned") { setStrikeWarning({ strikes: data.strikes ?? 3, banned: true }); return; }
-        if (data.error === "inappropriate_prompt") { setStrikeWarning({ strikes: data.strikes ?? 1, banned: false }); return; }
-        if (data.error === "pending_review") { setPendingReview(true); return; }
+        if (handleSafetyRefusal(data)) return;
         throw new Error(data.error || "LLM request failed");
       }
-      setPendingReview(false);
+      applyReviewResult(data, llmPrompt);
       const fields: Field[] = data.fields.map((f: any, i: number) =>
         makeField({
           id: `llm${i}`, name: f.name, type: f.type,
@@ -970,23 +1127,26 @@ export default function SchemaBuilder() {
     if (!llmPrompt.trim()) return;
     setLlmError("");
     setStrikeWarning(null);
-    setPendingReview(false);
 
-    // Safety check before doing anything — block search and generation if flagged
+    // Safety check before doing anything. Flagged → continue, but everything produced is locked for review
+    setReviewError("");
     const userId = localStorage.getItem("user_id");
     try {
       const safetyRes = await fetch(`${NODE_API}/api/llm/check-prompt`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: llmPrompt, user_id: userId, context: "ai_search" }),
+        body: JSON.stringify({ prompt: llmPrompt, user_id: userId, instructor_id: activeInstructorId, context: "ai_search" }),
       });
+      const data = await safetyRes.json().catch(() => ({}));
       if (!safetyRes.ok) {
-        const data = await safetyRes.json();
-        if (data.error === "pending_review") { setPendingReview(true); return; }
-        if (data.error === "inappropriate_prompt") { setStrikeWarning({ strikes: data.strikes ?? 1, banned: data.banned ?? false }); return; }
+        if (handleSafetyRefusal(data)) return;
+      } else {
+        applyReviewResult(data, llmPrompt);
       }
     } catch {
-      // If safety check fails, allow to proceed
+      // Fail closed — an unchecked prompt could skip instructor review
+      setReviewError("Could not check your prompt right now. Please make sure you're online and try again.");
+      return;
     }
 
     setSortBy("downloads");
@@ -1089,7 +1249,10 @@ export default function SchemaBuilder() {
         })
       );
 
-      setTables(splitSchemaIntoTables(ds.title, [...realFields, ...llmFields]));
+      // Multi-table source: keep the real tables + detected links, add LLM fields to the primary table
+      if (!applyRelatedTables(dlData, llmFields)) {
+        setTables(splitSchemaIntoTables(ds.title, [...realFields, ...llmFields]));
+      }
       setMode("kaggle");
       setPhase("schema");
     } catch (e: any) {
@@ -1300,24 +1463,27 @@ export default function SchemaBuilder() {
   const handleSearch = async () => {
     if (!searchQuery.trim()) return;
 
-    // Safety check before allowing dataset search
+    // Safety check before allowing dataset search. Flagged → search continues, results locked for review
+    setReviewError("");
     const userId = localStorage.getItem("user_id");
     try {
       const safetyRes = await fetch(`${NODE_API}/api/llm/check-prompt`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: searchQuery, user_id: userId, context: "dataset_search" }),
+        body: JSON.stringify({ prompt: searchQuery, user_id: userId, instructor_id: activeInstructorId, context: "dataset_search" }),
       });
+      const data = await safetyRes.json().catch(() => ({}));
       if (!safetyRes.ok) {
-        const data = await safetyRes.json();
-        if (data.error === "pending_review") { setPendingReview(true); return; }
-        if (data.error === "inappropriate_prompt") { setStrikeWarning({ strikes: 1, banned: false }); return; }
+        if (handleSafetyRefusal(data)) return;
+      } else {
+        applyReviewResult(data, searchQuery);
       }
     } catch {
-      // If safety check itself fails, allow the search to proceed
+      // Fail closed — an unchecked query could skip instructor review
+      setReviewError("Could not check your search right now. Please make sure you're online and try again.");
+      return;
     }
 
-    setPendingReview(false);
     setExtSourceFilter("all");
     setSortBy("downloads");
     setSizeFilter("any");
@@ -1358,6 +1524,7 @@ export default function SchemaBuilder() {
       if (!res.ok) throw new Error(await parsePythonError(res));
       const datasets = (await res.json()).datasets ?? [];
       setSearchResults(datasets);
+      if (datasets.length === 0) reportEvent("search_no_results", { prompt_text: searchQuery });
       if (isDirectRef && datasets.length > 0 && datasets[0].source) {
         setExtSourceFilter(datasets[0].source);
       }
@@ -1477,12 +1644,14 @@ export default function SchemaBuilder() {
       }));
       setOriginalSchema(orig);
 
-      setTables([{
-        id: "1", name: ds.title,
-        fields: orig.map((f, i) =>
-          makeField({ id: `f${i}`, name: f.name, type: f.type, originalName: f.name, originalType: f.type })
-        ),
-      }]);
+      if (!applyRelatedTables(data)) {
+        setTables([{
+          id: "1", name: ds.title,
+          fields: orig.map((f, i) =>
+            makeField({ id: `f${i}`, name: f.name, type: f.type, originalName: f.name, originalType: f.type })
+          ),
+        }]);
+      }
       setMode("kaggle"); setPhase("schema");
     } catch (e: any) {
       setErrorMsg(e.message ?? "Download failed."); setPhase("error");
@@ -1562,7 +1731,7 @@ export default function SchemaBuilder() {
       };
       const res = await fetch(`${PYTHON_API}/api/generate-from-schema`, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({ ...payload, review_id: reviewId ?? undefined }),
       });
       if (!res.ok) throw new Error(await parsePythonError(res));
       const data = await res.json();
@@ -1589,6 +1758,7 @@ export default function SchemaBuilder() {
         body: JSON.stringify({
           dataset_id: templateDatasetId,
           row_count:  rowCount,
+          review_id:  reviewId ?? undefined,
           fields: (at2?.fields ?? []).map((f) => ({ name: f.name, null_rate: f.null_rate })),
         }),
       });
@@ -1599,7 +1769,7 @@ export default function SchemaBuilder() {
       if (userId) {
         await fetch(`${NODE_API}/api/datasets`, {
           method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ user_id: userId, name: getActiveTable()?.name ?? "dataset", kaggle_ref: "", python_dataset_id: data.dataset_id, row_count: rowCount, source: "llm", purpose: sessionStorage.getItem("generation_purpose"), category: sessionStorage.getItem("generation_category") }),
+          body: JSON.stringify({ user_id: userId, name: getActiveTable()?.name ?? "dataset", kaggle_ref: "", python_dataset_id: data.dataset_id, row_count: rowCount, source: "llm", purpose: sessionStorage.getItem("generation_purpose"), category: sessionStorage.getItem("generation_category"), review_id: reviewId }),
         }).catch(() => {});
       }
       sessionStorage.setItem("preview_params", JSON.stringify({
@@ -1630,6 +1800,7 @@ export default function SchemaBuilder() {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           table_name: at.name,
+          review_id: reviewId ?? undefined,
           fields: at.fields.map((f) => ({
             name:        f.name,
             field_type:  f.type,
@@ -1657,6 +1828,7 @@ export default function SchemaBuilder() {
         body: JSON.stringify({
           dataset_id: templateData.dataset_id,
           row_count:  rowCount,
+          review_id:  reviewId ?? undefined,
           fields: at.fields.map((f) => ({ name: f.name, null_rate: f.null_rate })),
         }),
         signal: ctrl.signal,
@@ -1668,7 +1840,7 @@ export default function SchemaBuilder() {
       if (userId) {
         await fetch(`${NODE_API}/api/datasets`, {
           method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ user_id: userId, name: at.name, kaggle_ref: "", python_dataset_id: expandData.dataset_id, row_count: rowCount, source: "llm", purpose: sessionStorage.getItem("generation_purpose"), category: sessionStorage.getItem("generation_category") }),
+          body: JSON.stringify({ user_id: userId, name: at.name, kaggle_ref: "", python_dataset_id: expandData.dataset_id, row_count: rowCount, source: "llm", purpose: sessionStorage.getItem("generation_purpose"), category: sessionStorage.getItem("generation_category"), review_id: reviewId }),
         }).catch(() => {});
       }
 
@@ -1718,7 +1890,7 @@ export default function SchemaBuilder() {
 
     try {
       let endpoint = `${PYTHON_API}/api/generate`;
-      let body: any = { dataset_id: activeDatasetId, changes, row_count: rowCount };
+      let body: any = { dataset_id: activeDatasetId, changes, row_count: rowCount, review_id: reviewId ?? undefined };
 
       if (hasLlmFields) {
         endpoint = `${PYTHON_API}/api/generate-hybrid`;
@@ -1749,7 +1921,7 @@ export default function SchemaBuilder() {
       if (userId) {
         await fetch(`${NODE_API}/api/datasets`, {
           method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ user_id: userId, name: getActiveTable()?.name ?? "dataset", kaggle_ref: kaggleRef, python_dataset_id: activeDatasetId, row_count: rowCount, source: selectedDataSource, purpose: sessionStorage.getItem("generation_purpose"), category: sessionStorage.getItem("generation_category") }),
+          body: JSON.stringify({ user_id: userId, name: getActiveTable()?.name ?? "dataset", kaggle_ref: kaggleRef, python_dataset_id: activeDatasetId, row_count: rowCount, source: selectedDataSource, purpose: sessionStorage.getItem("generation_purpose"), category: sessionStorage.getItem("generation_category"), review_id: reviewId }),
         }).catch(() => {});
       }
       sessionStorage.setItem("preview_params", JSON.stringify({ id: activeDatasetId, name: getActiveTable()?.name ?? "dataset", rows: rowCount, ref: kaggleRef }));
@@ -1964,6 +2136,49 @@ export default function SchemaBuilder() {
 
   return (
     <div className="space-y-4">
+
+      {/* ── Instructor review lock (Pending → Approved / Rejected) ── */}
+      {reviewId && reviewStatus && (
+        <div className={`flex items-start gap-2.5 rounded-xl border px-4 py-3 ${
+          reviewStatus === "pending"  ? "bg-amber-50 border-amber-300" :
+          reviewStatus === "approved" ? "bg-green-50 border-green-300" :
+                                        "bg-red-50 border-red-300"}`}>
+          <AlertCircle className={`w-4 h-4 flex-shrink-0 mt-0.5 ${
+            reviewStatus === "pending" ? "text-amber-600" : reviewStatus === "approved" ? "text-green-600" : "text-red-600"}`} />
+          <div className="flex-1 min-w-0">
+            {reviewStatus === "pending" && (
+              <>
+                <p className="text-xs font-semibold text-amber-900">🔒 Pending instructor review — dataset locked</p>
+                <p className="text-xs text-amber-800 mt-0.5 leading-relaxed">
+                  Your prompt was flagged and sent to your instructor. You can keep building and generating, but the dataset
+                  can't be previewed, exported, or downloaded until your instructor approves it. You'll get an email when they decide.
+                </p>
+              </>
+            )}
+            {reviewStatus === "approved" && (
+              <>
+                <p className="text-xs font-semibold text-green-900">✓ Approved by your instructor — dataset unlocked</p>
+                <p className="text-xs text-green-800 mt-0.5 leading-relaxed">
+                  Datasets from this prompt can now be previewed and downloaded from My Downloads.
+                </p>
+              </>
+            )}
+            {reviewStatus === "rejected" && (
+              <>
+                <p className="text-xs font-semibold text-red-900">✗ Rejected by your instructor — access denied</p>
+                <p className="text-xs text-red-800 mt-0.5 leading-relaxed">
+                  Datasets generated from this prompt will stay locked and cannot be downloaded. Start over with a different prompt.
+                </p>
+              </>
+            )}
+          </div>
+          {reviewStatus === "approved" && (
+            <button onClick={clearReview} className="text-gray-400 hover:text-gray-600 flex-shrink-0" title="Dismiss">
+              <X className="w-3.5 h-3.5" />
+            </button>
+          )}
+        </div>
+      )}
 
       {/* ── Pure-AI confirmation modal ── */}
       {showPureAiConfirm && (
@@ -2187,15 +2402,10 @@ export default function SchemaBuilder() {
               </button>
             </div>
           )}
-          {pendingReview && (
-            <div className="mx-4 mb-3 flex items-start gap-2.5 bg-blue-50 border border-blue-300 rounded-lg px-3 py-2.5">
-              <AlertCircle className="w-4 h-4 text-blue-600 flex-shrink-0 mt-0.5" />
-              <div>
-                <p className="text-xs font-semibold text-blue-800">Prompt sent for instructor review</p>
-                <p className="text-xs text-blue-700 mt-0.5 leading-relaxed">
-                  Your prompt was flagged and has been sent to your instructor for review. You will receive an email once it is approved, after which you can resubmit it.
-                </p>
-              </div>
+          {reviewError && (
+            <div className="mx-4 mb-3 flex items-start gap-2.5 bg-red-50 border border-red-200 rounded-lg px-3 py-2.5">
+              <AlertCircle className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5" />
+              <p className="text-xs text-red-700 leading-relaxed">{reviewError}</p>
             </div>
           )}
           {strikeWarning && !strikeWarning.banned && (
@@ -2498,14 +2708,15 @@ export default function SchemaBuilder() {
                 <p className="text-sm font-semibold text-gray-800">Upload a Real Dataset</p>
                 <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-green-100 text-green-700 border border-green-200">Option B — CTGAN Path</span>
               </div>
-              <p className="text-xs text-gray-400 mt-0.5">CTGAN learns from your CSV and generates a statistically similar dataset — column names and structure are inherited from the source</p>
+              <p className="text-xs text-gray-400 mt-0.5">CTGAN learns from your data and generates a statistically similar dataset — column names and structure are inherited from the source</p>
+              <p className="text-[11px] text-gray-400 mt-0.5">CSV, TSV, TXT, Excel (.xlsx/.xls), Parquet, JSON/JSONL, or an archive (.zip, .tar, .tar.gz, .gz). Multiple tables are linked automatically.</p>
             </div>
-            <span className="text-xs text-green-700 font-medium border border-green-200 rounded-full px-3 py-1 bg-green-50 group-hover:bg-green-100 transition-colors">
-              Choose CSV
+            <span className="text-xs text-green-700 font-medium border border-green-200 rounded-full px-3 py-1 bg-green-50 group-hover:bg-green-100 transition-colors whitespace-nowrap">
+              Choose File
             </span>
             <input
               type="file"
-              accept=".csv"
+              accept=".csv,.tsv,.tab,.txt,.xlsx,.xls,.parquet,.json,.jsonl,.zip,.tar,.gz,.tgz"
               className="hidden"
               onChange={(e) => {
                 const file = e.target.files?.[0];
@@ -3123,6 +3334,47 @@ export default function SchemaBuilder() {
       )}
 
       {/* Table tabs — shown when 2+ tables */}
+      {/* Auto-detected relationships between the tables of a real dataset */}
+      {phase === "schema" && tables.length >= 2 && (() => {
+        // Only for tables loaded from a real dataset (not presets / AI-split schemas)
+        if (!tables.some((t) => t.id.startsWith("rel"))) return null;
+        const rels = tables.flatMap((t) =>
+          t.fields.filter((f) => f.fk_table && f.fk_field).map((f) => {
+            const det = detectedRelations.find((r) => r.child_table === t.name && r.child_field === f.name
+              && r.parent_table === f.fk_table && r.parent_field === f.fk_field);
+            return {
+              child_table: t.name, child_field: f.name,
+              parent_table: f.fk_table!, parent_field: f.fk_field!,
+              match_rate: det?.match_rate ?? null, confidence: det?.confidence ?? "manual",
+            };
+          })
+        );
+        return (
+          <div className="bg-blue-50 border border-blue-100 rounded-xl px-4 py-3 space-y-1.5">
+            <p className="text-xs font-semibold text-blue-800">
+              {tables.length} tables detected in this dataset · {rels.length} relationship{rels.length === 1 ? "" : "s"} linked
+            </p>
+            {rels.length > 0 ? (
+              <ul className="text-[11px] text-blue-700 space-y-0.5">
+                {rels.map((r) => (
+                  <li key={`${r.child_table}.${r.child_field}`} className="flex flex-wrap items-center gap-1.5">
+                    <span className="font-mono">{r.child_table}.{r.child_field}</span>
+                    <span>→</span>
+                    <span className="font-mono">{r.parent_table}.{r.parent_field}</span>
+                    <span className="text-blue-500">
+                      ({r.match_rate != null ? `${Math.round(r.match_rate * 100)}% match · ${r.confidence}` : "set manually"})
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-[11px] text-blue-700">No key links found between these tables — they will be generated independently.</p>
+            )}
+            <p className="text-[11px] text-blue-500">You can change or remove any link from the field's FK selector.</p>
+          </div>
+        );
+      })()}
+
       {phase === "schema" && tables.length >= 2 && (
         <div className="bg-white border border-gray-100 rounded-xl overflow-hidden shadow-sm">
           <div className="flex items-center overflow-x-auto">

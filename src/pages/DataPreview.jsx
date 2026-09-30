@@ -3,6 +3,7 @@ import { useLocation } from "wouter";
 import * as XLSX from "xlsx";
 
 import { PYTHON_API } from "../lib/config";
+import { reportEvent } from "../lib/activity";
 const ROWS_PER_PAGE = 25;
 const TABS = ["Table View", "JSON", "Statistics"];
 
@@ -88,6 +89,8 @@ export default function DataPreview() {
   const [validating, setValidating]   = useState(false);
   const [exportFormat, setExportFormat] = useState("csv");
   const [exporting, setExporting]       = useState(false);
+  // Set when the dataset is locked behind an instructor review (423 pending / 403 rejected / 503 unverifiable)
+  const [lock, setLock]                 = useState(null);
 
   const exportFormats = [
     { id: "csv",   label: "CSV" },
@@ -104,7 +107,10 @@ export default function DataPreview() {
       if (entityTables.length > 0) {
         const fmt = exportFormat === "excel" ? "xlsx" : exportFormat === "jsonl" ? "json" : exportFormat;
         const res = await fetch(`${PYTHON_API}/api/download-multi/${datasetId}?format=${fmt}`);
-        if (!res.ok) throw new Error("Export failed");
+        if (!res.ok) {
+          const body = await res.json().catch(() => null);
+          throw new Error(body?.detail?.message || "Export failed");
+        }
         const blob = await res.blob();
         const filename =
           fmt === "xlsx" ? "dataset_tables.xlsx" :
@@ -114,11 +120,16 @@ export default function DataPreview() {
         const a = document.createElement("a");
         a.href = url; a.download = filename; a.click();
         URL.revokeObjectURL(url);
+        reportEvent("dataset_exported", { table_name: datasetName, format: fmt, tables: entityTables.length + 1, dataset_id: datasetId });
         return;
       }
 
       // Single-table: fetch CSV then convert on the frontend
       const csvRes = await fetch(`${PYTHON_API}/api/download/${datasetId}`);
+      if (!csvRes.ok) {
+        const body = await csvRes.json().catch(() => null);
+        throw new Error(body?.detail?.message || "Export failed");
+      }
       const csvText = await csvRes.text();
       const lines = csvText.trim().split("\n");
       const headers = lines[0].split(",").map((h) => h.replace(/^"|"$/g, "").trim());
@@ -171,7 +182,9 @@ export default function DataPreview() {
       const a = document.createElement("a");
       a.href = url; a.download = filename; a.click();
       URL.revokeObjectURL(url);
+      reportEvent("dataset_exported", { table_name: datasetName, format: exportFormat, rows: allRows.length, dataset_id: datasetId });
     } catch (e) {
+      reportEvent("export_failed", { table_name: datasetName, format: exportFormat, error: e.message, dataset_id: datasetId });
       alert("Export failed: " + e.message);
     } finally {
       setExporting(false);
@@ -183,16 +196,34 @@ export default function DataPreview() {
     sessionStorage.removeItem("preview_params");
     const cacheKey = `preview_cache_${datasetId}`;
     fetch(`${PYTHON_API}/api/preview/${datasetId}?limit=200`)
-      .then((r) => {
-        if (!r.ok) throw new Error(r.status === 404 ? "missing" : "unavailable");
+      .then(async (r) => {
+        if (!r.ok) {
+          const body = await r.json().catch(() => null);
+          if (body?.detail?.locked) {
+            const err = new Error("locked");
+            err.lock = body.detail;
+            throw err;
+          }
+          throw new Error(r.status === 404 ? "missing" : "unavailable");
+        }
         return r.json();
       })
       .then((d) => {
+        setLock(null);
         setData(d);
+        reportEvent("dataset_previewed", { table_name: datasetName, rows: d.total_rows, columns: d.columns?.length, dataset_id: datasetId });
         setLoading(false);
         try { sessionStorage.setItem(cacheKey, JSON.stringify(d)); } catch {}
       })
-      .catch(() => {
+      .catch((e) => {
+        // Locked for instructor review — never fall back to cached rows
+        if (e.lock) {
+          try { sessionStorage.removeItem(cacheKey); } catch {}
+          setLock(e.lock);
+          setLoading(false);
+          reportEvent("locked_dataset_access", { table_name: datasetName, review_status: e.lock.review_status, dataset_id: datasetId });
+          return;
+        }
         const cached = sessionStorage.getItem(cacheKey);
         if (cached) {
           try { setData(JSON.parse(cached)); setLoading(false); return; } catch {}
@@ -247,6 +278,40 @@ export default function DataPreview() {
       </div>
     </div>
   );
+
+  if (lock) {
+    const rejected = lock.review_status === "rejected";
+    const pending  = lock.review_status === "pending";
+    return (
+      <div className="flex flex-col items-center justify-center py-20 text-center space-y-4">
+        <div className={`w-14 h-14 rounded-full flex items-center justify-center ${rejected ? "bg-red-50" : "bg-amber-50"}`}>
+          <span className="text-2xl">{rejected ? "⛔" : "🔒"}</span>
+        </div>
+        <div>
+          <p className="text-sm font-semibold text-gray-800 mb-1">
+            {rejected ? "Access denied — rejected by your instructor" : pending ? "Locked — waiting for instructor approval" : "Locked — approval could not be verified"}
+          </p>
+          <p className="text-xs text-gray-500 max-w-sm">{lock.message}</p>
+        </div>
+        <div className="flex items-center gap-3">
+          {!rejected && (
+            <button
+              onClick={() => { setLock(null); setLoading(true); setRetryCount(c => c + 1); }}
+              className="px-4 py-2 bg-purple-600 text-white text-xs font-medium rounded-lg hover:bg-purple-700 transition-colors"
+            >
+              Check again
+            </button>
+          )}
+          <button
+            onClick={() => setLocation("/downloads")}
+            className="px-4 py-2 border border-gray-200 text-gray-600 text-xs font-medium rounded-lg hover:bg-gray-50 transition-colors"
+          >
+            My Downloads
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   if (error) {
     return (

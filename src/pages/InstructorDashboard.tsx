@@ -6,6 +6,8 @@ import {
   MessageSquare, Search, ChevronDown, ChevronUp, ShieldAlert, Shield, Ban,
 } from "lucide-react";
 import { NODE_API as BACKEND } from "../lib/config";
+import { reportEvent } from "../lib/activity";
+import LogViewer from "../components/LogViewer";
 
 type Student = {
   id: string;
@@ -27,17 +29,24 @@ type FlaggedPrompt = {
   status: "pending" | "approved" | "rejected";
   created_at: string;
   reviewed_at: string | null;
+  locked_datasets?: number;   // datasets the student generated that are waiting on this decision
+  detection?: Detection | null;
 };
 
-type ActivityEntry = {
-  id: string;
-  user_id: string;
-  student_name: string;
-  student_email: string;
-  action_type: string;
-  details: Record<string, unknown>;
-  created_at: string;
+// A trigger word the server's detector found in a prompt (same rules as the live flagging check)
+type Trigger = { level: number; term: string; matched: string; category: string };
+
+// Full breakdown stored with each flag: which level fired, on which word, and the AI's verdict
+type Detection = {
+  matches?: { level: number; source: string; term: string; category: string; matched: string; action: string; note?: string }[];
+  ai?: { status: "safe" | "unsafe" | "unavailable" | "skipped"; reason?: string; category?: string | null };
+  reason?: string | null;
+  normalized?: string;
+  flag?: boolean;
+  block?: boolean;
 };
+
+type SystemTrigger = { term: string; category: string; examples: string[]; context_rule: string | null };
 
 type Invite = {
   id: string;
@@ -66,23 +75,6 @@ const ALL_PURPOSES = ["Homework", "Project", "Research", "Testing / Evaluation"]
 
 const FRONTEND = "https://synthcs.site";
 
-const ACTION_LABELS: Record<string, { label: string; color: string }> = {
-  dataset_search:     { label: "Searched datasets",   color: "text-amber-700 bg-amber-50 border-amber-100" },
-  ai_search:          { label: "AI search",           color: "text-indigo-600 bg-indigo-50 border-indigo-100" },
-  schema_generated:   { label: "Generated schema",    color: "text-purple-600 bg-purple-50 border-purple-100" },
-  schema_saved:       { label: "Saved schema",        color: "text-blue-600 bg-blue-50 border-blue-100" },
-  dataset_uploaded:   { label: "Uploaded CSV",        color: "text-cyan-700 bg-cyan-50 border-cyan-100" },
-  dataset_generated:  { label: "Generated dataset",   color: "text-emerald-700 bg-emerald-50 border-emerald-100" },
-  dataset_downloaded: { label: "Downloaded dataset",  color: "text-green-600 bg-green-50 border-green-100" },
-  prompt_flagged:     { label: "Prompt flagged",      color: "text-red-600 bg-red-50 border-red-100" },
-};
-
-const formatActivityTime = (iso: string) =>
-  new Date(iso).toLocaleString("en-US", {
-    year: "numeric", month: "short", day: "numeric",
-    hour: "2-digit", minute: "2-digit", second: "2-digit",
-  });
-
 export default function InstructorDashboard() {
   const [, setLocation] = useLocation();
   const instructorId   = localStorage.getItem("user_id")   ?? "";
@@ -92,25 +84,22 @@ export default function InstructorDashboard() {
 
   const [students,       setStudents]       = useState<Student[]>([]);
   const [flagged,        setFlagged]        = useState<FlaggedPrompt[]>([]);
-  const [activity,       setActivity]       = useState<ActivityEntry[]>([]);
   const [invites,        setInvites]        = useState<Invite[]>([]);
 
   const [loadingStudents, setLoadingStudents] = useState(true);
   const [loadingFlagged,  setLoadingFlagged]  = useState(false);
-  const [loadingActivity, setLoadingActivity] = useState(false);
-  const [activityOrder,   setActivityOrder]   = useState<"newest" | "oldest">("newest");
   const [loadingInvites,  setLoadingInvites]  = useState(false);
 
   type PromptEntry = {
     id: string; student_name: string; student_email: string;
     prompt_text: string; flag_reason: string | null; status: string | null;
     created_at: string; source: "flagged" | "generated";
+    triggers?: Trigger[];
   };
   const [prompts,        setPrompts]        = useState<PromptEntry[]>([]);
   const [loadingPrompts, setLoadingPrompts] = useState(false);
   const [promptSearch,   setPromptSearch]   = useState("");
 
-  const [expandedRow, setExpandedRow] = useState<string | null>(null);
 
   // Restrictions tab state
   const [restrictions,        setRestrictions]        = useState<Restriction[]>([]);
@@ -120,13 +109,31 @@ export default function InstructorDashboard() {
   const [quotaInput,          setQuotaInput]          = useState("");
   const [savingRestriction,   setSavingRestriction]   = useState(false);
 
-  const SUSPICIOUS_KEYWORDS = [
-    "fake", "forged", "counterfeit", "illegal", "fraud", "stolen", "laundering",
-    "identity theft", "phishing", "scam", "fabricated", "falsified", "hack",
-    "exploit", "bypass", "cheat", "manipulate", "bribe", "corrupt",
-  ];
-  const isSuspicious = (text: string) =>
-    SUSPICIOUS_KEYWORDS.some((kw) => text.toLowerCase().includes(kw));
+  // Level 3 list comes from the server — the exact list the detector uses
+  const [systemTriggers, setSystemTriggers] = useState<SystemTrigger[]>([]);
+  useEffect(() => {
+    fetch(`${BACKEND}/api/moderation/system-triggers`)
+      .then((r) => (r.ok ? r.json() : []))
+      .then((d) => { if (Array.isArray(d)) setSystemTriggers(d); })
+      .catch(() => {});
+  }, []);
+
+  // "Test a prompt" tool
+  const [testPrompt,  setTestPrompt]  = useState("");
+  const [testUseAi,   setTestUseAi]   = useState(true);
+  const [testResult,  setTestResult]  = useState<Detection | null>(null);
+  const [testLoading, setTestLoading] = useState(false);
+  const runPromptTest = async () => {
+    if (!testPrompt.trim()) return;
+    setTestLoading(true);
+    try {
+      const res = await fetch(`${BACKEND}/api/moderation/test`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt: testPrompt, instructor_id: instructorId, use_ai: testUseAi }),
+      });
+      setTestResult(res.ok ? await res.json() : null);
+    } finally { setTestLoading(false); }
+  };
 
   const [actionId,  setActionId]  = useState<string | null>(null);
   const [addEmail,  setAddEmail]  = useState("");
@@ -155,14 +162,6 @@ export default function InstructorDashboard() {
       const res = await fetch(`${BACKEND}/instructor/flagged-prompts?instructor_id=${instructorId}`);
       if (res.ok) setFlagged(await res.json());
     } finally { setLoadingFlagged(false); }
-  }, [instructorId]);
-
-  const fetchActivity = useCallback(async () => {
-    setLoadingActivity(true);
-    try {
-      const res = await fetch(`${BACKEND}/instructor/activity?instructor_id=${instructorId}`);
-      if (res.ok) setActivity(await res.json());
-    } finally { setLoadingActivity(false); }
   }, [instructorId]);
 
   const fetchInvites = useCallback(async () => {
@@ -196,7 +195,6 @@ export default function InstructorDashboard() {
 
   useEffect(() => { fetchStudents(); }, [fetchStudents]);
   useEffect(() => { if (tab === "flagged")       fetchFlagged();       }, [tab, fetchFlagged]);
-  useEffect(() => { if (tab === "activity")      fetchActivity();      }, [tab, fetchActivity]);
   useEffect(() => { if (tab === "invites")       fetchInvites();       }, [tab, fetchInvites]);
   useEffect(() => { if (tab === "prompts")       fetchPrompts();       }, [tab, fetchPrompts]);
   useEffect(() => { if (tab === "restrictions")  fetchRestrictions();  }, [tab, fetchRestrictions]);
@@ -375,6 +373,7 @@ export default function InstructorDashboard() {
   };
 
   const handleSignOut = () => {
+    reportEvent("logout"); // before user_id is cleared
     ["user_id","user_name","is_admin","is_instructor","last_path"].forEach((k) => localStorage.removeItem(k));
     setLocation("/login");
   };
@@ -455,12 +454,25 @@ export default function InstructorDashboard() {
                           <span className="text-xs text-gray-400">{fp.student_email}</span>
                           <StatusBadge status={fp.status} />
                         </div>
-                        <p className="text-xs text-gray-500 mb-1.5">
-                          <span className="font-medium text-amber-600">Flag reason:</span> {fp.flag_reason}
-                        </p>
+                        {fp.detection?.matches || fp.detection?.ai ? (
+                          <div className="mb-1.5"><DetectionBreakdown detection={fp.detection} compact /></div>
+                        ) : (
+                          <p className="text-xs text-gray-500 mb-1.5">
+                            <span className="font-medium text-amber-600">Flag reason:</span> {fp.flag_reason}
+                          </p>
+                        )}
                         <div className="bg-gray-50 border border-gray-100 rounded-lg px-3 py-2 text-xs text-gray-700 leading-relaxed">
                           {fp.prompt_text}
                         </div>
+                        {(fp.locked_datasets ?? 0) > 0 && (
+                          <p className={`text-xs mt-1.5 ${fp.status === "pending" ? "text-amber-700" : fp.status === "approved" ? "text-green-700" : "text-red-600"}`}>
+                            {fp.status === "pending"
+                              ? `🔒 ${fp.locked_datasets} generated dataset${fp.locked_datasets === 1 ? " is" : "s are"} locked until you approve or reject this prompt.`
+                              : fp.status === "approved"
+                              ? `✓ ${fp.locked_datasets} dataset${fp.locked_datasets === 1 ? "" : "s"} unlocked for the student.`
+                              : `⛔ ${fp.locked_datasets} dataset${fp.locked_datasets === 1 ? "" : "s"} permanently locked.`}
+                          </p>
+                        )}
                         <p className="text-xs text-gray-400 mt-1.5">
                           {new Date(fp.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "2-digit", minute: "2-digit" })}
                         </p>
@@ -486,167 +498,10 @@ export default function InstructorDashboard() {
         )}
 
         {tab === "activity" && (
-          <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
-            {loadingActivity ? (
-              <div className="py-16 text-center text-sm text-gray-400">Loading…</div>
-            ) : activity.length === 0 ? (
-              <EmptyState icon={<Activity className="w-5 h-5 text-gray-300" />} text="No activity recorded yet." />
-            ) : (
-              <>
-              <div className="flex items-center justify-between gap-3 px-5 py-3 border-b border-gray-100">
-                <p className="text-xs text-gray-500">{activity.length} recorded {activity.length === 1 ? "activity" : "activities"}</p>
-                <div className="inline-flex rounded-lg border border-gray-200 overflow-hidden text-xs">
-                  {(["newest", "oldest"] as const).map((o) => (
-                    <button
-                      key={o}
-                      onClick={() => setActivityOrder(o)}
-                      className={`px-3 py-1.5 font-medium transition-colors ${activityOrder === o ? "bg-gray-900 text-white" : "bg-white text-gray-500 hover:bg-gray-50"}`}
-                    >
-                      {o === "newest" ? "Newest first" : "Oldest first"}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm min-w-[640px]">
-                  <thead>
-                    <tr className="border-b border-gray-100 bg-gray-50/60">
-                      <th className="text-left px-5 py-3 text-xs font-semibold text-gray-400 uppercase tracking-wide">Student</th>
-                      <th className="text-left px-5 py-3 text-xs font-semibold text-gray-400 uppercase tracking-wide">Action</th>
-                      <th className="text-left px-5 py-3 text-xs font-semibold text-gray-400 uppercase tracking-wide">Details</th>
-                      <th className="text-left px-5 py-3 text-xs font-semibold text-gray-400 uppercase tracking-wide">Time</th>
-                      <th className="px-3 py-3" />
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-50">
-                    {[...activity]
-                      .sort((x, y) => {
-                        const diff = new Date(x.created_at).getTime() - new Date(y.created_at).getTime();
-                        return activityOrder === "oldest" ? diff : -diff;
-                      })
-                      .map((a) => {
-                      const meta = ACTION_LABELS[a.action_type] ?? { label: a.action_type, color: "text-gray-500 bg-gray-50 border-gray-100" };
-                      const promptText = String(a.details.prompt_text ?? "");
-                      const purpose    = String(a.details.purpose   ?? "");
-                      const category   = String(a.details.category  ?? "");
-                      const suspicious = promptText && isSuspicious(promptText);
-                      const isExpanded = expandedRow === a.id;
-                      const summaryText =
-                        promptText
-                          ? promptText
-                          : a.action_type === "schema_saved"
-                          ? String(a.details.schema_name ?? "")
-                          : a.action_type === "dataset_downloaded" || a.action_type === "dataset_generated"
-                          ? `${a.details.table_name ?? ""} · ${a.details.rows != null ? Number(a.details.rows).toLocaleString() : "?"} rows`
-                          : a.action_type === "dataset_uploaded"
-                          ? String(a.details.file_name ?? "")
-                          : "—";
-
-                      return (
-                        <>
-                          <tr
-                            key={a.id}
-                            onClick={() => setExpandedRow(isExpanded ? null : a.id)}
-                            className={`cursor-pointer transition-colors ${suspicious ? "bg-red-50/60 hover:bg-red-50" : "hover:bg-gray-50/50"}`}
-                          >
-                            <td className="px-5 py-3">
-                              <div className="font-medium text-gray-900 text-xs truncate max-w-[150px]">{a.student_name}</div>
-                              <div className="text-xs text-gray-400 truncate max-w-[150px]">{a.student_email}</div>
-                            </td>
-                            <td className="px-5 py-3">
-                              <div className="flex flex-col gap-1">
-                                <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${meta.color}`}>
-                                  {meta.label}
-                                </span>
-                                {suspicious && (
-                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium border bg-red-50 border-red-200 text-red-700">
-                                    <ShieldAlert className="w-3 h-3" /> Suspicious
-                                  </span>
-                                )}
-                              </div>
-                            </td>
-                            <td className="px-5 py-3 text-xs text-gray-500 max-w-[220px]">
-                              <span className="truncate block">{summaryText || "—"}</span>
-                              {category && (
-                                <span className="mt-0.5 inline-block text-[11px] text-blue-600 bg-blue-50 border border-blue-100 rounded px-1.5 py-0.5">
-                                  {category}
-                                </span>
-                              )}
-                              {purpose && (
-                                <span className="mt-0.5 inline-block text-[11px] text-purple-600 bg-purple-50 border border-purple-100 rounded px-1.5 py-0.5">
-                                  {purpose}
-                                </span>
-                              )}
-                            </td>
-                            <td className="px-5 py-3 text-xs text-gray-400 whitespace-nowrap">
-                              {formatActivityTime(a.created_at)}
-                            </td>
-                            <td className="px-3 py-3 text-gray-300">
-                              {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-                            </td>
-                          </tr>
-                          {isExpanded && (
-                            <tr key={`${a.id}-expanded`} className={suspicious ? "bg-red-50/40" : "bg-gray-50/40"}>
-                              <td colSpan={5} className="px-5 py-4">
-                                <div className="space-y-2 text-xs">
-                                  {promptText && (
-                                    <div>
-                                      <p className="font-semibold text-gray-600 mb-1">Original prompt (as typed by the student)</p>
-                                      <p className="text-gray-700 leading-relaxed whitespace-pre-wrap bg-white border border-gray-100 rounded-lg px-3 py-2">
-                                        {promptText}
-                                      </p>
-                                    </div>
-                                  )}
-                                  {category && (
-                                    <div>
-                                      <p className="font-semibold text-gray-600 mb-1">Data category</p>
-                                      <p className="text-blue-700 font-medium">{category}</p>
-                                    </div>
-                                  )}
-                                  {purpose && (
-                                    <div>
-                                      <p className="font-semibold text-gray-600 mb-1">Declared usage</p>
-                                      <p className="text-purple-700 font-medium">{purpose}</p>
-                                    </div>
-                                  )}
-                                  {(a.action_type === "dataset_downloaded" || a.action_type === "dataset_generated") && (
-                                    <div className="text-gray-500">
-                                      Table: <strong>{String(a.details.table_name ?? "—")}</strong> ·{" "}
-                                      Rows: <strong>{a.details.rows != null ? Number(a.details.rows).toLocaleString() : "—"}</strong>
-                                      {a.details.source ? <> · Source: <strong>{String(a.details.source)}</strong></> : null}
-                                      {a.details.kaggle_ref ? <> · Ref: <strong>{String(a.details.kaggle_ref)}</strong></> : null}
-                                    </div>
-                                  )}
-                                  {a.action_type === "dataset_uploaded" && (
-                                    <div className="text-gray-500">
-                                      File: <strong>{String(a.details.file_name ?? "—")}</strong>
-                                    </div>
-                                  )}
-                                  {a.action_type === "prompt_flagged" && a.details.flag_reason ? (
-                                    <div className="text-red-600">
-                                      Flag reason: <strong>{String(a.details.flag_reason)}</strong>
-                                    </div>
-                                  ) : null}
-                                  <div className="text-gray-400">{formatActivityTime(a.created_at)}</div>
-                                  {suspicious && (
-                                    <div className="flex items-start gap-2 bg-red-50 border border-red-200 rounded-lg px-3 py-2 text-red-700">
-                                      <ShieldAlert className="w-4 h-4 flex-shrink-0 mt-0.5" />
-                                      <span>This prompt contains potentially suspicious keywords. Review the content above to determine if it violates academic integrity policies.</span>
-                                    </div>
-                                  )}
-                                </div>
-                              </td>
-                            </tr>
-                          )}
-                        </>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-              </>
-            )}
-          </div>
+          <LogViewer
+            endpoint={`${BACKEND}/instructor/logs?instructor_id=${instructorId}`}
+            scopeNote="Showing your students' activity, your own actions, and system-wide warnings/errors (e.g. the generation service going down). Click a row for full details."
+          />
         )}
 
         {tab ==="students" && (
@@ -728,6 +583,16 @@ export default function InstructorDashboard() {
                         <div className="bg-gray-50 border border-gray-100 rounded-lg px-3 py-2 text-xs text-gray-700 leading-relaxed">
                           {p.prompt_text}
                         </div>
+                        {(p.triggers?.length ?? 0) > 0 && (
+                          <div className="flex flex-wrap items-center gap-1 mt-1.5 text-[11px]">
+                            <span className="text-gray-400">Trigger words:</span>
+                            {p.triggers!.map((t, i) => (
+                              <span key={i} className="px-1.5 py-0.5 rounded border bg-red-50 border-red-200 text-red-700">
+                                "{t.term}" ← "{t.matched}" · L{t.level}
+                              </span>
+                            ))}
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -743,24 +608,100 @@ export default function InstructorDashboard() {
               <div className="py-16 text-center text-sm text-gray-400">Loading…</div>
             ) : (
               <>
-                {/* System Keywords */}
+                {/* How flagging works */}
+                <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+                  <div className="px-5 py-4 border-b border-gray-100 flex items-center gap-2">
+                    <Shield className="w-4 h-4 text-purple-500" />
+                    <p className="text-sm font-semibold text-gray-800">What triggers a flag</p>
+                  </div>
+                  <div className="px-5 py-4 space-y-3 text-xs text-gray-600 leading-relaxed">
+                    <p>
+                      Every student prompt — the search query or AI description <strong>exactly as typed</strong> — is checked by three levels.
+                      All three always run, and the flag records which ones fired and on which word.
+                    </p>
+                    <ol className="space-y-2">
+                      <li className="flex gap-2">
+                        <span className="flex-shrink-0 w-14 font-semibold text-purple-700">Level 1</span>
+                        <span><strong>Your trigger words</strong> (below). Checked against the prompt, and when generating, against the dataset's column names too. <em>Flag</em> sends it to you; <em>Block</em> refuses it.</span>
+                      </li>
+                      <li className="flex gap-2">
+                        <span className="flex-shrink-0 w-14 font-semibold text-purple-700">Level 2</span>
+                        <span><strong>AI detection</strong> reads the prompt for harmful intent, catching requests that use no listed word. It can only add a flag, never remove one.</span>
+                      </li>
+                      <li className="flex gap-2">
+                        <span className="flex-shrink-0 w-14 font-semibold text-purple-700">Level 3</span>
+                        <span><strong>System trigger words</strong> — built-in rules that always run, including when the AI is down or misses something (the fallback).</span>
+                      </li>
+                    </ol>
+                    <p className="text-gray-500">
+                      Word matching catches variations: other word forms (<em>manipulating, manipulation</em>), capitals, separators
+                      (<em>credit-card, creditcard</em>), spaced letters (<em>c r e d i t</em>), and look-alike characters (<em>ph1shing, fr@ud</em>).
+                      A flagged prompt's dataset stays locked until you approve it.
+                    </p>
+                  </div>
+                </div>
+
+                {/* Test a prompt */}
+                <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+                  <div className="px-5 py-4 border-b border-gray-100 flex items-center gap-2">
+                    <Search className="w-4 h-4 text-blue-500" />
+                    <p className="text-sm font-semibold text-gray-800">Test a prompt</p>
+                    <span className="ml-auto text-xs text-gray-400">Nothing is saved or sent to students</span>
+                  </div>
+                  <div className="px-5 py-4 space-y-3">
+                    <div className="flex flex-col sm:flex-row gap-2">
+                      <input
+                        type="text"
+                        value={testPrompt}
+                        onChange={(e) => setTestPrompt(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === "Enter") runPromptTest(); }}
+                        placeholder='e.g. "fishing emails sent to students" or "stock price manipulation"'
+                        className="flex-1 text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                      />
+                      <label className="flex items-center gap-1.5 text-xs text-gray-600 whitespace-nowrap">
+                        <input type="checkbox" checked={testUseAi} onChange={(e) => setTestUseAi(e.target.checked)} className="accent-purple-600" />
+                        Include AI (Level 2)
+                      </label>
+                      <button
+                        onClick={runPromptTest}
+                        disabled={testLoading || !testPrompt.trim()}
+                        className="px-4 py-2 bg-purple-600 text-white text-sm font-medium rounded-lg hover:bg-purple-700 disabled:opacity-50"
+                      >
+                        {testLoading ? "Checking…" : "Check"}
+                      </button>
+                    </div>
+                    {testResult && <DetectionBreakdown detection={testResult} />}
+                  </div>
+                </div>
+
+                {/* System Keywords (Level 3) — served by the backend, identical to what the detector uses */}
                 <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
                   <div className="px-5 py-4 border-b border-gray-100 flex items-center gap-2">
                     <ShieldAlert className="w-4 h-4 text-red-500" />
-                    <p className="text-sm font-semibold text-gray-800">System-level Trigger Words</p>
-                    <span className="ml-auto text-xs text-gray-400 bg-gray-100 px-2 py-0.5 rounded-full">Read-only</span>
+                    <p className="text-sm font-semibold text-gray-800">Level 3 · System-level Trigger Words</p>
+                    <span className="ml-auto text-xs text-gray-400 bg-gray-100 px-2 py-0.5 rounded-full">Always on · Read-only</span>
                   </div>
-                  <div className="px-5 py-4">
-                    <p className="text-xs text-gray-500 mb-3">
-                      These keywords are automatically detected in all student prompts. Prompts containing them are flagged for your review.
+                  <div className="px-5 py-4 space-y-3">
+                    <p className="text-xs text-gray-500">
+                      Prompts containing any of these words (or a variation of them) are flagged for your review. Hover a word to see variations that are caught.
                     </p>
-                    <div className="flex flex-wrap gap-2">
-                      {SUSPICIOUS_KEYWORDS.map((kw) => (
-                        <span key={kw} className="px-2.5 py-1 rounded-full text-xs font-medium bg-red-50 text-red-700 border border-red-200">
-                          {kw}
-                        </span>
-                      ))}
-                    </div>
+                    {[...new Set(systemTriggers.map((t) => t.category))].map((cat) => (
+                      <div key={cat}>
+                        <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">{cat}</p>
+                        <div className="flex flex-wrap gap-1.5">
+                          {systemTriggers.filter((t) => t.category === cat).map((t) => (
+                            <span
+                              key={t.term}
+                              title={`Also catches: ${t.examples.join(", ")}${t.context_rule ? `\n${t.context_rule}` : ""}`}
+                              className="px-2.5 py-1 rounded-full text-xs font-medium bg-red-50 text-red-700 border border-red-200 cursor-help"
+                            >
+                              {t.term}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                    {systemTriggers.length === 0 && <p className="text-xs text-gray-400">Loading…</p>}
                   </div>
                 </div>
 
@@ -768,11 +709,13 @@ export default function InstructorDashboard() {
                 <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
                   <div className="px-5 py-4 border-b border-gray-100 flex items-center gap-2">
                     <Plus className="w-4 h-4 text-purple-500" />
-                    <p className="text-sm font-semibold text-gray-800">Custom Trigger Words</p>
+                    <p className="text-sm font-semibold text-gray-800">Level 1 · Your Trigger Words</p>
                   </div>
                   <div className="px-5 py-4 space-y-4">
                     <p className="text-xs text-gray-500">
-                      Add words specific to your course. <strong>Flag</strong> → prompt is flagged for your review but generation proceeds. <strong>Block</strong> → student cannot generate with this keyword.
+                      Add words specific to your course — word forms and spellings like <em>gamble / gambling</em> or <em>exam-answers</em> are matched too.{" "}
+                      <strong>Flag</strong> → sent to you for review; the student can keep working but the dataset stays locked until you approve.{" "}
+                      <strong>Block</strong> → the student cannot use a prompt containing this word.
                     </p>
                     <div className="flex gap-2">
                       <input
@@ -993,6 +936,59 @@ export default function InstructorDashboard() {
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+// Shows exactly what triggered (or didn't trigger) a flag, level by level
+function DetectionBreakdown({ detection, compact = false }: { detection: Detection; compact?: boolean }) {
+  const matches = detection.matches ?? [];
+  const byLevel = (lvl: number) => matches.filter((m) => m.level === lvl);
+  const ai = detection.ai;
+  const flagged = detection.flag ?? (matches.some((m) => m.action !== "exempt") || ai?.status === "unsafe");
+
+  const Row = ({ label, children }: { label: string; children: React.ReactNode }) => (
+    <div className="flex gap-2 text-xs">
+      <span className="flex-shrink-0 w-44 font-medium text-gray-500">{label}</span>
+      <span className="text-gray-700 min-w-0">{children}</span>
+    </div>
+  );
+  const Hits = ({ lvl }: { lvl: number }) => {
+    const hits = byLevel(lvl);
+    if (!hits.length) return <span className="text-gray-400">No match</span>;
+    return (
+      <span className="flex flex-wrap gap-1">
+        {hits.map((m, i) => (
+          <span key={i} title={m.note ?? m.source}
+            className={`px-1.5 py-0.5 rounded border ${
+              m.action === "exempt" ? "bg-gray-50 border-gray-200 text-gray-400 line-through" :
+              m.action === "block"  ? "bg-red-100 border-red-300 text-red-800" :
+                                      "bg-red-50 border-red-200 text-red-700"}`}>
+            "{m.term}" ← matched "{m.matched}"{m.action === "block" ? " · BLOCK" : ""}{m.source.includes("columns") ? " · in dataset columns" : ""}
+          </span>
+        ))}
+      </span>
+    );
+  };
+
+  return (
+    <div className={`space-y-1.5 ${compact ? "" : "border border-gray-100 rounded-lg p-3 bg-gray-50/50"}`}>
+      {!compact && (
+        <p className={`text-xs font-semibold ${detection.block ? "text-red-700" : flagged ? "text-amber-700" : "text-green-700"}`}>
+          {detection.block ? "⛔ Would be BLOCKED" : flagged ? "⚑ Would be FLAGGED for your review" : "✓ Would NOT be flagged"}
+        </p>
+      )}
+      <Row label="Level 1 · Your trigger words"><Hits lvl={1} /></Row>
+      <Row label="Level 2 · AI detection">
+        {!ai || ai.status === "skipped" ? <span className="text-gray-400">Not run</span> :
+         ai.status === "unsafe" ? <span className="text-red-700">Unsafe — {ai.reason}</span> :
+         ai.status === "safe" ? <span className="text-green-700">Safe</span> :
+         <span className="text-amber-700">Unavailable — rule-based levels used as fallback</span>}
+      </Row>
+      <Row label="Level 3 · System trigger words"><Hits lvl={3} /></Row>
+      {!compact && detection.normalized && (
+        <Row label="Text the rules checked"><code className="text-[11px] text-gray-500 break-all">{detection.normalized}</code></Row>
+      )}
     </div>
   );
 }

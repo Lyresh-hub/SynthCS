@@ -3,6 +3,7 @@ import { useLocation } from "wouter";
 import { cn } from "../lib/utils";
 import ConfirmDialog from "../components/ConfirmDialog";
 import { NODE_API } from "../lib/config";
+import { reportEvent } from "../lib/activity";
 import { ChevronDown, ChevronRight } from "lucide-react";
 
 interface User {
@@ -201,6 +202,7 @@ export default function UserAccounts() {
   }
 
   function handleLogout() {
+    reportEvent("logout"); // before user_id is cleared
     localStorage.removeItem("user_id");
     localStorage.removeItem("user_name");
     localStorage.removeItem("is_admin");

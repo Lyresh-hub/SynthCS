@@ -1,6 +1,7 @@
 import { useLocation, Link, useRoute } from "wouter";
 import { LayoutDashboard, Users, Zap, LogOut, ShieldCheck, GraduationCap } from "lucide-react";
 import { cn } from "../lib/utils";
+import { reportEvent } from "../lib/activity";
 
 const navItems = [
   { label: "Overview",          icon: LayoutDashboard, href: "/admin" },
@@ -23,6 +24,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   const adminName = localStorage.getItem("user_name") ?? "Admin";
 
   function handleLogout() {
+    reportEvent("logout"); // before user_id is cleared
     localStorage.removeItem("user_id");
     localStorage.removeItem("user_name");
     localStorage.removeItem("is_admin");
