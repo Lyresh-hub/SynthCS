@@ -33,6 +33,7 @@ const CATALOG = {
   login_success:            { level: "INFO",  category: "auth",       msg: (d) => `Logged in${d.method && d.method !== "password" ? ` with ${d.method}` : ""}` },
   login_failed:             { level: "WARN",  category: "auth",       msg: (d) => `Failed login for ${s(d.email) || "unknown account"} — ${s(d.reason) || "invalid credentials"}` },
   logout:                   { level: "INFO",  category: "auth",       msg: () => "Logged out" },
+  banned_session_ended:     { level: "WARN",  category: "auth",       msg: () => "Banned account was signed out automatically" },
   signup:                   { level: "INFO",  category: "auth",       msg: (d) => `Created an account${d.role ? ` (${d.role})` : ""}` },
   email_verified:           { level: "INFO",  category: "auth",       msg: () => "Verified email address" },
   password_reset_requested: { level: "INFO",  category: "auth",       msg: () => "Requested a password reset" },

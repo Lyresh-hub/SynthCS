@@ -284,6 +284,9 @@ def _caller(authorization: str | None) -> dict | None:
     except Exception as e:
         print(f"[auth] identity check failed: {e}")
         raise HTTPException(status_code=503, detail={"error": "auth_unavailable", "message": "Could not verify your login right now. Please try again shortly."})
+    if status == 403 and body.get("error") == "banned":
+        # Banned account: pass it on so the website signs the user out with the right message
+        raise HTTPException(status_code=403, detail={"error": "banned", "message": body.get("message", "Your account has been banned.")})
     if status != 200 or not body.get("id"):
         return None
     if len(_identity_cache) > 2000:

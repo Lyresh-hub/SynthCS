@@ -26,11 +26,12 @@ export default function Login() {
   const [, setLocation] = useLocation();
   const [view, setView] = useState<View>("login");
 
-  const [serverError, setServerError] = useState(() =>
-    new URLSearchParams(window.location.search).get("session") === "expired"
-      ? "Your session has ended. Please log in again."
-      : ""
-  );
+  const [serverError, setServerError] = useState(() => {
+    const session = new URLSearchParams(window.location.search).get("session");
+    if (session === "banned") return "You were signed out because your account has been banned (3 strikes for inappropriate prompts). Contact your instructor or the administrator if you think this is a mistake.";
+    if (session === "expired") return "Your session has ended. Please log in again.";
+    return "";
+  });
   const [successMsg, setSuccessMsg]   = useState("");
   const [isPending, setIsPending]     = useState(false);
   const [showPassword, setShowPassword] = useState(false);

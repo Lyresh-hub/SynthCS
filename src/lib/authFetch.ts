@@ -32,10 +32,15 @@ export function installAuthFetch(): void {
 
     const res = await originalFetch(input, init);
 
-    if (res.status === 401 && isBackendUrl(url) && localStorage.getItem("user_id")) {
+    if ((res.status === 401 || res.status === 403) && isBackendUrl(url) && localStorage.getItem("user_id")) {
       const body = await res.clone().json().catch(() => null);
       const code = body?.error ?? body?.detail?.error;
-      if (code === "auth_required" && !window.location.pathname.startsWith("/login")) {
+      const onLogin = window.location.pathname.startsWith("/login");
+      if (code === "banned" && !onLogin) {
+        // Banned (e.g. 3rd strike) → signed out immediately, wherever they are in the app
+        clearSession();
+        window.location.assign("/login?session=banned");
+      } else if (res.status === 401 && code === "auth_required" && !onLogin) {
         clearSession();
         window.location.assign("/login?session=expired");
       }

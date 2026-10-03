@@ -56,7 +56,8 @@ export default function Layout({ children }: { children: React.ReactNode }) {
         .then((rows) => { if (Array.isArray(rows)) setPendingRequests(rows.filter((x) => x.status === "pending").length); })
         .catch(() => {});
     check();
-    const t = setInterval(check, 60_000);
+    // Every 30 s — this check-in also signs out a user who gets banned while idle
+    const t = setInterval(check, 30_000);
     return () => clearInterval(t);
   }, [location]);
 

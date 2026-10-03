@@ -483,6 +483,43 @@ process.on("uncaughtException", (err) => {
     .finally(() => setTimeout(() => process.exit(1), 500));
 });
 
+// ── Banned accounts are signed out everywhere ─────────────────────────────────
+// Every request that carries a login token is checked against the account's ban
+// status (cached 15 s). A banned user gets 403 "banned" on ANY request, and the
+// website signs them out immediately — not just the next time they log in.
+const BAN_CACHE_MS = 15_000;
+const banCache = new Map();          // userId → { banned, reason, at }
+const banLoggedAt = new Map();       // userId → last time we logged the forced sign-out
+
+async function getBanStatus(userId) {
+  const hit = banCache.get(userId);
+  if (hit && Date.now() - hit.at < BAN_CACHE_MS) return hit;
+  const r = await pool.query("SELECT is_banned, ban_reason FROM users WHERE id = $1", [userId]);
+  const status = { banned: !!r.rows[0]?.is_banned, reason: r.rows[0]?.ban_reason ?? null, at: Date.now() };
+  banCache.set(userId, status);
+  return status;
+}
+
+app.use(async (req, res, next) => {
+  const user = authUser(req);
+  if (!user || req.method === "OPTIONS") return next();
+  try {
+    const ban = await getBanStatus(user.id);
+    if (!ban.banned) return next();
+    if (Date.now() - (banLoggedAt.get(user.id) ?? 0) > 60 * 60 * 1000) {
+      banLoggedAt.set(user.id, Date.now());
+      logEvent({ action: "banned_session_ended", userId: user.id, details: { route: req.path, reason: ban.reason } });
+    }
+    return res.status(403).json({
+      error: "banned",
+      message: `Your account has been permanently banned. Reason: ${ban.reason || "Violation of Terms of Service"}`,
+    });
+  } catch (e) {
+    console.error("Ban check error:", e.message);
+    next(); // don't lock everyone out if the check itself fails
+  }
+});
+
 // Session — only used during the OAuth handshake (10-minute window)
 app.use(session({
   secret: JWT_SECRET,
@@ -1568,6 +1605,7 @@ app.patch("/api/admin/users/:id/ban", requireAdmin, async (req, res) => {
       "UPDATE users SET is_banned = TRUE, ban_reason = $1 WHERE id = $2",
       [reason, req.params.id]
     );
+    banCache.delete(req.params.id); // takes effect on the user's very next request
     res.json({ success: true });
   } catch (err) {
     console.error("Admin ban user error:", err.message);
@@ -1581,6 +1619,7 @@ app.patch("/api/admin/users/:id/unban", requireAdmin, async (req, res) => {
       "UPDATE users SET is_banned = FALSE, ban_reason = NULL, strike_count = 0 WHERE id = $1",
       [req.params.id]
     );
+    banCache.delete(req.params.id);
     res.json({ success: true });
   } catch (err) {
     console.error("Admin unban user error:", err.message);
@@ -1595,6 +1634,7 @@ app.patch("/api/admin/users/:id/remove-strikes", requireAdmin, async (req, res) 
       "UPDATE users SET strike_count = 0, is_banned = FALSE, ban_reason = NULL WHERE id = $1",
       [req.params.id]
     );
+    banCache.delete(req.params.id);
     res.json({ success: true });
   } catch (err) {
     console.error("Remove strikes error:", err.message);
@@ -2605,6 +2645,7 @@ app.post("/instructor/flagged-prompts/:id/reject", async (req, res) => {
        WHERE id = $1 AND strike_count >= 3`,
       [student_id]
     );
+    banCache.delete(student_id); // a 3rd strike signs the student out on their next request
 
     // Fetch student + instructor info to send rejection email
     const [studentRes, instructorRes] = await Promise.all([
