@@ -499,8 +499,8 @@ export default function InstructorDashboard() {
 
         {tab === "activity" && (
           <LogViewer
-            endpoint={`${BACKEND}/instructor/logs?instructor_id=${instructorId}`}
-            scopeNote="Showing your students' activity, your own actions, and system-wide warnings/errors (e.g. the generation service going down). Click a row for full details."
+            endpoint={`${BACKEND}/instructor/logs`}
+            scopeNote="Showing the activity of students enrolled in your classes. Click a row for full details."
           />
         )}
 

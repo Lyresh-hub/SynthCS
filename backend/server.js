@@ -2693,24 +2693,26 @@ async function queryLogs(scopeSql, scopeParams, query, restrictions = []) {
   };
 }
 
-// Instructor scope: their students (any class, legacy link included), their own actions,
-// and system-wide WARN/ERROR events (e.g. the generation service going down)
-app.get("/instructor/logs", async (req, res) => {
-  const { instructor_id } = req.query;
-  if (!instructor_id) return res.status(400).json({ error: "instructor_id required" });
+// Instructor scope: ONLY the students enrolled (approved) in this instructor's
+// classes. The instructor's own actions and system-wide events are admin-only.
+// The instructor is identified by their login token, not by an ID in the URL.
+app.get("/instructor/logs", requireAuth, async (req, res) => {
+  if (req.user.role !== "instructor" && req.user.role !== "admin") {
+    return res.status(403).json({ error: "forbidden", message: "Only instructors can view class activity." });
+  }
+  const instructorId = req.user.id;
   try {
-    const ins = await pool.query("SELECT full_name FROM users WHERE id = $1", [instructor_id]);
-    if (!ins.rows.length) return res.status(404).json({ error: "Instructor not found" });
     const scope = `(
-      al.user_id = $2
-      OR (u.is_instructor = FALSE AND (
-        u.instructor = $1
-        OR EXISTS (SELECT 1 FROM student_classes sc WHERE sc.student_id = u.id AND sc.instructor_id = $2 AND sc.status = 'approved')
-      ))
-      OR (al.user_id IS NULL AND al.category = 'system' AND al.level IN ('WARN', 'ERROR'))
+      al.user_id IS NOT NULL
+      AND COALESCE(u.is_instructor, FALSE) = FALSE
+      AND COALESCE(u.is_admin, FALSE) = FALSE
+      AND EXISTS (
+        SELECT 1 FROM student_classes sc
+        WHERE sc.student_id = u.id AND sc.instructor_id = $1 AND sc.status = 'approved'
+      )
     )`;
-    const restrictions = await loadClassRestrictions(instructor_id);
-    res.json(await queryLogs(scope, [ins.rows[0].full_name, instructor_id], req.query, restrictions));
+    const restrictions = await loadClassRestrictions(instructorId);
+    res.json(await queryLogs(scope, [instructorId], req.query, restrictions));
   } catch (err) {
     console.error("Instructor logs error:", err.message);
     res.status(500).json({ error: "Server error" });

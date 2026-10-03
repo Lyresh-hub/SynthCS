@@ -42,8 +42,8 @@ The **server** decides the level of every event. The browser can report events t
 
 | Viewer | Scope |
 |---|---|
-| **Instructor** (Instructor Panel → Activity) | Their students' events (all classes), their own actions, and system-wide WARN/ERROR events that affect everyone (e.g. "generation service unreachable") |
-| **Admin** (Admin → Classes → Activity & System Logs) | Everything, including failed logins for unknown accounts and all system events |
+| **Instructor** (Instructor Panel → Activity) | **Only** the activity of students enrolled (approved) in their classes. The instructor is identified by their login session, not an ID in the request. |
+| **Admin** (Admin → Classes → Activity & System Logs) | Everything: all students, instructors' own actions, admins, failed logins for unknown accounts, and all system events |
 
 ## 5. Where it lives in the code
 
