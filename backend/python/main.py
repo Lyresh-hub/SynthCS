@@ -342,11 +342,20 @@ def _require_quota(authorization: str | None) -> None:
         return
     if status == 200 and body.get("limit") is not None and (body.get("remaining") or 0) <= 0:
         limit = body["limit"]
+        when = "at midnight (Philippine time)"
+        try:
+            from datetime import datetime, timezone
+            reset = datetime.fromisoformat(str(body.get("resets_at")).replace("Z", "+00:00"))
+            left = max(60, int((reset - datetime.now(timezone.utc)).total_seconds()))
+            h, m = left // 3600, -(-(left % 3600) // 60)
+            when = f"in {f'{h}h ' if h else ''}{m}m, at 12:00 AM (Philippine time)"
+        except Exception:
+            pass
         raise HTTPException(status_code=429, detail={
             "error": "quota_exceeded",
-            "limit": limit, "used": body.get("used"),
-            "message": f"You've reached your daily limit of {limit} dataset generation{'s' if limit != 1 else ''}. "
-                       "It resets at midnight (Philippine time).",
+            "limit": limit, "used": body.get("used"), "resets_at": body.get("resets_at"),
+            "message": f"You've used all {limit} of today's dataset generation{'s' if limit != 1 else ''}. "
+                       f"Your limit resets {when}.",
         })
 
 

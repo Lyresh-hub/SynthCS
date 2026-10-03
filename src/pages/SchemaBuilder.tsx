@@ -61,6 +61,17 @@ async function fetchPython(
   return lastRes!;
 }
 
+// "resets in 5h 12m, at 12:00 AM" for the daily generation limit
+function describeQuotaReset(resetsAt?: string | null): string {
+  if (!resetsAt) return "at midnight (Philippine time)";
+  const ms = new Date(resetsAt).getTime() - Date.now();
+  const at = new Date(resetsAt).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: "Asia/Manila" });
+  if (ms <= 0) return "now — refresh the page";
+  const h = Math.floor(ms / 3_600_000);
+  const m = Math.max(1, Math.ceil((ms % 3_600_000) / 60_000));
+  return `in ${h > 0 ? `${h}h ` : ""}${m}m, at ${at} (Philippine time)`;
+}
+
 async function parsePythonError(res: Response): Promise<string> {
   const contentType = res.headers.get("content-type") ?? "";
   if (contentType.includes("text/html") || res.status === 502 || res.status === 503 || res.status === 504) {
@@ -621,7 +632,14 @@ export default function SchemaBuilder() {
 
   // Daily generation quota (set by the instructor). Enforced on the server; shown here
   // so the student knows how many dataset generations they have left today.
-  const [quota, setQuota] = useState<{ limit: number | null; used: number; remaining: number | null } | null>(null);
+  const [quota, setQuota] = useState<{ limit: number | null; used: number; remaining: number | null; resets_at?: string | null } | null>(null);
+  // Re-render every minute so the "resets in …" countdown stays current
+  const [, setClockTick] = useState(0);
+  useEffect(() => {
+    if (quota?.limit == null || (quota.remaining ?? 1) > 0) return;
+    const t = setInterval(() => setClockTick((n) => n + 1), 60_000);
+    return () => clearInterval(t);
+  }, [quota?.limit, quota?.remaining]);
   const refreshQuota = () =>
     fetch(`${NODE_API}/api/student/quota`)
       .then((r) => (r.ok ? r.json() : null))
@@ -754,7 +772,7 @@ export default function SchemaBuilder() {
         const q = res.ok ? await res.json() : null;
         if (q) setQuota(q);
         if (q?.limit != null && q.remaining <= 0) {
-          setRestrictionError(`You've reached your daily limit of ${q.limit} dataset generation${q.limit !== 1 ? "s" : ""}. It resets at midnight (Philippine time).`);
+          setRestrictionError(`You've used all ${q.limit} of today's dataset generation${q.limit !== 1 ? "s" : ""}. Your limit resets ${describeQuotaReset(q.resets_at)}.`);
           return;
         }
       } catch { /* the server still enforces the limit when generating */ }
@@ -3565,7 +3583,9 @@ export default function SchemaBuilder() {
                   : (quota.remaining ?? 0) <= 1 ? "bg-amber-50 text-amber-700 border-amber-200"
                   : "bg-gray-50 text-gray-600 border-gray-200"}`}
               >
-                {quota.remaining} of {quota.limit} generation{quota.limit !== 1 ? "s" : ""} left today
+                {(quota.remaining ?? 0) === 0
+                  ? `Daily limit reached — resets ${describeQuotaReset(quota.resets_at).replace(" (Philippine time)", "")}`
+                  : `${quota.remaining} of ${quota.limit} generation${quota.limit !== 1 ? "s" : ""} left today`}
               </span>
             )}
             {/* Back to the result list this dataset was opened from — keeps the results */}
