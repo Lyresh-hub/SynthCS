@@ -54,6 +54,7 @@ export default function Downloads() {
       rows: ds.row_count,
       ref:  ds.kaggle_ref ?? "",
     }));
+    sessionStorage.setItem("preview_back", "/downloads"); // Preview's "← Back" returns here
     localStorage.setItem("last_path", "/schema-builder"); setLocation("/preview");
   };
 

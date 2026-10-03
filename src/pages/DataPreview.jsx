@@ -74,6 +74,8 @@ export default function DataPreview() {
     }
     return JSON.parse(sessionStorage.getItem("last_preview_params") || "{}");
   });
+  // Where "← Back" goes: My Downloads if opened from there, otherwise the Schema Builder
+  const [backPath] = useState(() => sessionStorage.getItem("preview_back") || "/schema-builder");
   const datasetId     = previewParams.id            || "";
   const datasetName   = previewParams.name          || "Dataset";
   const totalRowsMeta = Number(previewParams.rows)  || 0;
@@ -512,10 +514,10 @@ export default function DataPreview() {
             </div>
           </div>
           <button
-            onClick={() => setLocation("/schema-builder")}
+            onClick={() => setLocation(backPath)}
             className="flex-shrink-0 px-3 py-1.5 border border-gray-200 rounded-md text-xs text-gray-600 hover:bg-gray-50 transition-colors"
           >
-            ← Back
+            ← Back to {backPath === "/downloads" ? "My Downloads" : "Schema Builder"}
           </button>
         </div>
 

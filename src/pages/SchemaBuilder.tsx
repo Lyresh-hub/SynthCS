@@ -443,6 +443,8 @@ export default function SchemaBuilder() {
   const [phase, setPhase]           = useState<Phase>(() => readDraft() ? "schema" : "idle");
   const [mode, setMode]             = useState<Mode>(() => readDraft()?.mode ?? "kaggle");
   const [loadingMsg, setLoadingMsg] = useState("");
+  // Which result list the open dataset came from, so "← Back to results" can return to it
+  const [resultsBackPhase, setResultsBackPhase] = useState<"results" | "smart_results" | null>(null);
   const [errorMsg, setErrorMsg]     = useState("");
 
   const [searchQuery, setSearchQuery]         = useState("");
@@ -1020,7 +1022,7 @@ export default function SchemaBuilder() {
           body: JSON.stringify({ user_id: userId, name: data.primary_table, kaggle_ref: "", python_dataset_id: data.dataset_id, row_count: data.total_rows, source: "multi-table", purpose: sessionStorage.getItem("generation_purpose"), category: sessionStorage.getItem("generation_category"), review_id: reviewId }),
         }).catch(() => {});
       }
-      localStorage.setItem("last_path", "/schema-builder"); setLocation("/preview");
+      sessionStorage.removeItem("preview_back"); localStorage.setItem("last_path", "/schema-builder"); setLocation("/preview");
     } catch (e: any) {
       setErrorMsg(e.message ?? "Multi-table generation failed.");
       setPhase("error");
@@ -1035,7 +1037,7 @@ export default function SchemaBuilder() {
       name: getActiveTable()?.name ?? "dataset",
       rows: 200,
     }));
-    localStorage.setItem("last_path", "/schema-builder"); setLocation("/preview");
+    sessionStorage.removeItem("preview_back"); localStorage.setItem("last_path", "/schema-builder"); setLocation("/preview");
   };
 
   // ── Import user's own CSV ────────────────────────────────────────────────
@@ -1276,6 +1278,7 @@ export default function SchemaBuilder() {
         setTables(splitSchemaIntoTables(ds.title, [...realFields, ...llmFields]));
       }
       setMode("kaggle");
+      setResultsBackPhase("smart_results"); // "← Back to results" returns here
       setPhase("schema");
     } catch (e: any) {
       setErrorMsg(e.message ?? "Failed to download and augment dataset.");
@@ -1372,6 +1375,7 @@ export default function SchemaBuilder() {
       const mergedTitle = toDownload.map((d) => d.title).join(" + ");
       setTables([{ id: "1", name: mergedTitle, fields: [...primaryFields, ...mergedFields, ...llmFields] }]);
       setMode("kaggle");
+      setResultsBackPhase("smart_results"); // "← Back to results" returns here
       setPhase("schema");
       setSelectedSmartIds(new Set());
     } catch (e: any) {
@@ -1636,6 +1640,7 @@ export default function SchemaBuilder() {
       }
       const title = toDownload.map((d) => d.title).join(" + ");
       setTables([{ id: "1", name: title, fields: [...primaryFields, ...mergedFields] }]);
+      setResultsBackPhase("results"); // "← Back to results" returns here
       setMode("kaggle"); setPhase("schema");
     } catch (e: any) {
       setErrorMsg(e.message ?? "Combine failed."); setPhase("error");
@@ -1674,6 +1679,7 @@ export default function SchemaBuilder() {
           ),
         }]);
       }
+      setResultsBackPhase("results"); // "← Back to results" returns here
       setMode("kaggle"); setPhase("schema");
     } catch (e: any) {
       setErrorMsg(e.message ?? "Download failed."); setPhase("error");
@@ -1800,7 +1806,7 @@ export default function SchemaBuilder() {
         entity_tables: entityTables,
       }));
       pushNotification({ title: getActiveTable()?.name ?? "dataset", message: `${rowCount.toLocaleString()} rows · LLM + CTGAN`, dataset_id: data.dataset_id });
-      localStorage.setItem("last_path", "/schema-builder"); setLocation("/preview");
+      sessionStorage.removeItem("preview_back"); localStorage.setItem("last_path", "/schema-builder"); setLocation("/preview");
     } catch (e: any) {
       setErrorMsg(e.message ?? "CTGAN expansion failed."); setPhase("error");
     }
@@ -1874,7 +1880,7 @@ export default function SchemaBuilder() {
         ref:           "",
         entity_tables: templateData.entity_tables ?? [],
       }));
-      localStorage.setItem("last_path", "/schema-builder"); setLocation("/preview");
+      sessionStorage.removeItem("preview_back"); localStorage.setItem("last_path", "/schema-builder"); setLocation("/preview");
     } catch (e: any) {
       clearTimeout(genTimeout);
       const isAbort = e?.name === "AbortError" || (e?.message ?? "").toLowerCase().includes("aborted");
@@ -1948,7 +1954,7 @@ export default function SchemaBuilder() {
       }
       sessionStorage.setItem("preview_params", JSON.stringify({ id: activeDatasetId, name: getActiveTable()?.name ?? "dataset", rows: rowCount, ref: kaggleRef }));
       pushNotification({ title: getActiveTable()?.name ?? "dataset", message: `${rowCount.toLocaleString()} rows · ${selectedDataSource}`, dataset_id: activeDatasetId });
-      localStorage.setItem("last_path", "/schema-builder"); setLocation("/preview");
+      sessionStorage.removeItem("preview_back"); localStorage.setItem("last_path", "/schema-builder"); setLocation("/preview");
     } catch (e: any) {
       const msg = e.message ?? "Generation failed. Check the Python service logs.";
       if (e?.name === "AbortError" || msg.toLowerCase().includes("aborted")) {
@@ -3474,8 +3480,19 @@ export default function SchemaBuilder() {
                               return <span className="text-xs font-medium px-2.5 py-1 rounded-full bg-purple-100 text-purple-700">AI Generated Schema</span>;
               return <div className="flex items-center gap-1.5">{tags}</div>;
             })()}
+            <div className="flex items-center gap-3">
+            {/* Back to the result list this dataset was opened from — keeps the results */}
+            {resultsBackPhase && (resultsBackPhase === "results" ? searchResults.length > 0 : smartResults.length > 0) && (
+              <button
+                onClick={() => setPhase(resultsBackPhase)}
+                className="px-3 py-1.5 border border-gray-200 rounded-lg text-xs font-medium text-gray-600 hover:bg-gray-50 transition-colors"
+              >
+                ← Back to results
+              </button>
+            )}
             <button
               onClick={() => {
+                setResultsBackPhase(null);
                 sessionStorage.removeItem("schema_builder_draft");
                 setTables([]);
                 setActiveTableId("");
@@ -3486,8 +3503,9 @@ export default function SchemaBuilder() {
               }}
               className="text-xs text-gray-400 hover:text-red-500 transition-colors"
             >
-              ← Start Over
+              Start Over
             </button>
+            </div>
           </div>
 
           {/* Loan-demo compatibility indicator */}
