@@ -32,6 +32,7 @@ import AdminClasses from "./pages/AdminClasses";
 import ValidationReport from "./pages/ValidationReport";
 import AcceptInvitation from "./pages/AcceptInvitation";
 import Classes from "./pages/Classes";
+import MyRequests from "./pages/MyRequests";
 import JoinClass from "./pages/JoinClass";
 
 // Bago mag-start ang memory router, tignan muna natin kung may espesyal na params sa URL.
@@ -150,6 +151,7 @@ export default function App() {
               <Route path="/saved-schemas" component={SavedSchemas} />
               <Route path="/downloads" component={Downloads} />
               <Route path="/classes" component={Classes} />
+              <Route path="/my-requests" component={MyRequests} />
               <Route path="/join-class" component={JoinClass} />
               <Route path="/preview" component={DataPreview} />
               <Route path="/validation-report" component={ValidationReport} />

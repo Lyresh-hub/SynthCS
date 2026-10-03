@@ -669,6 +669,8 @@ async function initDB() {
     `).catch(() => {});
     // Exactly what triggered the flag: matched words per level + AI verdict
     await pool.query(`ALTER TABLE flagged_prompts ADD COLUMN IF NOT EXISTS detection JSONB`).catch(() => {});
+    // Where it was flagged (dataset_search | ai_search | ai_schema | generate) — used by the student's My Requests page
+    await pool.query(`ALTER TABLE flagged_prompts ADD COLUMN IF NOT EXISTS context VARCHAR(20)`).catch(() => {});
 
     // Class invitation links — per instructor + course
     await pool.query(`
@@ -1715,7 +1717,7 @@ async function evaluatePrompt(prompt, { apiKey, restrictions = [], fieldNames = 
 }
 
 // ── Shared safety check (check-prompt, generate-schema, generation-time check) ─
-async function runSafetyCheck(prompt, user_id, apiKey, instructor_id, { useAi = true, fieldNames = [] } = {}) {
+async function runSafetyCheck(prompt, user_id, apiKey, instructor_id, { useAi = true, fieldNames = [], context = null } = {}) {
   let instructor = null;
   let restrictions = [];
   if (user_id) {
@@ -1740,7 +1742,7 @@ async function runSafetyCheck(prompt, user_id, apiKey, instructor_id, { useAi = 
 
   if (user_id) {
     try {
-      return await openReview(user_id, prompt.trim(), detection.reason, instructor?.id ?? instructor_id, detection);
+      return await openReview(user_id, prompt.trim(), detection.reason, instructor?.id ?? instructor_id, detection, context);
     } catch (e) {
       console.error("Flagging error:", e.message);
       // Fail closed: a flagged prompt must never slip through unreviewed
@@ -1791,7 +1793,7 @@ async function resolveReviewInstructor(studentId, preferredInstructorId) {
   return any.rows[0] ?? null;
 }
 
-async function openReview(studentId, promptText, flagReason, preferredInstructorId, detection = null) {
+async function openReview(studentId, promptText, flagReason, preferredInstructorId, detection = null, context = null) {
   const prior = await pool.query(
     `SELECT id, status FROM flagged_prompts WHERE student_id = $1 AND prompt_text = $2
      ORDER BY created_at DESC LIMIT 1`,
@@ -1808,8 +1810,8 @@ async function openReview(studentId, promptText, flagReason, preferredInstructor
 
   const instructor = await resolveReviewInstructor(studentId, preferredInstructorId);
   const inserted = await pool.query(
-    "INSERT INTO flagged_prompts (student_id, instructor_id, prompt_text, flag_reason, detection) VALUES ($1, $2, $3, $4, $5) RETURNING id",
-    [studentId, instructor?.id ?? null, promptText, flagReason, detection ? JSON.stringify(detection) : null]
+    "INSERT INTO flagged_prompts (student_id, instructor_id, prompt_text, flag_reason, detection, context) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id",
+    [studentId, instructor?.id ?? null, promptText, flagReason, detection ? JSON.stringify(detection) : null, context]
   );
   logActivity(studentId, "prompt_flagged", { prompt_text: promptText, flag_reason: flagReason, triggers: detection?.matches ?? [], ai: detection?.ai ?? null });
 
@@ -1828,7 +1830,9 @@ app.post("/api/llm/check-prompt", async (req, res) => {
   if (!prompt?.trim()) return res.json({ safe: true });
 
   // no key = no AI check, keyword check still runs
-  const result = await runSafetyCheck(prompt.trim(), user_id, apiKey, instructor_id);
+  const result = await runSafetyCheck(prompt.trim(), user_id, apiKey, instructor_id, {
+    context: context === "ai_search" ? "ai_search" : "dataset_search",
+  });
   // Record every search the student runs, with the prompt exactly as typed.
   // Flagged searches are already logged as prompt_flagged inside runSafetyCheck.
   if (result.safe && !result.review_id && user_id) {
@@ -1848,7 +1852,7 @@ app.post("/api/llm/generate-schema", async (req, res) => {
 
   // ── Moderation: delegate to shared safety-check helper ──────────────────────
   // Flagged prompts still get a schema, but carry a review_id that locks the dataset
-  const safetyResult = await runSafetyCheck(prompt.trim(), user_id, apiKey, instructor_id);
+  const safetyResult = await runSafetyCheck(prompt.trim(), user_id, apiKey, instructor_id, { context: "ai_schema" });
   if (!safetyResult.safe) {
     // Pending review → no schema is generated (the AI is never asked) until approved
     return res.status(403).json({
@@ -2096,6 +2100,28 @@ Valid types: ${VALID_TYPES.join(", ")}`;
 // ── Dataset endpoints ─────────────────────────────────────────────────────────
 const PYTHON_DATASETS_DIR = path.join(__dirname, "python", "temp_datasets");
 const REVIEW_TO_DATASET_STATUS = { pending: "pending_review", approved: "ready", rejected: "rejected" };
+
+// ── Student: My Requests — their own flagged prompts and the instructor's decision ──
+app.get("/api/student/reviews", requireAuth, async (req, res) => {
+  try {
+    const r = await pool.query(
+      `SELECT fp.id, fp.prompt_text, fp.status, fp.context, fp.created_at, fp.reviewed_at,
+              COALESCE(rv.full_name, ins.full_name) AS instructor_name,
+              (SELECT COUNT(*)::int FROM datasets d WHERE d.review_id = fp.id) AS datasets
+       FROM flagged_prompts fp
+       LEFT JOIN users rv  ON rv.id  = fp.reviewed_by
+       LEFT JOIN users ins ON ins.id = fp.instructor_id
+       WHERE fp.student_id = $1
+       ORDER BY fp.created_at DESC
+       LIMIT 200`,
+      [req.user.id]
+    );
+    res.json(r.rows);
+  } catch (err) {
+    console.error("Student reviews error:", err.message);
+    res.status(500).json({ error: "Server error" });
+  }
+});
 
 // Review status — the Python service calls this before serving a locked dataset,
 // and the Schema Builder polls it to show when the lock is lifted.
@@ -2916,7 +2942,7 @@ app.post("/api/moderation/check-generation", async (req, res) => {
   const text = String(prompt ?? "").trim() || fieldNames.join(" ");
   if (!text) return res.json({ ok: true, review_id: null });
   try {
-    const result = await runSafetyCheck(text, student_id, null, instructor_id, { useAi: false, fieldNames });
+    const result = await runSafetyCheck(text, student_id, null, instructor_id, { useAi: false, fieldNames, context: "generate" });
     if (!result.safe) return res.status(403).json(result);
     res.json({ ok: true, review_id: result.review_id ?? null, message: result.message ?? null, reason: result.detection?.reason ?? null });
   } catch (e) {

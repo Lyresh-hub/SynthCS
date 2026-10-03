@@ -2181,8 +2181,42 @@ export default function SchemaBuilder() {
     else if (r.kind === "generate") askPurposeThen(r.action);
   }, [resumeNow]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // "Open results" from My Requests: an approved prompt is re-run here (it passes now).
+  // Searches and AI steps run automatically; a generation step reopens the schema.
+  const [openNotice, setOpenNotice] = useState("");
+  useEffect(() => {
+    const raw = sessionStorage.getItem("sb_open_request");
+    if (!raw) return;
+    sessionStorage.removeItem("sb_open_request");
+    let req: { kind: string; prompt: string } | null = null;
+    try { req = JSON.parse(raw); } catch { return; }
+    if (!req?.prompt) return;
+    clearReview(); // drop any old lock banner for this prompt — it's approved
+    if (req.kind === "dataset_search") {
+      setSearchQuery(req.prompt);
+      setResumeNow({ kind: "dataset_search", prompt: req.prompt });
+    } else if (req.kind === "ai_search" || req.kind === "ai_schema") {
+      setLlmPrompt(req.prompt);
+      setResumeNow({ kind: req.kind, prompt: req.prompt });
+    } else {
+      setOpenNotice(tables.length > 0
+        ? "Your prompt was approved — your schema is below. Click Generate to continue."
+        : "Your prompt was approved. Search or describe your dataset again with the same prompt to continue.");
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   return (
     <div className="space-y-4">
+
+      {openNotice && (
+        <div className="flex items-start gap-2.5 rounded-xl border border-green-300 bg-green-50 px-4 py-3">
+          <AlertCircle className="w-4 h-4 text-green-600 flex-shrink-0 mt-0.5" />
+          <p className="flex-1 text-xs text-green-800">{openNotice}</p>
+          <button onClick={() => setOpenNotice("")} className="text-gray-400 hover:text-gray-600 flex-shrink-0" title="Dismiss">
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
 
       {/* ── Instructor review lock (Pending → Approved / Rejected) ── */}
       {reviewId && reviewStatus && (
@@ -2204,6 +2238,12 @@ export default function SchemaBuilder() {
                 {sessionStorage.getItem("sb_review_prompt") && (
                   <p className="text-[11px] text-amber-700 mt-1 truncate">Prompt under review: “{sessionStorage.getItem("sb_review_prompt")}”</p>
                 )}
+                <button
+                  onClick={() => setLocation("/my-requests")}
+                  className="mt-1.5 text-[11px] font-medium text-amber-800 underline hover:text-amber-900"
+                >
+                  Track it in My Requests →
+                </button>
               </>
             )}
             {reviewStatus === "approved" && (

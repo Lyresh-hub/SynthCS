@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { useLocation, Link, useRoute } from "wouter";
 import {
   LayoutDashboard, Layers, Download,
-  Bell, FileJson, Settings, CheckCheck, Trash2, Database, Menu, X, HelpCircle, GraduationCap,
+  Bell, FileJson, Settings, CheckCheck, Trash2, Database, Menu, X, HelpCircle, GraduationCap, ClipboardList,
 } from "lucide-react";
 import { cn } from "../lib/utils";
 import {
@@ -18,6 +18,7 @@ const navItems = [
   { label: "Schema Builder", icon: Layers,         href: "/schema-builder", tourKey: "nav-schema" },
   { label: "Saved Schemas",  icon: FileJson,       href: "/saved-schemas",  tourKey: "nav-saved",    indent: true },
   { label: "Downloads",     icon: Download,        href: "/downloads",      tourKey: "nav-downloads" },
+  { label: "My Requests",   icon: ClipboardList,   href: "/my-requests",    tourKey: "nav-requests" },
   { label: "Classes",       icon: GraduationCap,  href: "/classes",        tourKey: "nav-classes" },
 ];
 
@@ -44,6 +45,20 @@ export default function Layout({ children }: { children: React.ReactNode }) {
 
   // Kinukuha yung pangalan ng naka-login na user mula sa localStorage
   const userName = localStorage.getItem("user_name") ?? "User";
+
+  // Number of the student's flagged prompts still waiting for the instructor (sidebar badge)
+  const [pendingRequests, setPendingRequests] = useState(0);
+  useEffect(() => {
+    if (!localStorage.getItem("auth_token")) return;
+    const check = () =>
+      fetch(`${NODE_API}/api/student/reviews`)
+        .then((r) => (r.ok ? r.json() : []))
+        .then((rows) => { if (Array.isArray(rows)) setPendingRequests(rows.filter((x) => x.status === "pending").length); })
+        .catch(() => {});
+    check();
+    const t = setInterval(check, 60_000);
+    return () => clearInterval(t);
+  }, [location]);
 
   // Easter egg: i-click ang logo ng 5 beses para mapunta sa admin panel
   const [logoClicks, setLogoClicks] = useState(0);
@@ -178,6 +193,11 @@ export default function Layout({ children }: { children: React.ReactNode }) {
               >
                 <Icon className={cn(item.indent ? "w-3.5 h-3.5" : "w-4 h-4", isActive ? "text-purple-600" : "text-gray-400")} />
                 {item.label}
+                {item.href === "/my-requests" && pendingRequests > 0 && (
+                  <span className="ml-auto min-w-[18px] h-[18px] px-1 rounded-full bg-amber-500 text-white text-[10px] font-bold flex items-center justify-center" title="Waiting for your instructor">
+                    {pendingRequests}
+                  </span>
+                )}
               </div>
             </Link>
           );
