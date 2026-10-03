@@ -1,5 +1,5 @@
 import { useLocation, Link, useRoute } from "wouter";
-import { LayoutDashboard, Users, Zap, LogOut, ShieldCheck, GraduationCap } from "lucide-react";
+import { LayoutDashboard, Users, Zap, LogOut, ShieldCheck, GraduationCap, Activity } from "lucide-react";
 import { cn } from "../lib/utils";
 import { reportEvent } from "../lib/activity";
 
@@ -7,6 +7,7 @@ const navItems = [
   { label: "Overview",          icon: LayoutDashboard, href: "/admin" },
   { label: "User Management",   icon: Users,           href: "/admin/users" },
   { label: "Classes",           icon: GraduationCap,   href: "/admin/classes" },
+  { label: "Activity History",  icon: Activity,        href: "/admin/activity" },
 ];
 
 // Ginagawa natin yung dalawang initials galing sa buong pangalan — halimbawa "John Doe" → "JD"

@@ -78,6 +78,7 @@ function formatValue(key: string, v: unknown): string {
 
 export default function LogViewer({
   endpoint, scopeNote, hidePromptText = false, onViewPrompt, initialSearch = "",
+  extraQuery, showRoleFilter = false,
 }: {
   endpoint: string;
   scopeNote?: string;
@@ -86,6 +87,10 @@ export default function LogViewer({
   onViewPrompt?: (log: { student: string | null; prompt: string }) => void;
   /** Pre-fill the search box (e.g. arriving from a prompt card) */
   initialSearch?: string;
+  /** Fixed filters sent with every request, e.g. { actions: "login_success,logout" } */
+  extraQuery?: Record<string, string>;
+  /** Show the Students / Faculty / Admins / System filter (admin view) */
+  showRoleFilter?: boolean;
 }) {
   const [logs, setLogs]         = useState<LogEntry[]>([]);
   const [counts, setCounts]     = useState<Record<LogLevel, number>>({ INFO: 0, WARN: 0, ERROR: 0 });
@@ -95,6 +100,7 @@ export default function LogViewer({
   const [category, setCategory] = useState("");
   const [since, setSince]       = useState("7d");
   const [search, setSearch]     = useState(initialSearch);
+  const [role, setRole]         = useState("");
   const [query, setQuery]       = useState("");                      // debounced search
   const [order, setOrder]       = useState<"newest" | "oldest">("newest");
   const [live, setLive]         = useState(false);
@@ -109,6 +115,8 @@ export default function LogViewer({
       if (levels.length) qs.set("level", levels.join(","));
       if (category) qs.set("category", category);
       if (query) qs.set("q", query);
+      if (role) qs.set("role", role);
+      for (const [k, v] of Object.entries(extraQuery ?? {})) if (v) qs.set(k, v);
       const res = await fetch(`${endpoint}${endpoint.includes("?") ? "&" : "?"}${qs}`);
       if (!res.ok) throw new Error();
       const data = await res.json();
@@ -120,7 +128,7 @@ export default function LogViewer({
     } finally {
       setLoading(false);
     }
-  }, [endpoint, since, levels, category, query]);
+  }, [endpoint, since, levels, category, query, role, JSON.stringify(extraQuery ?? {})]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { load(); }, [load]);
   useEffect(() => {
@@ -175,6 +183,16 @@ export default function LogViewer({
             className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-purple-500">
             {CATEGORIES.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
           </select>
+          {showRoleFilter && (
+            <select value={role} onChange={(e) => setRole(e.target.value)} aria-label="Who"
+              className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-purple-500">
+              <option value="">Everyone</option>
+              <option value="student">Students</option>
+              <option value="instructor">Faculty</option>
+              <option value="admin">Admins</option>
+              <option value="system">System (no user)</option>
+            </select>
+          )}
           <select value={since} onChange={(e) => setSince(e.target.value)}
             className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-purple-500">
             {RANGES.map((r) => <option key={r.id} value={r.id}>{r.label}</option>)}

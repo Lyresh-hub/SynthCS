@@ -499,7 +499,7 @@ export default function SchemaBuilder() {
   // which step was stopped ("resume") so the student can continue after approval.
   type ReviewResume =
     | { kind: "dataset_search" | "ai_search" | "ai_schema"; prompt: string }
-    | { kind: "generate"; prompt: string; action: "template" | "expand" | "generate" };
+    | { kind: "generate"; prompt: string; action: "search" | "template" | "expand" | "generate" };
   const [reviewId, setReviewId]         = useState<string | null>(() => sessionStorage.getItem("sb_review_id"));
   const [reviewStatus, setReviewStatus] = useState<"pending" | "approved" | "rejected" | null>(() => (sessionStorage.getItem("sb_review_id") ? "pending" : null));
   const [reviewError, setReviewError]   = useState("");
@@ -608,7 +608,7 @@ export default function SchemaBuilder() {
   const [detectedCategory, setDetectedCategory]   = useState("");
   const [selectedUsage, setSelectedUsage]         = useState("");
   const [usageOther, setUsageOther]               = useState("");
-  const [purposePendingAction, setPurposePendingAction] = useState<"template" | "expand" | "generate" | null>(null);
+  const [purposePendingAction, setPurposePendingAction] = useState<"search" | "template" | "expand" | "generate" | null>(null);
 
   // Class restrictions — loaded from the active instructor on mount
   type RestrictionEntry = { id: string; restriction_type: string; value: string; action: string };
@@ -665,7 +665,13 @@ export default function SchemaBuilder() {
     return best.label;
   };
 
-  const askPurposeThen = async (action: "template" | "expand" | "generate") => {
+  // The purpose is asked ONCE, when the student starts a search (dataset search or
+  // AI "Generate Schema"). Generating afterwards reuses that answer. It is only asked
+  // at the generate step when there was no search first (own upload, preset).
+  const purposeAlreadyGiven = () => sessionStorage.getItem("sb_purpose_set") === "1";
+
+  const askPurposeThen = async (action: "search" | "template" | "expand" | "generate") => {
+    if (action === "search") { openPurposeModal(action, searchQuery.trim()); return; }
     const fieldNames = tables.flatMap((t) => t.fields.map((f) => f.name));
     // The student's own words: the AI description, or the dataset search they ran
     const studentPrompt = llmPrompt.trim() || searchQuery.trim();
@@ -703,7 +709,16 @@ export default function SchemaBuilder() {
     }
 
     setRestrictionError("");
-    const detected = detectCategory(prompt);
+    // Generate / expand after a search: purpose was already given → don't ask twice
+    if ((action === "generate" || action === "expand") && purposeAlreadyGiven()) {
+      runAfterPurpose(action);
+      return;
+    }
+    openPurposeModal(action, prompt);
+  };
+
+  const openPurposeModal = (action: "search" | "template" | "expand" | "generate", promptForCategory: string) => {
+    const detected = detectCategory(promptForCategory);
     setDetectedCategory(detected);
     setSelectedCategory(detected);
     setCategoryOther("");
@@ -714,8 +729,10 @@ export default function SchemaBuilder() {
     setShowPurposeModal(true);
   };
 
-  const confirmPurpose = async () => {
-    // Quota check
+  // Runs the step the purpose was asked for. The daily limit is checked only for
+  // steps that generate something — never for a plain dataset search.
+  const runAfterPurpose = async (action: "search" | "template" | "expand" | "generate") => {
+    if (action === "search") { handleSearch(); return; }
     const quotaRule = classRestrictions.find((r) => r.restriction_type === "quota");
     const studentId = localStorage.getItem("user_id");
     if (quotaRule && studentId) {
@@ -726,12 +743,16 @@ export default function SchemaBuilder() {
         if (count >= limit) {
           setRestrictionError(`You have reached your daily generation limit of ${limit} dataset${limit !== 1 ? "s" : ""}. Try again tomorrow.`);
           reportEvent("quota_reached", { limit, count });
-          setShowPurposeModal(false);
           return;
         }
       } catch { /* quota check failed silently — allow generation */ }
     }
+    if (action === "template") handleLlmGenerate();
+    else if (action === "expand") handleExpand();
+    else if (action === "generate") handleGenerate();
+  };
 
+  const confirmPurpose = async () => {
     const finalCategory = selectedCategory === "Other" ? (categoryOther.trim() || "Other") : selectedCategory;
     const finalUsage    = selectedUsage    === "Other" ? (usageOther.trim()    || "Other") : selectedUsage;
     const combined = `${finalCategory} — ${finalUsage}`;
@@ -739,13 +760,14 @@ export default function SchemaBuilder() {
     sessionStorage.setItem("generation_purpose",  finalUsage);
     sessionStorage.setItem("generation_category", finalCategory);
     sessionStorage.setItem("generation_purpose_full", combined);
-    if (purposePendingAction === "template") handleLlmGenerate();
-    else if (purposePendingAction === "expand") handleExpand();
-    else if (purposePendingAction === "generate") handleGenerate();
+    sessionStorage.setItem("sb_purpose_set", "1");   // answered — the generate step won't ask again
+    const action = purposePendingAction;
     setPurposePendingAction(null);
+    if (action) runAfterPurpose(action);
   };
 
   const loadMultiTablePreset = (preset: MultiTablePreset) => {
+    sessionStorage.removeItem("sb_purpose_set");
     const tables: Table[] = preset.tables.map((t, i) => ({
       id: `t_pre_${i}`,
       name: t.name,
@@ -773,6 +795,7 @@ export default function SchemaBuilder() {
   };
 
   const loadPreset = (preset: Preset) => {
+    sessionStorage.removeItem("sb_purpose_set");
     const fields: Field[] = preset.fields.map((f, i) =>
       makeField({
         id: `p${i}`, name: f.name, type: f.type,
@@ -1042,6 +1065,7 @@ export default function SchemaBuilder() {
 
   // ── Import user's own CSV ────────────────────────────────────────────────
   const handleUploadDataset = async (file: File) => {
+    sessionStorage.removeItem("sb_purpose_set");   // new data, no search → ask the purpose at generate
     failureKind.current = "upload";
     setLoadingMsg(`Reading ${file.name} and detecting tables…`);
     setPhase("loading");
@@ -1159,7 +1183,7 @@ export default function SchemaBuilder() {
       const safetyRes = await fetch(`${NODE_API}/api/llm/check-prompt`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: llmPrompt, user_id: userId, instructor_id: activeInstructorId, context: "ai_search" }),
+        body: JSON.stringify({ prompt: llmPrompt, user_id: userId, instructor_id: activeInstructorId, context: "ai_search", purpose: sessionStorage.getItem("generation_purpose") ?? undefined, category: sessionStorage.getItem("generation_category") ?? undefined }),
       });
       const data = await safetyRes.json().catch(() => ({}));
       if (!safetyRes.ok) {
@@ -1496,7 +1520,7 @@ export default function SchemaBuilder() {
       const safetyRes = await fetch(`${NODE_API}/api/llm/check-prompt`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: searchQuery, user_id: userId, instructor_id: activeInstructorId, context: "dataset_search" }),
+        body: JSON.stringify({ prompt: searchQuery, user_id: userId, instructor_id: activeInstructorId, context: "dataset_search", purpose: sessionStorage.getItem("generation_purpose") ?? undefined, category: sessionStorage.getItem("generation_category") ?? undefined }),
       });
       const data = await safetyRes.json().catch(() => ({}));
       if (!safetyRes.ok) {
@@ -2847,12 +2871,12 @@ export default function SchemaBuilder() {
             <input
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && handleSearch()}
+              onKeyDown={(e) => e.key === "Enter" && searchQuery.trim() && askPurposeThen("search")}
               placeholder="Search topics (e.g. employee salary) or paste Kaggle URL / slug (e.g. zillow/zecon)..."
               className="flex-1 text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500"
             />
             <button
-              onClick={handleSearch}
+              onClick={() => searchQuery.trim() && askPurposeThen("search")}
               className="flex items-center gap-1.5 px-4 py-2 bg-gray-800 text-white rounded-lg text-sm font-medium hover:bg-gray-900 transition-colors"
             >
               <Search className="w-4 h-4" /> Search
@@ -3534,6 +3558,7 @@ export default function SchemaBuilder() {
               onClick={() => {
                 setResultsBackPhase(null);
                 sessionStorage.removeItem("schema_builder_draft");
+                sessionStorage.removeItem("sb_purpose_set");
                 setTables([]);
                 setActiveTableId("");
                 setPhase("idle");

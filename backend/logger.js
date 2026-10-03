@@ -51,6 +51,11 @@ const CATALOG = {
   invite_created:           { level: "INFO",  category: "class",      msg: (d) => `Created an invite link for ${s(d.course)}` },
   restriction_added:        { level: "INFO",  category: "class",      msg: (d) => `Added class restriction: ${s(d.restriction_type)} “${s(d.value)}”${d.action ? ` (${d.action})` : ""}` },
   restriction_removed:      { level: "INFO",  category: "class",      msg: () => "Removed a class restriction" },
+  student_invited:          { level: "INFO",  category: "class",      msg: (d) => `Invited ${s(d.email) || "a student"} to ${s(d.course) || "the class"} by email` },
+  student_removed:          { level: "INFO",  category: "class",      msg: (d) => `Removed ${s(d.student_name) || "a student"} from ${s(d.course) || "the class"}` },
+  invite_toggled:           { level: "INFO",  category: "class",      msg: (d) => `${d.active ? "Activated" : "Deactivated"} the invite link for ${s(d.course) || "a class"}` },
+  invite_deleted:           { level: "INFO",  category: "class",      msg: (d) => `Deleted the invite link for ${s(d.course) || "a class"}` },
+  restrictions_updated:     { level: "INFO",  category: "class",      msg: (d) => `Updated ${s(d.course) || "class"} limits${d.max_rows ? ` (max ${Number(d.max_rows).toLocaleString("en-US")} rows)` : ""}${Array.isArray(d.allowed_formats) && d.allowed_formats.length ? ` (formats: ${d.allowed_formats.join(", ")})` : ""}` },
 
   // ── Search ──
   dataset_search:           { level: "INFO",  category: "search",     msg: (d) => `Searched datasets for ${q(d.prompt_text)}` },

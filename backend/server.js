@@ -1966,7 +1966,9 @@ app.post("/api/llm/check-prompt", async (req, res) => {
   // Record every search the student runs, with the prompt exactly as typed.
   // Flagged searches are already logged as prompt_flagged inside runSafetyCheck.
   if (result.safe && !result.review_id && user_id) {
-    logActivity(user_id, context === "ai_search" ? "ai_search" : "dataset_search", { prompt_text: prompt });
+    logActivity(user_id, context === "ai_search" ? "ai_search" : "dataset_search", {
+      prompt_text: prompt, category: req.body.category ?? null, purpose: req.body.purpose ?? null,
+    });
   }
   if (result.safe) return res.json({ safe: true });
   // Flagged → 403 with error "pending_review" and the review_id: the search does not run
@@ -2629,6 +2631,7 @@ app.put("/api/instructor/:id/course-restrictions", async (req, res) => {
        DO UPDATE SET max_rows = $3, allowed_formats = $4, updated_at = NOW()`,
       [req.params.id, course, max_rows ?? null, allowed_formats ?? null]
     );
+    logActivity(req.params.id, "restrictions_updated", { course, max_rows: max_rows ?? null, allowed_formats: allowed_formats ?? null });
     res.json({ ok: true });
   } catch (err) {
     console.error("Course restrictions update error:", err.message);
@@ -2784,6 +2787,19 @@ async function queryLogs(scopeSql, scopeParams, query, restrictions = [], { hide
 
   if (SINCE_INTERVALS[query.since]) where.push(`al.created_at >= NOW() - INTERVAL '${SINCE_INTERVALS[query.since]}'`);
   if (query.category) add("al.category = ?", String(query.category));
+  // role: who did it — student | instructor (faculty) | admin | system (no user)
+  const ROLE_SQL = {
+    student:    "(al.user_id IS NOT NULL AND COALESCE(u.is_instructor, FALSE) = FALSE AND COALESCE(u.is_admin, FALSE) = FALSE)",
+    instructor: "(COALESCE(u.is_instructor, FALSE) = TRUE AND COALESCE(u.is_admin, FALSE) = FALSE)",
+    admin:      "(COALESCE(u.is_admin, FALSE) = TRUE)",
+    system:     "(al.user_id IS NULL)",
+  };
+  if (ROLE_SQL[query.role]) where.push(ROLE_SQL[query.role]);
+  // actions: comma-separated list of event types (quick views like "Logins & logouts")
+  if (query.actions) {
+    const list = String(query.actions).split(",").map((a) => a.trim()).filter((a) => /^[a-z_]{2,40}$/.test(a));
+    if (list.length) { params.push(list); where.push(`al.action_type = ANY($${params.length})`); }
+  }
   if (query.user_id) add("al.user_id = ?", String(query.user_id));
   if (query.q) {
     params.push(`%${String(query.q).slice(0, 100)}%`);
@@ -3154,7 +3170,8 @@ app.get("/instructor/invites", async (req, res) => {
 
 app.delete("/instructor/invites/:id", async (req, res) => {
   try {
-    await pool.query("DELETE FROM class_invitations WHERE id = $1", [req.params.id]);
+    const del = await pool.query("DELETE FROM class_invitations WHERE id = $1 RETURNING instructor_id, course", [req.params.id]);
+    if (del.rowCount) logActivity(del.rows[0].instructor_id, "invite_deleted", { course: del.rows[0].course });
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: "Server error" });
@@ -3164,10 +3181,12 @@ app.delete("/instructor/invites/:id", async (req, res) => {
 app.patch("/instructor/invites/:id/toggle", async (req, res) => {
   try {
     const result = await pool.query(
-      "UPDATE class_invitations SET active = NOT active WHERE id = $1 RETURNING active",
+      "UPDATE class_invitations SET active = NOT active WHERE id = $1 RETURNING active, instructor_id, course",
       [req.params.id]
     );
-    res.json({ active: result.rows[0].active });
+    const inv = result.rows[0];
+    if (inv) logActivity(inv.instructor_id, "invite_toggled", { course: inv.course, active: inv.active });
+    res.json({ active: inv.active });
   } catch (err) { res.status(500).json({ error: "Server error" }); }
 });
 
@@ -3390,11 +3409,15 @@ app.delete("/api/student/:id/classes/:classId", async (req, res) => {
 app.patch("/instructor/students/:studentId/remove", async (req, res) => {
   try {
     const { instructor_id } = req.body ?? {};
+    const stu = await pool.query("SELECT full_name FROM users WHERE id = $1", [req.params.studentId]).catch(() => ({ rows: [] }));
     if (instructor_id) {
-      await pool.query(
-        `DELETE FROM student_classes WHERE student_id = $1 AND instructor_id = $2`,
+      const removed = await pool.query(
+        `DELETE FROM student_classes WHERE student_id = $1 AND instructor_id = $2 RETURNING course`,
         [req.params.studentId, instructor_id]
       );
+      logActivity(instructor_id, "student_removed", {
+        student_id: req.params.studentId, student_name: stu.rows[0]?.full_name ?? null, course: removed.rows[0]?.course ?? null,
+      });
     } else {
       await pool.query(`UPDATE users SET instructor = NULL, course = NULL, approval_status = 'pending' WHERE id = $1`, [req.params.studentId]);
     }
@@ -3429,9 +3452,10 @@ app.post("/instructor/students/add", async (req, res) => {
 
     if (EMAIL_READY) {
       await sendClassInvitationEmail(email, instructorName, course || "Data Science", token).catch((e) =>
-        console.error("Invitation email error:", e.message)
+        reportEmailFailure("Class invitation email", e, instructor_id)
       );
     }
+    logActivity(instructor_id, "student_invited", { email: email.toLowerCase(), course: course || "Data Science" });
 
     res.json({ invited: true, email });
   } catch (err) {

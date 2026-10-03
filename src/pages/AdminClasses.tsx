@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { BookOpen, Activity, ChevronDown, ChevronRight, CheckCircle, XCircle, Clock, Plus, Copy, Trash2, X } from "lucide-react";
 import { NODE_API as BACKEND } from "../lib/config";
-import LogViewer from "../components/LogViewer";
 
 const FRONTEND_URL = "https://synthcs.site";
 
@@ -166,7 +165,6 @@ export default function AdminClasses() {
       {/* Tabs */}
       <div className="flex gap-1 bg-white border border-gray-100 rounded-xl p-1 w-fit shadow-sm">
         <TabBtn active={tab === "courses"}  onClick={() => setTab("courses")}  icon={<BookOpen className="w-3.5 h-3.5" />}  label="Courses" />
-        <TabBtn active={tab === "activity"} onClick={() => setTab("activity")} icon={<Activity className="w-3.5 h-3.5" />}  label="Activity & System Logs" />
       </div>
 
       {/* ── Courses ── */}
@@ -284,13 +282,6 @@ export default function AdminClasses() {
         </div>
       )}
 
-      {/* ── Activity & system logs (all users + system events) ── */}
-      {tab === "activity" && (
-        <LogViewer
-          endpoint={`${BACKEND}/api/admin/logs?admin_id=${adminId}`}
-          scopeNote="Account and system activity for all users (students, instructors, admins): logins, logouts, bans, enrollments, datasets, and errors. Prompt content is not shown here — instructors review their students' prompts. Click a row for full details."
-        />
-      )}
     </div>
   );
 }
