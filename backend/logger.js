@@ -39,6 +39,7 @@ const CATALOG = {
   account_unbanned:         { level: "INFO",  category: "auth",       msg: () => "Account unbanned by an administrator (strikes reset)" },
   strikes_reset:            { level: "INFO",  category: "auth",       msg: () => "Strikes removed by an administrator" },
   signup:                   { level: "INFO",  category: "auth",       msg: (d) => `Created an account${d.role ? ` (${d.role})` : ""}` },
+  instructor_registered:    { level: "INFO",  category: "auth",       msg: () => "Instructor account registered by an administrator" },
   email_verified:           { level: "INFO",  category: "auth",       msg: () => "Verified email address" },
   password_reset_requested: { level: "INFO",  category: "auth",       msg: () => "Requested a password reset" },
 

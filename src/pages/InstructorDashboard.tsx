@@ -8,6 +8,7 @@ import {
 import { NODE_API as BACKEND } from "../lib/config";
 import { reportEvent } from "../lib/activity";
 import LogViewer from "../components/LogViewer";
+import PromptHistory, { type PromptEntry, type PromptFocus } from "../components/PromptHistory";
 
 type Student = {
   id: string;
@@ -90,15 +91,11 @@ export default function InstructorDashboard() {
   const [loadingFlagged,  setLoadingFlagged]  = useState(false);
   const [loadingInvites,  setLoadingInvites]  = useState(false);
 
-  type PromptEntry = {
-    id: string; student_name: string; student_email: string;
-    prompt_text: string; flag_reason: string | null; status: string | null;
-    created_at: string; source: "flagged" | "generated";
-    triggers?: Trigger[];
-  };
   const [prompts,        setPrompts]        = useState<PromptEntry[]>([]);
   const [loadingPrompts, setLoadingPrompts] = useState(false);
-  const [promptSearch,   setPromptSearch]   = useState("");
+  // Cross-links between the Activity Timeline and Prompts & Reviews
+  const [promptFocus,    setPromptFocus]    = useState<PromptFocus | null>(null);
+  const [timelineSearch, setTimelineSearch] = useState("");
 
 
   // Restrictions tab state
@@ -384,10 +381,10 @@ export default function InstructorDashboard() {
   const TABS: { id: Tab; label: string; icon: React.ReactNode; badge?: number }[] = [
     { id: "pending",      label: "Approvals",       icon: <Clock className="w-3.5 h-3.5" />,         badge: pendingCount },
     { id: "flagged",      label: "Flagged Prompts",  icon: <AlertTriangle className="w-3.5 h-3.5" />, badge: flaggedCount },
-    { id: "activity",     label: "Activity",         icon: <Activity className="w-3.5 h-3.5" /> },
+    { id: "activity",     label: "Activity Timeline", icon: <Activity className="w-3.5 h-3.5" /> },
     { id: "students",     label: "Students",         icon: <Users className="w-3.5 h-3.5" /> },
     { id: "invites",      label: "Invite Links",     icon: <LinkIcon className="w-3.5 h-3.5" /> },
-    { id: "prompts",      label: "Prompt History",   icon: <MessageSquare className="w-3.5 h-3.5" /> },
+    { id: "prompts",      label: "Prompts & Reviews", icon: <MessageSquare className="w-3.5 h-3.5" /> },
     { id: "restrictions", label: "Restrictions",     icon: <Shield className="w-3.5 h-3.5" /> },
   ];
 
@@ -438,14 +435,19 @@ export default function InstructorDashboard() {
         )}
 
         {tab === "flagged" && (
+          <div className="space-y-2">
+          <p className="text-xs text-gray-500">
+            Prompts waiting for <strong>your decision</strong>. Once you approve or reject one, it moves to{" "}
+            <button onClick={() => setTab("prompts")} className="font-medium text-purple-600 hover:underline">Prompts &amp; Reviews</button>.
+          </p>
           <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
             {loadingFlagged ? (
               <div className="py-16 text-center text-sm text-gray-400">Loading…</div>
-            ) : flagged.length === 0 ? (
-              <EmptyState icon={<AlertTriangle className="w-5 h-5 text-gray-300" />} text="No flagged prompts." />
+            ) : flagged.filter((f) => f.status === "pending").length === 0 ? (
+              <EmptyState icon={<CheckCircle className="w-5 h-5 text-gray-300" />} text="Nothing waiting for your decision." />
             ) : (
               <div className="divide-y divide-gray-50">
-                {flagged.map((fp) => (
+                {flagged.filter((f) => f.status === "pending").map((fp) => (
                   <div key={fp.id} className="px-5 py-4">
                     <div className="flex items-start justify-between gap-4">
                       <div className="flex-1 min-w-0">
@@ -495,12 +497,17 @@ export default function InstructorDashboard() {
               </div>
             )}
           </div>
+          </div>
         )}
 
         {tab === "activity" && (
           <LogViewer
+            key={timelineSearch}
             endpoint={`${BACKEND}/instructor/logs`}
-            scopeNote="Showing the activity of students enrolled in your classes. Click a row for full details."
+            scopeNote="What your students DID, in time order (students enrolled in your classes). What they typed is in Prompts & Reviews — use “View prompt” on a row. Click a row for full details."
+            hidePromptText
+            initialSearch={timelineSearch}
+            onViewPrompt={({ student, prompt }) => { setPromptFocus({ student: student ?? undefined, text: prompt }); setTab("prompts"); }}
           />
         )}
 
@@ -529,77 +536,12 @@ export default function InstructorDashboard() {
         )}
 
         {tab === "prompts" && (
-          <div className="space-y-4">
-            <div className="bg-white rounded-xl border border-gray-100 shadow-sm px-4 py-3 flex items-center gap-2">
-              <Search className="w-4 h-4 text-gray-400 flex-shrink-0" />
-              <input
-                type="text"
-                value={promptSearch}
-                onChange={(e) => setPromptSearch(e.target.value)}
-                placeholder="Search by student name or prompt text…"
-                className="flex-1 text-sm focus:outline-none bg-transparent"
-              />
-            </div>
-
-            <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
-              {loadingPrompts ? (
-                <div className="py-16 text-center text-sm text-gray-400">Loading prompt history…</div>
-              ) : prompts.length === 0 ? (
-                <EmptyState icon={<MessageSquare className="w-5 h-5 text-gray-300" />} text="No prompts recorded yet." />
-              ) : (() => {
-                const filtered = prompts.filter((p) => {
-                  const q = promptSearch.toLowerCase();
-                  return !q || p.student_name?.toLowerCase().includes(q) || p.prompt_text?.toLowerCase().includes(q);
-                });
-                return filtered.length === 0 ? (
-                  <EmptyState icon={<Search className="w-5 h-5 text-gray-300" />} text="No results match your search." />
-                ) : (
-                  <div className="divide-y divide-gray-50">
-                    {filtered.map((p) => (
-                      <div key={p.id} className="px-5 py-4">
-                        <div className="flex items-start justify-between gap-4 mb-1.5">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <span className="text-sm font-medium text-gray-900">{p.student_name}</span>
-                            <span className="text-xs text-gray-400">{p.student_email}</span>
-                            {p.source === "flagged" ? (
-                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-red-50 text-red-600 border border-red-100">
-                                <AlertTriangle className="w-3 h-3" /> Flagged
-                              </span>
-                            ) : (
-                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-green-50 text-green-600 border border-green-100">
-                                <CheckCircle className="w-3 h-3" /> Successful
-                              </span>
-                            )}
-                          </div>
-                          <span className="text-xs text-gray-400 whitespace-nowrap flex-shrink-0">
-                            {new Date(p.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "2-digit", minute: "2-digit" })}
-                          </span>
-                        </div>
-                        {p.source === "flagged" && p.flag_reason && (
-                          <p className="text-xs text-amber-700 mb-1">
-                            <span className="font-medium">Flag reason:</span> {p.flag_reason}
-                          </p>
-                        )}
-                        <div className="bg-gray-50 border border-gray-100 rounded-lg px-3 py-2 text-xs text-gray-700 leading-relaxed">
-                          {p.prompt_text}
-                        </div>
-                        {(p.triggers?.length ?? 0) > 0 && (
-                          <div className="flex flex-wrap items-center gap-1 mt-1.5 text-[11px]">
-                            <span className="text-gray-400">Trigger words:</span>
-                            {p.triggers!.map((t, i) => (
-                              <span key={i} className="px-1.5 py-0.5 rounded border bg-red-50 border-red-200 text-red-700">
-                                "{t.term}" ← "{t.matched}" · L{t.level}
-                              </span>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                );
-              })()}
-            </div>
-          </div>
+          <PromptHistory
+            entries={prompts}
+            loading={loadingPrompts}
+            focus={promptFocus}
+            onViewTimeline={(e) => { setTimelineSearch(e.student_name ?? ""); setTab("activity"); }}
+          />
         )}
 
         {tab === "restrictions" && (

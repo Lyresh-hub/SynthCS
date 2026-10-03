@@ -1440,6 +1440,93 @@ app.get("/api/admin/analytics", requireAdmin, async (req, res) => {
   }
 });
 
+// ── Admin: register an instructor account ─────────────────────────────────────
+// The admin creates the account (already verified + approved) with a temporary
+// password and hands it to the instructor in person; the instructor can change
+// it later with "Forgot password". The welcome email never contains the password.
+async function sendInstructorWelcomeEmail(to, fullName) {
+  const sender = process.env.GMAIL_SENDER || "christianboluntate5@gmail.com";
+  const frontendUrl = process.env.FRONTEND_URL || "http://localhost:5173";
+  const htmlBody = `
+    <div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:32px 24px">
+      <h2 style="color:#6d28d9;margin-bottom:8px">Your SynthCS instructor account is ready</h2>
+      <p style="color:#374151;font-size:15px;line-height:1.6">Hi <strong>${fullName}</strong>,</p>
+      <p style="color:#374151;font-size:15px;line-height:1.6">
+        An administrator has created an <strong>instructor account</strong> for you on SynthCS.
+        Your administrator will give you your temporary password. After signing in, you can set your own
+        password with <em>Forgot password</em> on the login page.
+      </p>
+      <a href="${frontendUrl}/login"
+         style="display:inline-block;margin:24px 0;padding:12px 28px;background:#7c3aed;color:#fff;
+                border-radius:8px;text-decoration:none;font-weight:600;font-size:14px">
+        Sign in to SynthCS
+      </a>
+      <p style="color:#9ca3af;font-size:12px">If you weren't expecting this, contact your SynthCS administrator.</p>
+    </div>`;
+  const rawEmail = [
+    `From: SynthCS <${sender}>`,
+    `To: ${to}`,
+    `Subject: Your SynthCS instructor account is ready`,
+    `MIME-Version: 1.0`,
+    `Content-Type: text/html; charset=UTF-8`,
+    ``,
+    htmlBody,
+  ].join("\r\n");
+  const encoded = Buffer.from(rawEmail).toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  const accessToken = await getGmailAccessToken();
+  const gmailRes = await fetch("https://gmail.googleapis.com/gmail/v1/users/me/messages/send", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ raw: encoded }),
+  });
+  if (!gmailRes.ok) throw new Error(`Gmail API error ${gmailRes.status}: ${await gmailRes.text()}`);
+}
+
+app.post("/api/admin/instructors", requireAdmin, async (req, res) => {
+  // The logged-in admin (token) must be the admin in the request
+  const caller = authUser(req);
+  if (!caller || caller.role !== "admin") return res.status(403).json({ error: "forbidden", message: "Only administrators can register instructors." });
+
+  const first_name = String(req.body.first_name ?? "").trim();
+  const last_name  = String(req.body.last_name ?? "").trim();
+  const email      = String(req.body.email ?? "").trim().toLowerCase();
+  const password   = String(req.body.password ?? "");
+  if (!first_name || !last_name) return res.status(400).json({ error: "First and last name are required." });
+  if (!isAllowedEmail(email)) return res.status(400).json({ error: "Use a Gordon College email address (@gordoncollege.edu.ph)." });
+  if (password.length < 8) return res.status(400).json({ error: "The temporary password must be at least 8 characters." });
+
+  try {
+    const existing = await pool.query("SELECT id, is_instructor FROM users WHERE LOWER(email) = $1", [email]);
+    if (existing.rows.length) {
+      return res.status(409).json({
+        error: existing.rows[0].is_instructor
+          ? "This email is already registered as an instructor."
+          : "This email already has a student account. Use \"Make Instructor\" on that user instead.",
+      });
+    }
+    const full_name = `${first_name} ${last_name}`;
+    const hashed = await bcrypt.hash(password, 10);
+    const created = await pool.query(
+      `INSERT INTO users (first_name, last_name, full_name, email, password, email_verified, is_instructor, approval_status, tour_done)
+       VALUES ($1, $2, $3, $4, $5, TRUE, TRUE, 'approved', FALSE)
+       RETURNING id, full_name, email, created_at`,
+      [first_name, last_name, full_name, email, hashed]
+    );
+    const instructor = created.rows[0];
+    logActivity(instructor.id, "instructor_registered", { by_admin: caller.id, email });
+
+    let emailed = false;
+    if (EMAIL_READY) {
+      try { await sendInstructorWelcomeEmail(email, full_name); emailed = true; }
+      catch (e) { reportEmailFailure("Instructor welcome email", e, instructor.id); }
+    }
+    res.status(201).json({ ...instructor, emailed });
+  } catch (err) {
+    console.error("Register instructor error:", err.message);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
 app.get("/api/admin/users", requireAdmin, async (req, res) => {
   try {
     const result = await pool.query(`
@@ -2830,57 +2917,203 @@ app.get("/instructor/activity", async (req, res) => {
   }
 });
 
-// ── Instructor: full prompt history (flagged + successful) ───────────────────
-app.get("/instructor/prompt-history", async (req, res) => {
-  const { instructor_id } = req.query;
-  if (!instructor_id) return res.status(400).json({ error: "instructor_id required" });
+// ── Instructor: Prompts & Reviews (detailed prompt history) ───────────────────
+// One entry per prompt a student typed, with everything that followed it:
+//   - the reason they declared (type of data + intended use, from the Purpose pop-up)
+//   - the review outcome if it was flagged (pending / approved / rejected / blocked,
+//     who decided and when, the trigger words matched)
+//   - the datasets used/generated, downloads/exports, saved schemas, failures
+// Follow-up actions are tied to a prompt by time: everything the student did after
+// a prompt, until they typed a DIFFERENT prompt (or 24 h passed), belongs to it.
+// Repeats of the same prompt within 30 minutes are steps of one entry
+// (e.g. AI search → schema generated). Only students enrolled (approved) in the
+// instructor's classes are included; the instructor comes from the login token.
+const PROMPT_EVENT_TYPES = ["dataset_search", "ai_search", "schema_generated", "prompt_flagged", "prompt_blocked"];
+const FOLLOW_UP_TYPES = [
+  "dataset_generated", "dataset_downloaded", "dataset_exported", "schema_saved",
+  "dataset_previewed", "generation_failed", "locked_dataset_access",
+];
+const PROMPT_TYPE_LABEL = {
+  dataset_search: "Dataset search", ai_search: "AI search", schema_generated: "AI schema",
+  prompt_flagged: "Flagged", prompt_blocked: "Blocked",
+};
+
+function sourceLabel(d) {
+  const src = String(d.source ?? "").toLowerCase();
+  const named = ["kaggle", "hugging face", "huggingface", "uci", "openml", "data.gov.ph", "psa"].find((s) => src.includes(s));
+  if (named) return String(d.source);                       // e.g. "Kaggle", "Hugging Face"
+  if (d.kaggle_ref || src === "external") return "Real dataset";   // source dataset used, provider not named
+  if (src === "multi-table") return "Multi-table (schema)";
+  if (src === "llm") return "AI-generated";
+  return d.source ? String(d.source) : "Unknown";
+}
+
+app.get("/instructor/prompt-history", requireAuth, async (req, res) => {
+  if (req.user.role !== "instructor" && req.user.role !== "admin") {
+    return res.status(403).json({ error: "forbidden", message: "Only instructors can view prompt history." });
+  }
+  const instructorId = req.user.id;
   try {
-    const ins = await pool.query("SELECT full_name FROM users WHERE id = $1", [instructor_id]);
-    if (!ins.rows.length) return res.status(404).json({ error: "Instructor not found" });
-    const instructorName = ins.rows[0].full_name;
-
-    const inClass = `(
-      u.instructor = $1
-      OR EXISTS (
-        SELECT 1 FROM student_classes sc
-        WHERE sc.student_id = u.id AND sc.instructor_id = $2 AND sc.status = 'approved'
-      )
-    )`;
-
-    // Flagged prompts
-    const flagged = await pool.query(
-      `SELECT fp.id, u.full_name AS student_name, u.email AS student_email,
-              fp.prompt_text, fp.flag_reason, fp.status, fp.created_at,
-              'flagged' AS source
-       FROM flagged_prompts fp
-       JOIN users u ON u.id = fp.student_id
-       WHERE ${inClass}
-       ORDER BY fp.created_at DESC`,
-      [instructorName, instructor_id]
+    const studentsRes = await pool.query(
+      "SELECT DISTINCT student_id FROM student_classes WHERE instructor_id = $1 AND status = 'approved'",
+      [instructorId]
     );
+    const studentIds = studentsRes.rows.map((r) => r.student_id);
+    if (!studentIds.length) return res.json([]);
 
-    // Searches and successful schema generation prompts from activity_log
-    const generated = await pool.query(
-      `SELECT al.id, u.full_name AS student_name, u.email AS student_email,
-              al.details->>'prompt_text' AS prompt_text,
-              NULL AS flag_reason, NULL AS status, al.created_at,
-              'generated' AS source
-       FROM activity_log al
-       JOIN users u ON u.id = al.user_id
-       WHERE ${inClass}
-         AND al.action_type IN ('schema_generated', 'dataset_search', 'ai_search')
-         AND al.details->>'prompt_text' IS NOT NULL
-       ORDER BY al.created_at DESC`,
-      [instructorName, instructor_id]
-    );
+    const [eventsRes, flagsRes] = await Promise.all([
+      pool.query(
+        `SELECT al.id, al.user_id, al.action_type, al.details, al.created_at,
+                u.full_name AS student_name, u.email AS student_email
+         FROM activity_log al JOIN users u ON u.id = al.user_id
+         WHERE al.user_id = ANY($1) AND al.action_type = ANY($2)
+           AND al.created_at > NOW() - INTERVAL '180 days'
+         ORDER BY al.user_id, al.created_at ASC
+         LIMIT 20000`,
+        [studentIds, [...PROMPT_EVENT_TYPES, ...FOLLOW_UP_TYPES]]
+      ),
+      pool.query(
+        `SELECT fp.id, fp.student_id, fp.prompt_text, fp.status, fp.flag_reason, fp.detection, fp.context,
+                fp.created_at, fp.reviewed_at, rv.full_name AS reviewer_name
+         FROM flagged_prompts fp LEFT JOIN users rv ON rv.id = fp.reviewed_by
+         WHERE fp.student_id = ANY($1)`,
+        [studentIds]
+      ),
+    ]);
 
-    // Merge and sort by created_at descending
-    const combined = [...flagged.rows, ...generated.rows].sort(
-      (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-    );
+    const norm = (t) => String(t ?? "").trim().toLowerCase();
+    const flagsByStudent = new Map();
+    for (const f of flagsRes.rows) {
+      if (!flagsByStudent.has(f.student_id)) flagsByStudent.set(f.student_id, []);
+      flagsByStudent.get(f.student_id).push(f);
+    }
+    const findFlag = (studentId, text, at) => {
+      const list = (flagsByStudent.get(studentId) ?? []).filter((f) => norm(f.prompt_text) === norm(text));
+      if (!list.length) return null;
+      // the review opened closest to this prompt
+      return list.reduce((best, f) =>
+        Math.abs(new Date(f.created_at) - at) < Math.abs(new Date(best.created_at) - at) ? f : best);
+    };
 
-    const restrictions = await loadClassRestrictions(instructor_id);
-    res.json(combined.map((row) => ({ ...row, triggers: promptTriggers(row.prompt_text, restrictions) })));
+    const restrictions = await loadClassRestrictions(instructorId);
+    const entries = [];
+    let current = null;
+    let currentUser = null;
+
+    const startEntry = (ev) => ({
+      id: ev.id,
+      student_id: ev.user_id,
+      student_name: ev.student_name,
+      student_email: ev.student_email,
+      prompt_text: ev.details?.prompt_text ?? "",
+      started_at: ev.created_at,
+      last_at: ev.created_at,
+      steps: [],
+      prompt_types: [],
+      category: null,
+      purpose: null,
+      flagged: false,
+      blocked: false,
+      review: null,
+      datasets: [],
+      downloads: [],
+      saved: [],
+      previews: 0,
+      failures: [],
+      locked_attempts: 0,
+    });
+
+    for (const ev of eventsRes.rows) {
+      if (ev.user_id !== currentUser) { current = null; currentUser = ev.user_id; }
+      const d = ev.details ?? {};
+      const at = new Date(ev.created_at);
+
+      if (PROMPT_EVENT_TYPES.includes(ev.action_type)) {
+        const text = d.prompt_text ?? "";
+        const sameAsCurrent = current && norm(current.prompt_text) === norm(text) && at - new Date(current.last_at) < 30 * 60 * 1000;
+        if (!sameAsCurrent) { current = startEntry(ev); entries.push(current); }
+        current.last_at = ev.created_at;
+        current.steps.push({ type: ev.action_type, label: PROMPT_TYPE_LABEL[ev.action_type], at: ev.created_at, table_name: d.table_name ?? null });
+        if (!["prompt_flagged", "prompt_blocked"].includes(ev.action_type) && !current.prompt_types.includes(PROMPT_TYPE_LABEL[ev.action_type])) {
+          current.prompt_types.push(PROMPT_TYPE_LABEL[ev.action_type]);
+        }
+        if (d.category && !current.category) current.category = d.category;
+        if (d.purpose && !current.purpose) current.purpose = d.purpose;
+        if (ev.action_type === "prompt_flagged") {
+          current.flagged = true;
+          const f = findFlag(ev.user_id, text, at);
+          if (f) {
+            current.review = {
+              id: f.id, status: f.status, reason: f.flag_reason, reviewer: f.reviewer_name,
+              reviewed_at: f.reviewed_at, flagged_at: f.created_at,
+              matches: (f.detection?.matches ?? []).filter((m) => m.action !== "exempt")
+                .map((m) => ({ level: m.level, term: m.term, matched: m.matched })),
+              ai: f.detection?.ai?.status === "unsafe" ? f.detection.ai.reason : null,
+            };
+            if (!current.prompt_types.length && f.context) {
+              current.prompt_types.push(PROMPT_TYPE_LABEL[f.context] ?? (f.context === "generate" ? "Generation" : f.context));
+            }
+          }
+        }
+        if (ev.action_type === "prompt_blocked") current.blocked = true;
+        continue;
+      }
+
+      // Follow-up action: belongs to the student's latest prompt (within 24 h)
+      if (!current || at - new Date(current.started_at) > 24 * 60 * 60 * 1000) continue;
+      if (ev.action_type === "dataset_generated") {
+        current.datasets.push({
+          name: d.table_name ?? "dataset", rows: d.rows ?? null, source: sourceLabel(d),
+          reference: d.kaggle_ref ?? null, locked: !!d.locked, at: ev.created_at,
+        });
+        if (d.category && !current.category) current.category = d.category;
+        if (d.purpose && !current.purpose) current.purpose = d.purpose;
+      } else if (ev.action_type === "dataset_downloaded" || ev.action_type === "dataset_exported") {
+        current.downloads.push({
+          name: d.table_name ?? "dataset",
+          format: ev.action_type === "dataset_exported" ? String(d.format ?? "").toUpperCase() || "file" : "CSV",
+          at: ev.created_at,
+        });
+      } else if (ev.action_type === "schema_saved") {
+        current.saved.push({ name: d.schema_name ?? "schema", at: ev.created_at });
+      } else if (ev.action_type === "dataset_previewed") {
+        current.previews += 1;
+      } else if (ev.action_type === "generation_failed") {
+        current.failures.push({ stage: d.stage ?? null, error: String(d.error ?? "").slice(0, 200), at: ev.created_at });
+      } else if (ev.action_type === "locked_dataset_access") {
+        current.locked_attempts += 1;
+      }
+    }
+
+    // Flags that never produced a prompt_flagged log (older data) still appear
+    const seenFlagIds = new Set(entries.map((e) => e.review?.id).filter(Boolean));
+    for (const f of flagsRes.rows) {
+      if (seenFlagIds.has(f.id)) continue;
+      const stu = eventsRes.rows.find((e) => e.user_id === f.student_id);
+      const student = stu ?? (await pool.query("SELECT full_name AS student_name, email AS student_email FROM users WHERE id = $1", [f.student_id])).rows[0] ?? {};
+      entries.push({
+        id: f.id, student_id: f.student_id, student_name: student.student_name, student_email: student.student_email,
+        prompt_text: f.prompt_text, started_at: f.created_at, last_at: f.created_at,
+        steps: [{ type: "prompt_flagged", label: "Flagged", at: f.created_at }],
+        prompt_types: f.context ? [PROMPT_TYPE_LABEL[f.context] ?? f.context] : [],
+        category: null, purpose: null, flagged: true, blocked: false,
+        review: { id: f.id, status: f.status, reason: f.flag_reason, reviewer: f.reviewer_name, reviewed_at: f.reviewed_at, flagged_at: f.created_at,
+                  matches: (f.detection?.matches ?? []).filter((m) => m.action !== "exempt").map((m) => ({ level: m.level, term: m.term, matched: m.matched })),
+                  ai: f.detection?.ai?.status === "unsafe" ? f.detection.ai.reason : null },
+        datasets: [], downloads: [], saved: [], previews: 0, failures: [], locked_attempts: 0,
+      });
+    }
+
+    const result = entries
+      .map((e) => ({
+        ...e,
+        status: e.blocked ? "blocked" : e.flagged ? (e.review?.status ?? "pending") : "allowed",
+        triggers: promptTriggers(e.prompt_text, restrictions),
+      }))
+      .sort((a, b) => new Date(b.started_at) - new Date(a.started_at))
+      .slice(0, 500);
+
+    res.json(result);
   } catch (err) {
     console.error("Prompt history error:", err.message);
     res.status(500).json({ error: "Server error" });

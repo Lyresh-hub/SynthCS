@@ -3,6 +3,7 @@ import { useLocation } from "wouter";
 import {
   Trash2, BadgeCheck, ShieldAlert, Search, RefreshCw, Ban, ShieldCheck,
   Archive, RotateCcw, AlertTriangle, Clock, Mail, Users, GraduationCap, UserCheck, Zap,
+  UserPlus, Copy, Check, X, KeyRound,
 } from "lucide-react";
 import { NODE_API } from "../lib/config";
 
@@ -192,6 +193,128 @@ function PermanentDeleteModal({
   );
 }
 
+// ── Register Instructor ───────────────────────────────────────────────────────
+// Admin creates an instructor account (verified + approved) with a temporary
+// password, then sees the login details ONCE to hand to the instructor.
+function generateTempPassword(): string {
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789";
+  const bytes = new Uint32Array(12);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (b) => chars[b % chars.length]).join("") + "!";
+}
+
+function RegisterInstructorModal({ adminId, onClose, onCreated }: { adminId: string; onClose: () => void; onCreated: () => void }) {
+  const [firstName, setFirstName] = useState("");
+  const [lastName,  setLastName]  = useState("");
+  const [email,     setEmail]     = useState("");
+  const [password,  setPassword]  = useState(() => generateTempPassword());
+  const [saving,    setSaving]    = useState(false);
+  const [error,     setError]     = useState("");
+  const [created,   setCreated]   = useState<{ full_name: string; email: string; emailed: boolean } | null>(null);
+  const [copied,    setCopied]    = useState(false);
+
+  async function submit() {
+    setError("");
+    if (!firstName.trim() || !lastName.trim()) { setError("Enter the instructor's first and last name."); return; }
+    if (!email.trim().toLowerCase().endsWith("@gordoncollege.edu.ph")) { setError("Use a Gordon College email (@gordoncollege.edu.ph)."); return; }
+    if (password.length < 8) { setError("The temporary password must be at least 8 characters."); return; }
+    setSaving(true);
+    try {
+      const res = await fetch(`${NODE_API}/api/admin/instructors?admin_id=${adminId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ admin_id: adminId, first_name: firstName, last_name: lastName, email, password }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) { setError(data.error || data.message || "Could not register the instructor."); return; }
+      setCreated({ full_name: data.full_name, email: data.email, emailed: !!data.emailed });
+      onCreated();
+    } catch {
+      setError("Could not reach the server. Please try again.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function copyDetails() {
+    if (!created) return;
+    navigator.clipboard.writeText(`SynthCS instructor login\nEmail: ${created.email}\nTemporary password: ${password}\nSign in: ${window.location.origin}/login`)
+      .then(() => { setCopied(true); setTimeout(() => setCopied(false), 2000); })
+      .catch(() => {});
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-md">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+          <div className="flex items-center gap-2">
+            <UserPlus className="w-4 h-4 text-purple-600" />
+            <h2 className="text-base font-semibold text-gray-900">Register Instructor</h2>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X className="w-4 h-4" /></button>
+        </div>
+
+        {created ? (
+          <div className="px-6 py-5 space-y-4">
+            <div className="flex items-start gap-2 rounded-lg bg-green-50 border border-green-200 px-3 py-2.5">
+              <Check className="w-4 h-4 text-green-600 mt-0.5 flex-shrink-0" />
+              <p className="text-xs text-green-800">
+                <strong>{created.full_name}</strong> can now sign in as an instructor.
+                {created.emailed ? " A welcome email was sent (it does not include the password)." : ""}
+              </p>
+            </div>
+            <div className="rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 space-y-1.5 text-sm">
+              <div className="flex justify-between gap-3"><span className="text-gray-500">Email</span><span className="font-medium text-gray-800 break-all">{created.email}</span></div>
+              <div className="flex justify-between gap-3"><span className="text-gray-500">Temporary password</span><span className="font-mono font-semibold text-gray-900">{password}</span></div>
+            </div>
+            <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+              This password is shown only once. Give it to the instructor privately; they can change it later with
+              "Forgot password" on the login page.
+            </p>
+            <div className="flex gap-2">
+              <button onClick={copyDetails} className="flex-1 inline-flex items-center justify-center gap-1.5 px-4 py-2 border border-gray-200 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50">
+                {copied ? <><Check className="w-4 h-4 text-green-600" /> Copied</> : <><Copy className="w-4 h-4" /> Copy login details</>}
+              </button>
+              <button onClick={onClose} className="flex-1 px-4 py-2 bg-purple-600 text-white rounded-lg text-sm font-medium hover:bg-purple-700">Done</button>
+            </div>
+          </div>
+        ) : (
+          <div className="px-6 py-5 space-y-3">
+            <div className="grid grid-cols-2 gap-3">
+              <label className="text-xs font-medium text-gray-600">First name
+                <input value={firstName} onChange={(e) => setFirstName(e.target.value)} className="mt-1 w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500" />
+              </label>
+              <label className="text-xs font-medium text-gray-600">Last name
+                <input value={lastName} onChange={(e) => setLastName(e.target.value)} className="mt-1 w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500" />
+              </label>
+            </div>
+            <label className="block text-xs font-medium text-gray-600">Gordon College email
+              <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="name@gordoncollege.edu.ph" className="mt-1 w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500" />
+            </label>
+            <label className="block text-xs font-medium text-gray-600">Temporary password
+              <div className="mt-1 flex gap-2">
+                <input value={password} onChange={(e) => setPassword(e.target.value)} className="flex-1 border border-gray-200 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-purple-500" />
+                <button type="button" onClick={() => setPassword(generateTempPassword())} title="Generate a new password"
+                  className="inline-flex items-center gap-1 px-3 py-2 border border-gray-200 rounded-lg text-xs text-gray-600 hover:bg-gray-50">
+                  <KeyRound className="w-3.5 h-3.5" /> Generate
+                </button>
+              </div>
+            </label>
+            {error && <p className="text-xs text-red-600">{error}</p>}
+            <p className="text-[11px] text-gray-400">The account is created already verified and approved, so the instructor can sign in right away.</p>
+            <div className="flex gap-2 pt-1">
+              <button onClick={onClose} className="flex-1 px-4 py-2 border border-gray-200 rounded-lg text-sm text-gray-600 hover:bg-gray-50">Cancel</button>
+              <button onClick={submit} disabled={saving} className="flex-1 px-4 py-2 bg-purple-600 text-white rounded-lg text-sm font-medium hover:bg-purple-700 disabled:opacity-60">
+                {saving ? "Registering…" : "Register Instructor"}
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function AdminUsers() {
   const [, setLocation] = useLocation();
   const adminId     = localStorage.getItem("user_id") ?? "";
@@ -205,6 +328,7 @@ export default function AdminUsers() {
   const [search,   setSearch]   = useState("");
 
   const [scheduleTarget,     setScheduleTarget]     = useState<AdminUser | null>(null);
+  const [showRegister,       setShowRegister]       = useState(false);
   const [permDeleteTarget,   setPermDeleteTarget]   = useState<ArchivedUser | null>(null);
 
   useEffect(() => {
@@ -414,8 +538,15 @@ export default function AdminUsers() {
               <button onClick={loadAll} title="Refresh" className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors">
                 <RefreshCw className="w-4 h-4 text-gray-500" />
               </button>
+              <button onClick={() => setShowRegister(true)}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-purple-600 text-white rounded-lg text-xs font-medium hover:bg-purple-700 transition-colors whitespace-nowrap">
+                <UserPlus className="w-3.5 h-3.5" /> Register Instructor
+              </button>
             </div>
           </div>
+          {showRegister && (
+            <RegisterInstructorModal adminId={adminId} onClose={() => setShowRegister(false)} onCreated={loadAll} />
+          )}
 
           <div className="overflow-x-auto">
             <table className="w-full text-sm">

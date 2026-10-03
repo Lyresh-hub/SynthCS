@@ -54,6 +54,17 @@ const RANGES = [
 
 const HIDDEN_DETAIL_KEYS = new Set(["triggers", "client", "page"]);
 
+// Instructor timeline shows WHAT happened; the prompt itself lives in Prompts & Reviews
+const PROMPT_ACTION_LABEL: Record<string, string> = {
+  dataset_search: "Searched datasets",
+  ai_search: "AI search",
+  search_no_results: "Search found no datasets",
+  schema_generated: "Generated a schema",
+  prompt_flagged: "Prompt flagged for review",
+  prompt_blocked: "Prompt blocked by a class trigger word",
+  prompt_resubmitted_rejected: "Resubmitted a rejected prompt",
+};
+
 function formatTime(iso: string) {
   return new Date(iso).toLocaleString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
@@ -65,7 +76,17 @@ function formatValue(key: string, v: unknown): string {
   return String(v);
 }
 
-export default function LogViewer({ endpoint, scopeNote }: { endpoint: string; scopeNote?: string }) {
+export default function LogViewer({
+  endpoint, scopeNote, hidePromptText = false, onViewPrompt, initialSearch = "",
+}: {
+  endpoint: string;
+  scopeNote?: string;
+  /** Replace prompt text with a short action label + "View prompt" link (instructor timeline) */
+  hidePromptText?: boolean;
+  onViewPrompt?: (log: { student: string | null; prompt: string }) => void;
+  /** Pre-fill the search box (e.g. arriving from a prompt card) */
+  initialSearch?: string;
+}) {
   const [logs, setLogs]         = useState<LogEntry[]>([]);
   const [counts, setCounts]     = useState<Record<LogLevel, number>>({ INFO: 0, WARN: 0, ERROR: 0 });
   const [loading, setLoading]   = useState(true);
@@ -73,7 +94,7 @@ export default function LogViewer({ endpoint, scopeNote }: { endpoint: string; s
   const [levels, setLevels]     = useState<LogLevel[]>([]);          // empty = all
   const [category, setCategory] = useState("");
   const [since, setSince]       = useState("7d");
-  const [search, setSearch]     = useState("");
+  const [search, setSearch]     = useState(initialSearch);
   const [query, setQuery]       = useState("");                      // debounced search
   const [order, setOrder]       = useState<"newest" | "oldest">("newest");
   const [live, setLive]         = useState(false);
@@ -202,7 +223,11 @@ export default function LogViewer({ endpoint, scopeNote }: { endpoint: string; s
                 {shown.map((l) => {
                   const st = LEVEL_STYLE[l.level] ?? LEVEL_STYLE.INFO;
                   const open = expanded === l.id;
-                  const detailEntries = Object.entries(l.details ?? {}).filter(([k]) => !HIDDEN_DETAIL_KEYS.has(k));
+                  const promptText = typeof l.details?.prompt_text === "string" ? l.details.prompt_text : "";
+                  const maskPrompt = hidePromptText && !!promptText;
+                  const message = maskPrompt ? (PROMPT_ACTION_LABEL[l.action_type] ?? "Used a prompt") : l.message;
+                  const detailEntries = Object.entries(l.details ?? {})
+                    .filter(([k]) => !HIDDEN_DETAIL_KEYS.has(k) && !(maskPrompt && k === "prompt_text"));
                   return (
                     <Fragment key={l.id}>
                       <tr onClick={() => setExpanded(open ? null : l.id)} className={`cursor-pointer hover:bg-gray-50/70 ${st.row}`}>
@@ -222,7 +247,15 @@ export default function LogViewer({ endpoint, scopeNote }: { endpoint: string; s
                           )}
                         </td>
                         <td className="px-3 py-2.5 text-xs text-gray-700">
-                          <span className="line-clamp-2">{l.message}</span>
+                          <span className="line-clamp-2">{message}</span>
+                          {maskPrompt && onViewPrompt && (
+                            <button
+                              onClick={(ev) => { ev.stopPropagation(); onViewPrompt({ student: l.actor_name, prompt: promptText }); }}
+                              className="mt-0.5 text-[11px] font-medium text-purple-600 hover:text-purple-800 hover:underline"
+                            >
+                              View prompt →
+                            </button>
+                          )}
                           {(l.triggers?.length ?? 0) > 0 && (
                             <span className="mt-1 inline-flex flex-wrap gap-1">
                               {l.triggers!.map((t, i) => (
