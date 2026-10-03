@@ -328,6 +328,28 @@ def _claim_dataset(dataset_path: str, authorization: str | None) -> None:
         raise HTTPException(status_code=403, detail={"error": "not_owner", "message": "This dataset belongs to another user."})
 
 
+def _require_quota(authorization: str | None) -> None:
+    """Refuse a dataset generation when the student has used today's quota.
+    The quota itself lives in Node (instructor restrictions); if Node can't be
+    reached we let the generation go ahead rather than block the whole class."""
+    user = _require_caller(authorization)
+    if user.get("role") != "student":
+        return
+    try:
+        status, body = _node_get("/api/student/quota?check=1", authorization or "")
+    except Exception as e:
+        print(f"[quota] check failed, allowing generation: {e}")
+        return
+    if status == 200 and body.get("limit") is not None and (body.get("remaining") or 0) <= 0:
+        limit = body["limit"]
+        raise HTTPException(status_code=429, detail={
+            "error": "quota_exceeded",
+            "limit": limit, "used": body.get("used"),
+            "message": f"You've reached your daily limit of {limit} dataset generation{'s' if limit != 1 else ''}. "
+                       "It resets at midnight (Philippine time).",
+        })
+
+
 def _require_owner_access(dataset_id: str, authorization: str | None) -> None:
     """For endpoints that serve data: only the owner (or an admin) may read it."""
     user = _require_caller(authorization)
@@ -605,6 +627,7 @@ def generate(req: GenerateRequest, authorization: str | None = Header(default=No
         raise HTTPException(status_code=400, detail="row_count must be between 1000 and 100000.")
 
     _claim_dataset(dataset_path, authorization)
+    _require_quota(authorization)   # daily generation limit (server-side)
     _lock_for_review(dataset_path, req.review_id)
     changes = [c.model_dump() for c in req.changes]
 
@@ -1434,6 +1457,7 @@ def generate_multi_table(req: MultiTableRequest, authorization: str | None = Hea
 
     if not req.tables:
         raise HTTPException(status_code=400, detail="No tables provided.")
+    _require_quota(authorization)   # daily generation limit (server-side)
 
     table_names = {t.name for t in req.tables}
 
@@ -1667,6 +1691,7 @@ def expand_with_ctgan(req: ExpandRequest, authorization: str | None = Header(def
         raise HTTPException(status_code=400, detail="row_count must be between 1,000 and 100,000.")
 
     _claim_dataset(dataset_path, authorization)
+    _require_quota(authorization)   # daily generation limit (server-side)
     _lock_for_review(dataset_path, req.review_id)
     try:
         expand_template_with_ctgan(dataset_path, req.row_count)
@@ -2011,6 +2036,7 @@ def generate_hybrid(req: HybridGenerateRequest, authorization: str | None = Head
         raise HTTPException(status_code=400, detail="row_count must be between 1,000 and 100,000.")
 
     _claim_dataset(dataset_path, authorization)
+    _require_quota(authorization)   # daily generation limit (server-side)
     _lock_for_review(dataset_path, req.review_id)
     changes = [c.model_dump() for c in req.changes]
 

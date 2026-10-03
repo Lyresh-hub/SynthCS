@@ -70,7 +70,11 @@ async function parsePythonError(res: Response): Promise<string> {
   if (text.trimStart().startsWith("<") || text.includes("<!DOCTYPE") || text.includes("<html")) {
     return _SERVER_UNAVAIL;
   }
-  try { return JSON.parse(text)?.detail ?? text; } catch { return text; }
+  try {
+    const detail = JSON.parse(text)?.detail;
+    if (detail && typeof detail === "object") return detail.message ?? JSON.stringify(detail);
+    return detail ?? text;
+  } catch { return text; }
 }
 
 function sanitizeErrorMsg(msg: string): string {
@@ -615,6 +619,16 @@ export default function SchemaBuilder() {
   const [classRestrictions, setClassRestrictions] = useState<RestrictionEntry[]>([]);
   const [restrictionError, setRestrictionError]   = useState("");
 
+  // Daily generation quota (set by the instructor). Enforced on the server; shown here
+  // so the student knows how many dataset generations they have left today.
+  const [quota, setQuota] = useState<{ limit: number | null; used: number; remaining: number | null } | null>(null);
+  const refreshQuota = () =>
+    fetch(`${NODE_API}/api/student/quota`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((q) => { if (q) setQuota(q); })
+      .catch(() => {});
+  useEffect(() => { refreshQuota(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Relationships auto-detected between the tables of a downloaded/uploaded dataset
   const [detectedRelations, setDetectedRelations] = useState<DetectedRelation[]>([]);
 
@@ -733,19 +747,17 @@ export default function SchemaBuilder() {
   // steps that generate something — never for a plain dataset search.
   const runAfterPurpose = async (action: "search" | "template" | "expand" | "generate") => {
     if (action === "search") { handleSearch(); return; }
-    const quotaRule = classRestrictions.find((r) => r.restriction_type === "quota");
-    const studentId = localStorage.getItem("user_id");
-    if (quotaRule && studentId) {
+    // Only steps that produce a dataset use up the quota ("template" just builds a schema)
+    if (action === "generate" || action === "expand") {
       try {
-        const res = await fetch(`${NODE_API}/api/student/${studentId}/daily-count`);
-        const { count } = await res.json();
-        const limit = parseInt(quotaRule.value, 10);
-        if (count >= limit) {
-          setRestrictionError(`You have reached your daily generation limit of ${limit} dataset${limit !== 1 ? "s" : ""}. Try again tomorrow.`);
-          reportEvent("quota_reached", { limit, count });
+        const res = await fetch(`${NODE_API}/api/student/quota?check=1`);
+        const q = res.ok ? await res.json() : null;
+        if (q) setQuota(q);
+        if (q?.limit != null && q.remaining <= 0) {
+          setRestrictionError(`You've reached your daily limit of ${q.limit} dataset generation${q.limit !== 1 ? "s" : ""}. It resets at midnight (Philippine time).`);
           return;
         }
-      } catch { /* quota check failed silently — allow generation */ }
+      } catch { /* the server still enforces the limit when generating */ }
     }
     if (action === "template") handleLlmGenerate();
     else if (action === "expand") handleExpand();
@@ -3545,6 +3557,17 @@ export default function SchemaBuilder() {
               return <div className="flex items-center gap-1.5">{tags}</div>;
             })()}
             <div className="flex items-center gap-3">
+            {quota?.limit != null && (
+              <span
+                title="Set by your instructor. Every dataset you generate counts. Resets at midnight (Philippine time)."
+                className={`px-2.5 py-1 rounded-full text-[11px] font-medium border ${
+                  (quota.remaining ?? 0) === 0 ? "bg-red-50 text-red-700 border-red-200"
+                  : (quota.remaining ?? 0) <= 1 ? "bg-amber-50 text-amber-700 border-amber-200"
+                  : "bg-gray-50 text-gray-600 border-gray-200"}`}
+              >
+                {quota.remaining} of {quota.limit} generation{quota.limit !== 1 ? "s" : ""} left today
+              </span>
+            )}
             {/* Back to the result list this dataset was opened from — keeps the results */}
             {resultsBackPhase && (resultsBackPhase === "results" ? searchResults.length > 0 : smartResults.length > 0) && (
               <button

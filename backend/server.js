@@ -3240,16 +3240,57 @@ app.get("/api/class-restrictions", async (req, res) => {
 });
 
 // Daily generation count for quota enforcement
-app.get("/api/student/:id/daily-count", async (req, res) => {
+// ── Daily generation quota ────────────────────────────────────────────────────
+// Counts every dataset the student actually generated today (CTGAN from a real
+// dataset, AI schema → CTGAN, multi-table, own upload) — each is logged as
+// dataset_generated when it's saved. "Today" resets at midnight Philippine time.
+// A student in several classes gets the STRICTEST quota among their classes.
+// Enforced on the server: the Python service calls this (check=1) before it
+// starts any generation.
+const MANILA_DAY_START = `(date_trunc('day', NOW() AT TIME ZONE 'Asia/Manila') AT TIME ZONE 'Asia/Manila')`;
+const quotaLoggedAt = new Map();   // userId → last time we logged quota_reached
+
+async function getQuotaStatus(studentId) {
+  const [limitRes, usedRes, resetRes] = await Promise.all([
+    pool.query(
+      `SELECT MIN(NULLIF(regexp_replace(r.value, '[^0-9]', '', 'g'), '')::int) AS lim
+       FROM instructor_restrictions r
+       JOIN student_classes sc ON sc.instructor_id = r.instructor_id
+       WHERE sc.student_id = $1 AND sc.status = 'approved' AND r.restriction_type = 'quota'`,
+      [studentId]
+    ),
+    pool.query(
+      `SELECT COUNT(*)::int AS n FROM activity_log
+       WHERE user_id = $1 AND action_type = 'dataset_generated' AND created_at >= ${MANILA_DAY_START}`,
+      [studentId]
+    ),
+    pool.query(`SELECT (${MANILA_DAY_START} + INTERVAL '1 day') AS resets_at`),
+  ]);
+  const lim = limitRes.rows[0]?.lim;
+  const limit = Number.isInteger(lim) && lim > 0 ? lim : null;
+  const used = usedRes.rows[0]?.n ?? 0;
+  return {
+    limit,                                            // null = no quota set for this student's classes
+    used,
+    remaining: limit === null ? null : Math.max(0, limit - used),
+    resets_at: resetRes.rows[0]?.resets_at ?? null,
+  };
+}
+
+app.get("/api/student/quota", requireAuth, async (req, res) => {
   try {
-    const result = await pool.query(
-      `SELECT COUNT(*) FROM activity_log
-       WHERE user_id = $1 AND action_type = 'schema_generated'
-       AND created_at >= NOW() - INTERVAL '1 day'`,
-      [req.params.id]
-    );
-    res.json({ count: parseInt(result.rows[0].count, 10) });
-  } catch { res.status(500).json({ error: "Server error" }); }
+    const q = await getQuotaStatus(req.user.id);
+    // check=1 → a generation is about to start; log a WARN when it's refused (at most every 10 min)
+    if (req.query.check === "1" && q.limit !== null && q.remaining <= 0
+        && Date.now() - (quotaLoggedAt.get(req.user.id) ?? 0) > 10 * 60 * 1000) {
+      quotaLoggedAt.set(req.user.id, Date.now());
+      logActivity(req.user.id, "quota_reached", { limit: q.limit, used: q.used });
+    }
+    res.json(q);
+  } catch (err) {
+    console.error("Quota check error:", err.message);
+    res.status(500).json({ error: "Server error" });
+  }
 });
 
 // ── Moderation endpoints ──────────────────────────────────────────────────────
