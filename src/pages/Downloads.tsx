@@ -5,6 +5,7 @@ import ConfirmDialog from "../components/ConfirmDialog";
 
 import { NODE_API, PYTHON_API } from "../lib/config";
 import { reportEvent } from "../lib/activity";
+import { downloadWithAuth } from "../lib/authFetch";
 
 // TypeScript type para sa hugis ng dataset data mula sa backend
 interface Dataset {
@@ -242,15 +243,17 @@ export default function Downloads() {
                             >
                               <Eye className="w-3 h-3" /> Preview
                             </button>
-                            {/* Download link — direktang nagda-download ng file mula sa Python service */}
-                            <a
-                              href={`${PYTHON_API}/api/download/${ds.python_dataset_id}`}
-                              download
-                              onClick={() => reportEvent("dataset_downloaded", { table_name: ds.name, rows: ds.row_count, dataset_id: ds.id, source: ds.source })}
+                            {/* Download — fetched with the login token so only the owner can get the file */}
+                            <button
+                              onClick={() => {
+                                downloadWithAuth(`${PYTHON_API}/api/download/${ds.python_dataset_id}`, `${ds.name}.csv`)
+                                  .then(() => reportEvent("dataset_downloaded", { table_name: ds.name, rows: ds.row_count, dataset_id: ds.id, source: ds.source }))
+                                  .catch((e) => alert(e.message));
+                              }}
                               className="flex items-center gap-1 px-2.5 py-1 border border-gray-200 rounded-md text-xs font-medium text-gray-600 hover:bg-gray-50 transition-colors"
                             >
                               <Download className="w-3 h-3" /> Download
-                            </a>
+                            </button>
                           </>
                         ) : (
                           <span className="text-xs text-gray-300">No file</span>

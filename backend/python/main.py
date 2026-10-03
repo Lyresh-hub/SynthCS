@@ -37,7 +37,7 @@ from typing import Any
 from pathlib import Path
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, UploadFile, File
+from fastapi import FastAPI, HTTPException, UploadFile, File, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
@@ -223,6 +223,102 @@ def _require_review_access(dataset_id: str) -> None:
             })
 
 
+# ── Dataset ownership (who may read a dataset) ───────────────────────────────
+# The browser sends its login token as "Authorization: Bearer <token>". We ask
+# Node who that is (/api/auth/me — no secret needed here), record the owner in
+# owner.json when a dataset folder is created, and only serve a dataset to its
+# owner or an admin. Unknown/old folders are checked against Node's datasets table.
+
+_OWNER_FILE = "owner.json"
+_identity_cache: dict[str, tuple[float, dict]] = {}
+
+
+def _node_get(path: str, authorization: str) -> tuple[int, dict]:
+    import json as _json
+    import urllib.error
+    import urllib.request
+    req = urllib.request.Request(f"{_NODE_API_URL}{path}", headers={"Authorization": authorization})
+    try:
+        with urllib.request.urlopen(req, timeout=8) as r:
+            return r.status, _json.load(r)
+    except urllib.error.HTTPError as e:
+        try:
+            return e.code, _json.load(e)
+        except Exception:
+            return e.code, {}
+
+
+def _caller(authorization: str | None) -> dict | None:
+    """{id, role} of the logged-in caller, None when no/invalid token. Raises 503 if Node is unreachable."""
+    import time
+    if not authorization or not authorization.startswith("Bearer "):
+        return None
+    hit = _identity_cache.get(authorization)
+    if hit and hit[0] > time.time():
+        return hit[1]
+    try:
+        status, body = _node_get("/api/auth/me", authorization)
+    except Exception as e:
+        print(f"[auth] identity check failed: {e}")
+        raise HTTPException(status_code=503, detail={"error": "auth_unavailable", "message": "Could not verify your login right now. Please try again shortly."})
+    if status != 200 or not body.get("id"):
+        return None
+    if len(_identity_cache) > 2000:
+        _identity_cache.clear()
+    _identity_cache[authorization] = (time.time() + 120, body)
+    return body
+
+
+def _require_caller(authorization: str | None) -> dict:
+    user = _caller(authorization)
+    if not user:
+        raise HTTPException(status_code=401, detail={"error": "auth_required", "message": "Please log in to access datasets."})
+    return user
+
+
+def _read_owner(dataset_path: str) -> str | None:
+    import json as _json
+    p = os.path.join(dataset_path, _OWNER_FILE)
+    if not os.path.exists(p):
+        return None
+    with open(p, encoding="utf-8") as f:
+        return _json.load(f).get("user_id")
+
+
+def _write_owner(dataset_path: str, user_id: str) -> None:
+    import json as _json
+    os.makedirs(dataset_path, exist_ok=True)
+    with open(os.path.join(dataset_path, _OWNER_FILE), "w", encoding="utf-8") as f:
+        _json.dump({"user_id": user_id}, f)
+
+
+def _claim_dataset(dataset_path: str, authorization: str | None) -> None:
+    """For endpoints that create/modify a dataset: record the owner, refuse anyone else."""
+    user = _require_caller(authorization)
+    owner = _read_owner(dataset_path)
+    if owner is None:
+        _write_owner(dataset_path, user["id"])
+    elif owner != user["id"] and user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail={"error": "not_owner", "message": "This dataset belongs to another user."})
+
+
+def _require_owner_access(dataset_id: str, authorization: str | None) -> None:
+    """For endpoints that serve data: only the owner (or an admin) may read it."""
+    user = _require_caller(authorization)
+    if user.get("role") == "admin":
+        return
+    dataset_path = os.path.join(DATASETS_DIR, dataset_id)
+    owner = _read_owner(dataset_path)
+    if owner is None and os.path.isdir(dataset_path):
+        # Folder from before ownership was recorded — ask Node's datasets table
+        status, body = _node_get(f"/api/datasets/access/{dataset_id}", authorization or "")
+        if status == 200 and body.get("owner_id"):
+            owner = body["owner_id"]
+            _write_owner(dataset_path, owner)
+    if owner != user["id"]:
+        raise HTTPException(status_code=403, detail={"error": "not_owner", "message": "You don't have access to this dataset."})
+
+
 def _locked_response(dataset_id: str) -> dict[str, Any]:
     return {"dataset_id": dataset_id, "locked": True, "review_status": "pending"}
 
@@ -245,7 +341,7 @@ def kaggle_search(req: SearchRequest) -> dict[str, Any]:
 
 
 @app.post("/api/kaggle/download")
-def kaggle_download(req: DownloadRequest) -> dict[str, Any]:
+def kaggle_download(req: DownloadRequest, authorization: str | None = Header(default=None)) -> dict[str, Any]:
     """
     Download a Kaggle dataset, analyze its schema, and return:
     - dataset_id  (use this in /api/generate)
@@ -254,6 +350,7 @@ def kaggle_download(req: DownloadRequest) -> dict[str, Any]:
     dataset_id = str(uuid.uuid4())
     dest = os.path.join(DATASETS_DIR, dataset_id)
     os.makedirs(dest, exist_ok=True)
+    _claim_dataset(dest, authorization)
 
     csv_path = download_dataset(req.dataset_ref, dest)
     if not csv_path:
@@ -298,10 +395,11 @@ def hf_search(req: SearchRequest) -> dict[str, Any]:
 
 
 @app.post("/api/huggingface/download")
-def hf_download(req: DownloadRequest) -> dict[str, Any]:
+def hf_download(req: DownloadRequest, authorization: str | None = Header(default=None)) -> dict[str, Any]:
     dataset_id = str(uuid.uuid4())
     dest = os.path.join(DATASETS_DIR, dataset_id)
     os.makedirs(dest, exist_ok=True)
+    _claim_dataset(dest, authorization)
     csv_path = huggingface_service.download_dataset(req.dataset_ref, dest)
     if not csv_path:
         raise HTTPException(status_code=404, detail="Could not download dataset from Hugging Face.")
@@ -323,10 +421,11 @@ def uci_search(req: SearchRequest) -> dict[str, Any]:
 
 
 @app.post("/api/uci/download")
-def uci_download(req: DownloadRequest) -> dict[str, Any]:
+def uci_download(req: DownloadRequest, authorization: str | None = Header(default=None)) -> dict[str, Any]:
     dataset_id = str(uuid.uuid4())
     dest = os.path.join(DATASETS_DIR, dataset_id)
     os.makedirs(dest, exist_ok=True)
+    _claim_dataset(dest, authorization)
     csv_path = uci_service.download_dataset(req.dataset_ref, dest)
     if not csv_path:
         raise HTTPException(status_code=404, detail="Could not download dataset from UCI.")
@@ -348,10 +447,11 @@ def openml_search(req: SearchRequest) -> dict[str, Any]:
 
 
 @app.post("/api/openml/download")
-def openml_download(req: DownloadRequest) -> dict[str, Any]:
+def openml_download(req: DownloadRequest, authorization: str | None = Header(default=None)) -> dict[str, Any]:
     dataset_id = str(uuid.uuid4())
     dest = os.path.join(DATASETS_DIR, dataset_id)
     os.makedirs(dest, exist_ok=True)
+    _claim_dataset(dest, authorization)
     csv_path = openml_service.download_dataset(req.dataset_ref, dest)
     if not csv_path:
         raise HTTPException(status_code=404, detail="Could not download dataset from OpenML.")
@@ -373,10 +473,11 @@ def datagov_ph_search(req: SearchRequest) -> dict[str, Any]:
 
 
 @app.post("/api/datagov_ph/download")
-def datagov_ph_download(req: DownloadRequest) -> dict[str, Any]:
+def datagov_ph_download(req: DownloadRequest, authorization: str | None = Header(default=None)) -> dict[str, Any]:
     dataset_id = str(uuid.uuid4())
     dest = os.path.join(DATASETS_DIR, dataset_id)
     os.makedirs(dest, exist_ok=True)
+    _claim_dataset(dest, authorization)
     csv_path = datagov_ph_service.download_dataset(req.dataset_ref, dest)
     if not csv_path:
         raise HTTPException(status_code=404, detail="Could not download dataset from Data.gov.ph.")
@@ -398,10 +499,11 @@ def psa_search(req: SearchRequest) -> dict[str, Any]:
 
 
 @app.post("/api/psa/download")
-def psa_download(req: DownloadRequest) -> dict[str, Any]:
+def psa_download(req: DownloadRequest, authorization: str | None = Header(default=None)) -> dict[str, Any]:
     dataset_id = str(uuid.uuid4())
     dest = os.path.join(DATASETS_DIR, dataset_id)
     os.makedirs(dest, exist_ok=True)
+    _claim_dataset(dest, authorization)
     csv_path = psa_service.download_dataset(req.dataset_ref, dest)
     if not csv_path:
         raise HTTPException(status_code=404, detail="Could not download dataset from PSA.")
@@ -415,7 +517,7 @@ def psa_download(req: DownloadRequest) -> dict[str, Any]:
 # ── User-uploaded dataset ─────────────────────────────────────────────────────
 
 @app.post("/api/upload-dataset")
-async def upload_dataset(file: UploadFile = File(...)) -> dict[str, Any]:
+async def upload_dataset(file: UploadFile = File(...), authorization: str | None = Header(default=None)) -> dict[str, Any]:
     """
     Accept user-uploaded datasets in diverse formats:
       - Archive: .zip, .tar, .tar.gz, .tgz, .gz
@@ -439,6 +541,7 @@ async def upload_dataset(file: UploadFile = File(...)) -> dict[str, Any]:
 
     dataset_id = str(uuid.uuid4())
     dest = os.path.join(DATASETS_DIR, dataset_id)
+    _claim_dataset(dest, authorization)
 
     try:
         content = await file.read()
@@ -462,7 +565,7 @@ async def upload_dataset(file: UploadFile = File(...)) -> dict[str, Any]:
 # ── Kaggle generate ───────────────────────────────────────────────────────────
 
 @app.post("/api/generate")
-def generate(req: GenerateRequest):
+def generate(req: GenerateRequest, authorization: str | None = Header(default=None)):
     """
     Train CTGAN on the downloaded dataset and generate synthetic rows.
     Only the changes the user specified are applied to the output — nothing else.
@@ -475,6 +578,7 @@ def generate(req: GenerateRequest):
     if not (1_000 <= req.row_count <= 100_000):
         raise HTTPException(status_code=400, detail="row_count must be between 1000 and 100000.")
 
+    _claim_dataset(dataset_path, authorization)
     _lock_for_review(dataset_path, req.review_id)
     changes = [c.model_dump() for c in req.changes]
 
@@ -518,8 +622,9 @@ def generate(req: GenerateRequest):
 
 
 @app.get("/api/preview/{dataset_id}")
-def preview_dataset(dataset_id: str, limit: int = 100):
+def preview_dataset(dataset_id: str, limit: int = 100, authorization: str | None = Header(default=None)):
     """Return the first `limit` rows of a generated CSV as JSON for in-app preview."""
+    _require_owner_access(dataset_id, authorization)
     _require_review_access(dataset_id)
     dataset_path = os.path.join(DATASETS_DIR, dataset_id)
     # Fall back to template.csv when synthetic_output.csv not yet created (template-only view)
@@ -653,7 +758,7 @@ _TEMPLATE_ROWS = 100
 
 
 @app.post("/api/generate-from-schema")
-def generate_from_schema(req: SchemaGenerateRequest):
+def generate_from_schema(req: SchemaGenerateRequest, authorization: str | None = Header(default=None)):
     """
     Generate a 200-row template using relational generation:
     master entity tables built first, FK consistency enforced,
@@ -669,6 +774,7 @@ def generate_from_schema(req: SchemaGenerateRequest):
         dataset_id = str(uuid_module.uuid4())
         dest = os.path.join(DATASETS_DIR, dataset_id)
         os.makedirs(dest, exist_ok=True)
+        _claim_dataset(dest, authorization)
 
         # Inject table name into each field description so domain-aware pool
         # selection in gen_col can detect context (e.g. "grocery store" → grocery products)
@@ -1227,8 +1333,9 @@ def generate_from_schema(req: SchemaGenerateRequest):
 
 
 @app.get("/api/download-entity/{dataset_id}/{table_name}")
-def download_entity_table(dataset_id: str, table_name: str):
+def download_entity_table(dataset_id: str, table_name: str, authorization: str | None = Header(default=None)):
     """Download a generated entity master table (e.g. professor_master.csv)."""
+    _require_owner_access(dataset_id, authorization)
     _require_review_access(dataset_id)
     safe_name = table_name.replace("/", "").replace("\\", "").replace("..", "")
     if not safe_name.endswith(".csv"):
@@ -1240,8 +1347,9 @@ def download_entity_table(dataset_id: str, table_name: str):
 
 
 @app.get("/api/download-template/{dataset_id}")
-def download_template(dataset_id: str, format: str = "csv"):
+def download_template(dataset_id: str, format: str = "csv", authorization: str | None = Header(default=None)):
     """Download the 200-row template in CSV, JSON, or XLSX format."""
+    _require_owner_access(dataset_id, authorization)
     _require_review_access(dataset_id)
     import io
     import pandas as pd
@@ -1286,7 +1394,7 @@ def download_template(dataset_id: str, format: str = "csv"):
 
 
 @app.post("/api/generate-multi-table")
-def generate_multi_table(req: MultiTableRequest):
+def generate_multi_table(req: MultiTableRequest, authorization: str | None = Header(default=None)):
     """
     Generate multiple related tables with FK consistency, save them to
     temp_datasets/{dataset_id}/, and return dataset metadata for the
@@ -1425,6 +1533,7 @@ def generate_multi_table(req: MultiTableRequest):
     dataset_id = str(uuid.uuid4())
     dest = os.path.join(DATASETS_DIR, dataset_id)
     os.makedirs(dest, exist_ok=True)
+    _claim_dataset(dest, authorization)
     _lock_for_review(dest, req.review_id)
 
     primary_table = generation_order[0] if generation_order else req.tables[0].name
@@ -1453,8 +1562,9 @@ def generate_multi_table(req: MultiTableRequest):
 
 
 @app.get("/api/download-multi/{dataset_id}")
-def download_multi_table(dataset_id: str, format: str = "csv"):
+def download_multi_table(dataset_id: str, format: str = "csv", authorization: str | None = Header(default=None)):
     """Download all tables for a multi-table dataset as a ZIP or XLSX."""
+    _require_owner_access(dataset_id, authorization)
     _require_review_access(dataset_id)
     import io
     import zipfile
@@ -1521,7 +1631,7 @@ def download_multi_table(dataset_id: str, format: str = "csv"):
 
 
 @app.post("/api/expand-with-ctgan")
-def expand_with_ctgan(req: ExpandRequest):
+def expand_with_ctgan(req: ExpandRequest, authorization: str | None = Header(default=None)):
     """Train CTGAN on the 200-row template and scale up to req.row_count rows."""
     dataset_path = os.path.join(DATASETS_DIR, req.dataset_id)
     if not os.path.isdir(dataset_path):
@@ -1530,6 +1640,7 @@ def expand_with_ctgan(req: ExpandRequest):
     if not (1_000 <= req.row_count <= 100_000):
         raise HTTPException(status_code=400, detail="row_count must be between 1,000 and 100,000.")
 
+    _claim_dataset(dataset_path, authorization)
     _lock_for_review(dataset_path, req.review_id)
     try:
         expand_template_with_ctgan(dataset_path, req.row_count)
@@ -1858,7 +1969,7 @@ def smart_search(req: SmartSearchRequest) -> dict[str, Any]:
 # ── Hybrid generate (CTGAN real fields + schema-based LLM fields) ─────────────
 
 @app.post("/api/generate-hybrid")
-def generate_hybrid(req: HybridGenerateRequest):
+def generate_hybrid(req: HybridGenerateRequest, authorization: str | None = Header(default=None)):
     # The AI Augmented path: user's prompt found a real dataset, but LLM added
     # extra fields that weren't in the original data. We run CTGAN on the real
     # columns first, then append the extra columns using gen_col(). The extra
@@ -1873,6 +1984,7 @@ def generate_hybrid(req: HybridGenerateRequest):
     if not (1_000 <= req.row_count <= 100_000):
         raise HTTPException(status_code=400, detail="row_count must be between 1,000 and 100,000.")
 
+    _claim_dataset(dataset_path, authorization)
     _lock_for_review(dataset_path, req.review_id)
     changes = [c.model_dump() for c in req.changes]
 
@@ -1926,7 +2038,8 @@ def generate_hybrid(req: HybridGenerateRequest):
 
 
 @app.get("/api/validate/{dataset_id}")
-def validate_dataset(dataset_id: str):
+def validate_dataset(dataset_id: str, authorization: str | None = Header(default=None)):
+    _require_owner_access(dataset_id, authorization)
     _require_review_access(dataset_id)
     # Computes 4 quality metrics — all between 0 and 1 (higher = better).
     #
@@ -2124,8 +2237,9 @@ def validate_dataset(dataset_id: str):
 
 
 @app.get("/api/download/{dataset_id}")
-def download_saved(dataset_id: str):
+def download_saved(dataset_id: str, authorization: str | None = Header(default=None)):
     """Serve a previously generated CSV file by dataset_id."""
+    _require_owner_access(dataset_id, authorization)
     _require_review_access(dataset_id)
     dataset_path = os.path.join(DATASETS_DIR, dataset_id)
     output_path  = os.path.join(dataset_path, "synthetic_output.csv")

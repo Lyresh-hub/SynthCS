@@ -143,9 +143,8 @@ export default function Signup() {
         setPendingEmail(json.email);
         return;
       }
-      localStorage.setItem("user_id", json.id);
-      localStorage.setItem("user_name", json.full_name ?? `${json.first_name} ${json.last_name}`);
-      setLocation("/dashboard");
+      // Account created but needs instructor approval — no automatic sign-in
+      setLocation("/pending-approval");
     } catch {
       setServerError("Could not reach the server. Make sure the backend is running.");
     } finally {

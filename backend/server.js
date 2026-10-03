@@ -851,12 +851,50 @@ if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
 }
 
 // ── Auth helpers ──────────────────────────────────────────────────────────────
+// ── Login sessions (signed tokens) ────────────────────────────────────────────
+// After login the browser gets a signed token and sends it as
+// "Authorization: Bearer <token>". The server trusts the token, never a user_id
+// typed into a request — so nobody can act as (or read the data of) another user
+// just by knowing their ID. The Python service asks /api/auth/me to identify the caller.
+const AUTH_TOKEN_TTL = "7d";
+
+function roleOf(user) {
+  return user.is_admin ? "admin" : user.is_instructor ? "instructor" : "student";
+}
+
+function signAuthToken(user, role = roleOf(user)) {
+  return jwt.sign({ sub: user.id, role }, JWT_SECRET, { expiresIn: AUTH_TOKEN_TTL });
+}
+
+// Returns { id, role } for a valid token, otherwise null
+function authUser(req) {
+  const header = req.get("authorization") || "";
+  const token = header.startsWith("Bearer ") ? header.slice(7).trim() : null;
+  if (!token) return null;
+  try {
+    const payload = jwt.verify(token, JWT_SECRET);
+    return payload?.sub ? { id: String(payload.sub), role: payload.role || "student" } : null;
+  } catch {
+    return null;
+  }
+}
+
+function requireAuth(req, res, next) {
+  const user = authUser(req);
+  if (!user) {
+    return res.status(401).json({ error: "auth_required", message: "Your session has expired or you are not logged in. Please log in again." });
+  }
+  req.user = user;
+  next();
+}
+
 function oauthSuccessRedirect(res, user, method = "OAuth") {
   logActivity(user.id, "login_success", { method });
   const params = new URLSearchParams({
     user_id:   user.id,
     user_name: user.full_name,
     is_admin:  user.is_admin ? "true" : "false",
+    token:     signAuthToken(user),
   });
   res.redirect(`${FRONTEND_URL}/auth/callback?${params}`);
 }
@@ -909,7 +947,9 @@ app.post("/signup", async (req, res) => {
       return;
     }
 
-    res.status(201).json({ id: user.id, first_name: user.first_name, last_name: user.last_name, full_name: user.full_name, email: user.email });
+    // New students start as 'pending' — never sign them in here, even when email
+    // verification is off; they must wait for instructor approval like /login enforces
+    res.status(201).json({ pending_approval: true, email: user.email });
   } catch (err) {
     if (err.code === "23505") return res.status(400).json({ error: "Email already exists" });
     console.error("Signup error:", err.message);
@@ -1122,7 +1162,7 @@ app.post("/login", async (req, res) => {
     }
 
     logActivity(user.id, "login_success", { method: "password", role: user.is_admin ? "admin" : user.is_instructor ? "instructor" : "student" });
-    res.json({ id: user.id, first_name: user.first_name, last_name: user.last_name, full_name: user.full_name, email: user.email, is_admin: user.is_admin || false, is_instructor: user.is_instructor || false, tour_done: user.tour_done || false, instructor: user.instructor ?? null });
+    res.json({ id: user.id, first_name: user.first_name, last_name: user.last_name, full_name: user.full_name, email: user.email, is_admin: user.is_admin || false, is_instructor: user.is_instructor || false, tour_done: user.tour_done || false, instructor: user.instructor ?? null, token: signAuthToken(user) });
   } catch (err) {
     console.error("Login error:", err.message);
     res.status(500).json({ error: "Server error" });
@@ -1717,12 +1757,13 @@ async function runSafetyCheck(prompt, user_id, apiKey, instructor_id, { useAi = 
 }
 
 // ── Instructor review transaction: Pending → Approved / Rejected ──────────────
-// A flagged prompt opens (or reuses) a review. The student may keep working,
-// but every dataset produced under that review is locked — no preview, export
-// or download — until the instructor approves it. A rejected review keeps the
-// data locked for good, and resubmitting the same prompt is refused.
+// A flagged prompt opens (or reuses) a review and is locked IMMEDIATELY: the
+// search, AI schema, and generation steps are all refused while it is pending.
+// Once approved the student continues where they stopped (the approved prompt
+// passes from then on). Rejected prompts stay refused. Datasets are still tagged
+// with the review ID as a second line of defence (see the Python review lock).
 const PENDING_REVIEW_MESSAGE =
-  "Your prompt was flagged and sent to your instructor for review. You can keep building your dataset, but it will stay locked (no preview, export, or download) until your instructor approves it.";
+  "Your prompt was flagged and sent to your instructor for review. It is locked until your instructor approves it — nothing can be searched or generated with it until then. You'll get an email when they decide.";
 
 async function resolveReviewInstructor(studentId, preferredInstructorId) {
   // 1. The class the student is currently working in (multi-class enrollment)
@@ -1758,7 +1799,8 @@ async function openReview(studentId, promptText, flagReason, preferredInstructor
   );
   const last = prior.rows[0];
   if (last?.status === "approved") return { safe: true };                       // already cleared by instructor
-  if (last?.status === "pending")  return { safe: true, review_id: last.id, message: PENDING_REVIEW_MESSAGE };
+  // Locked from the moment it is flagged: nothing (search, schema, generation) proceeds until approved
+  if (last?.status === "pending")  return { safe: false, error: "pending_review", review_id: last.id, message: PENDING_REVIEW_MESSAGE };
   if (last?.status === "rejected") {
     logActivity(studentId, "prompt_resubmitted_rejected", { prompt_text: promptText, review_id: last.id });
     return { safe: false, error: "prompt_rejected", message: "Your instructor already rejected this prompt. It cannot be used to generate a dataset." };
@@ -1776,7 +1818,7 @@ async function openReview(studentId, promptText, flagReason, preferredInstructor
     sendFlaggedPromptEmail(instructor.email, instructor.full_name, student.rows[0]?.full_name, promptText)
       .catch((e) => reportEmailFailure("Flagged prompt email", e));
   }
-  return { safe: true, review_id: inserted.rows[0].id, message: PENDING_REVIEW_MESSAGE };
+  return { safe: false, error: "pending_review", review_id: inserted.rows[0].id, message: PENDING_REVIEW_MESSAGE };
 }
 
 // ── Check prompt safety (called before dataset search) ───────────────────────
@@ -1792,10 +1834,8 @@ app.post("/api/llm/check-prompt", async (req, res) => {
   if (result.safe && !result.review_id && user_id) {
     logActivity(user_id, context === "ai_search" ? "ai_search" : "dataset_search", { prompt_text: prompt });
   }
-  if (result.safe) {
-    // review_id present → allowed to continue, but everything produced is locked until approved
-    return res.json({ safe: true, review_id: result.review_id ?? null, pending_review: !!result.review_id, message: result.message });
-  }
+  if (result.safe) return res.json({ safe: true });
+  // Flagged → 403 with error "pending_review" and the review_id: the search does not run
   return res.status(403).json(result);
 });
 
@@ -1810,9 +1850,11 @@ app.post("/api/llm/generate-schema", async (req, res) => {
   // Flagged prompts still get a schema, but carry a review_id that locks the dataset
   const safetyResult = await runSafetyCheck(prompt.trim(), user_id, apiKey, instructor_id);
   if (!safetyResult.safe) {
+    // Pending review → no schema is generated (the AI is never asked) until approved
     return res.status(403).json({
       error: safetyResult.error,
       message: safetyResult.message,
+      review_id: safetyResult.review_id ?? null,
     });
   }
 
@@ -2071,9 +2113,30 @@ app.get("/api/reviews/:id/status", async (req, res) => {
   }
 });
 
-app.post("/api/datasets", async (req, res) => {
+// Who is calling — used by the Python service before it serves or writes a dataset
+app.get("/api/auth/me", requireAuth, (req, res) => res.json(req.user));
+
+// May the caller access this generated dataset? (owner or admin)
+app.get("/api/datasets/access/:pythonDatasetId", requireAuth, async (req, res) => {
   try {
-    const { user_id, name, kaggle_ref, python_dataset_id, row_count, source, purpose, category, review_id } = req.body;
+    if (req.user.role === "admin") return res.json({ allowed: true, owner_id: null });
+    const r = await pool.query(
+      "SELECT user_id FROM datasets WHERE python_dataset_id = $1 LIMIT 1",
+      [req.params.pythonDatasetId]
+    );
+    const owner = r.rows[0]?.user_id ?? null;
+    res.json({ allowed: !!owner && owner === req.user.id, owner_id: owner });
+  } catch (err) {
+    console.error("Dataset access check error:", err.message);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+app.post("/api/datasets", requireAuth, async (req, res) => {
+  try {
+    // The owner is whoever is logged in — a user_id sent in the body is ignored
+    const user_id = req.user.id;
+    const { name, kaggle_ref, python_dataset_id, row_count, source, purpose, category, review_id } = req.body;
     if (!user_id || !name)
       return res.status(400).json({ error: "user_id and name are required" });
 
@@ -2108,7 +2171,10 @@ app.post("/api/datasets", async (req, res) => {
   }
 });
 
-app.get("/api/datasets/:userId", async (req, res) => {
+app.get("/api/datasets/:userId", requireAuth, async (req, res) => {
+  if (req.user.id !== req.params.userId && req.user.role !== "admin") {
+    return res.status(403).json({ error: "forbidden", message: "You can only view your own datasets." });
+  }
   try {
     const result = await pool.query(
       `SELECT * FROM datasets
@@ -2123,12 +2189,13 @@ app.get("/api/datasets/:userId", async (req, res) => {
   }
 });
 
-app.delete("/api/datasets/:id", async (req, res) => {
+app.delete("/api/datasets/:id", requireAuth, async (req, res) => {
   try {
     const result = await pool.query(
-      "DELETE FROM datasets WHERE id = $1 RETURNING python_dataset_id, user_id, name, row_count",
-      [req.params.id]
+      "DELETE FROM datasets WHERE id = $1 AND (user_id = $2 OR $3) RETURNING python_dataset_id, user_id, name, row_count",
+      [req.params.id, req.user.id, req.user.role === "admin"]
     );
+    if (result.rowCount === 0) return res.status(404).json({ error: "Dataset not found" });
     if (result.rowCount > 0) {
       const d = result.rows[0];
       logActivity(d.user_id, "dataset_deleted", { table_name: d.name, rows: d.row_count, dataset_id: req.params.id });
@@ -2224,7 +2291,7 @@ app.post("/instructor/login", async (req, res) => {
     }
 
     logActivity(instructor.id, "login_success", { method: "password", role: "instructor" });
-    res.json({ id: instructor.id, name: instructor.name, email: instructor.email });
+    res.json({ id: instructor.id, name: instructor.name, email: instructor.email, token: signAuthToken(instructor, "instructor") });
   } catch (err) {
     console.error("Instructor login error:", err.message);
     res.status(500).json({ error: "Server error" });

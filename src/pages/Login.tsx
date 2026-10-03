@@ -26,7 +26,11 @@ export default function Login() {
   const [, setLocation] = useLocation();
   const [view, setView] = useState<View>("login");
 
-  const [serverError, setServerError] = useState("");
+  const [serverError, setServerError] = useState(() =>
+    new URLSearchParams(window.location.search).get("session") === "expired"
+      ? "Your session has ended. Please log in again."
+      : ""
+  );
   const [successMsg, setSuccessMsg]   = useState("");
   const [isPending, setIsPending]     = useState(false);
   const [showPassword, setShowPassword] = useState(false);
@@ -101,6 +105,7 @@ export default function Login() {
         return;
       }
       localStorage.setItem("user_id",        json.id);
+      localStorage.setItem("auth_token",     json.token);
       localStorage.setItem("user_name",      json.full_name);
       localStorage.setItem("is_admin",       json.is_admin       ? "true" : "false");
       localStorage.setItem("is_instructor",  json.is_instructor  ? "true" : "false");
@@ -109,7 +114,9 @@ export default function Login() {
       else localStorage.removeItem("instructor");
       sessionStorage.removeItem("schema_builder_draft");
       const pendingInvite = sessionStorage.getItem("pending_invite_token");
-      if (json.is_instructor) {
+      if (json.is_admin) {
+        setLocation("/admin"); // same as the Google/GitHub login path
+      } else if (json.is_instructor) {
         setLocation("/instructor/dashboard");
       } else if (pendingInvite) {
         setLocation(`/accept-invitation?token=${pendingInvite}`);

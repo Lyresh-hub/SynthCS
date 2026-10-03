@@ -374,7 +374,7 @@ export default function InstructorDashboard() {
 
   const handleSignOut = () => {
     reportEvent("logout"); // before user_id is cleared
-    ["user_id","user_name","is_admin","is_instructor","last_path"].forEach((k) => localStorage.removeItem(k));
+    ["user_id","user_name","is_admin","is_instructor","last_path","auth_token"].forEach((k) => localStorage.removeItem(k));
     setLocation("/login");
   };
 

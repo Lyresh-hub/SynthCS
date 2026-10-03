@@ -5,6 +5,7 @@ export default function PendingApproval() {
   const [, setLocation] = useLocation();
 
   const handleSignOut = () => {
+    localStorage.removeItem("auth_token");
     localStorage.removeItem("user_id");
     localStorage.removeItem("user_name");
     localStorage.removeItem("is_admin");

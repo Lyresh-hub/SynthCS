@@ -4,6 +4,7 @@ import * as XLSX from "xlsx";
 
 import { PYTHON_API } from "../lib/config";
 import { reportEvent } from "../lib/activity";
+import { downloadWithAuth } from "../lib/authFetch";
 const ROWS_PER_PAGE = 25;
 const TABS = ["Table View", "JSON", "Statistics"];
 
@@ -622,13 +623,15 @@ export default function DataPreview() {
                     <p className="text-xs font-semibold text-gray-700 capitalize">{et.name}_master.csv</p>
                     <p className="text-[11px] text-gray-400">{et.rows} records · {(et.columns ?? []).join(", ")}</p>
                   </div>
-                  <a
-                    href={`${PYTHON_API}/api/download-entity/${datasetId}/${et.name}`}
-                    download={`${et.name}_master.csv`}
+                  <button
+                    onClick={() =>
+                      downloadWithAuth(`${PYTHON_API}/api/download-entity/${datasetId}/${et.name}`, `${et.name}_master.csv`)
+                        .catch((e) => alert(e.message))
+                    }
                     className="text-xs px-3 py-1.5 bg-gray-800 text-white rounded-lg font-medium hover:bg-gray-900 transition-colors"
                   >
                     ↓ Download
-                  </a>
+                  </button>
                 </div>
               ))}
             </div>

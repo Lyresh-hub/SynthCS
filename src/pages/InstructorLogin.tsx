@@ -28,6 +28,7 @@ export default function InstructorLogin() {
       }
       localStorage.setItem("instructor_id",   json.id);
       localStorage.setItem("instructor_name", json.name);
+      localStorage.setItem("auth_token",      json.token);
       setLocation("/instructor/dashboard");
     } catch {
       setError("Could not reach the server. Make sure the backend is running.");

@@ -203,6 +203,7 @@ export default function UserAccounts() {
 
   function handleLogout() {
     reportEvent("logout"); // before user_id is cleared
+    localStorage.removeItem("auth_token");
     localStorage.removeItem("user_id");
     localStorage.removeItem("user_name");
     localStorage.removeItem("is_admin");

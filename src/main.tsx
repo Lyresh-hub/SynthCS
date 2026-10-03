@@ -4,6 +4,10 @@ import { createRoot } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import "./index.css"; // global na Tailwind CSS styles
 import App from "./App";
+import { installAuthFetch } from "./lib/authFetch";
+
+// Every request to our backends carries the login token (see lib/authFetch.ts)
+installAuthFetch();
 
 // Ginagawa natin yung isang shared na query client para sa buong app
 const queryClient = new QueryClient();

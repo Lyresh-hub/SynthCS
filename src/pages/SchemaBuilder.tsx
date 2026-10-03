@@ -492,25 +492,37 @@ export default function SchemaBuilder() {
   const [detectedExtras, setDetectedExtras]     = useState<string[]>([]);
   const [strikeWarning, setStrikeWarning] = useState<{ strikes: number; banned: boolean } | null>(null);
   // Instructor review of a flagged prompt: Pending → Approved / Rejected.
-  // While a review is open, every dataset generated in this session is locked
-  // (no preview, export, or download) until the instructor approves it.
+  // A flagged prompt is locked IMMEDIATELY — the search / AI schema / generation
+  // step it was used for does not run until the instructor approves it. We remember
+  // which step was stopped ("resume") so the student can continue after approval.
+  type ReviewResume =
+    | { kind: "dataset_search" | "ai_search" | "ai_schema"; prompt: string }
+    | { kind: "generate"; prompt: string; action: "template" | "expand" | "generate" };
   const [reviewId, setReviewId]         = useState<string | null>(() => sessionStorage.getItem("sb_review_id"));
   const [reviewStatus, setReviewStatus] = useState<"pending" | "approved" | "rejected" | null>(() => (sessionStorage.getItem("sb_review_id") ? "pending" : null));
   const [reviewError, setReviewError]   = useState("");
+  const [reviewResume, setReviewResume] = useState<ReviewResume | null>(() => {
+    try { return JSON.parse(sessionStorage.getItem("sb_review_resume") ?? "null"); } catch { return null; }
+  });
+  const [resumeNow, setResumeNow]       = useState<ReviewResume | null>(null);
   const pendingReview = !!reviewId && reviewStatus === "pending";
 
-  const startReview = (id: string, promptText: string) => {
+  const startReview = (id: string, promptText: string, resume: ReviewResume | null = null) => {
     sessionStorage.setItem("sb_review_id", id);
     sessionStorage.setItem("sb_review_prompt", promptText.trim());
+    if (resume) sessionStorage.setItem("sb_review_resume", JSON.stringify(resume));
     setReviewId(id);
     setReviewStatus("pending");
+    setReviewResume(resume);
     setReviewError("");
   };
   const clearReview = () => {
     sessionStorage.removeItem("sb_review_id");
     sessionStorage.removeItem("sb_review_prompt");
+    sessionStorage.removeItem("sb_review_resume");
     setReviewId(null);
     setReviewStatus(null);
+    setReviewResume(null);
   };
   // Instructor of the class the student is currently working in
   const activeInstructorId = localStorage.getItem("active_instructor_id") || localStorage.getItem("instructor_id") || undefined;
@@ -547,7 +559,13 @@ export default function SchemaBuilder() {
   };
 
   // Handles a 403 from the safety check. Returns true when the flow must stop.
-  const handleSafetyRefusal = (data: any): boolean => {
+  // pending_review = flagged: lock right here and remember the step for "Continue".
+  const handleSafetyRefusal = (data: any, resume: ReviewResume | null = null): boolean => {
+    if (data?.error === "pending_review" && data?.review_id) {
+      startReview(data.review_id, resume?.prompt ?? "", resume);
+      setPhase((p) => (p === "smart_searching" || p === "loading" ? "idle" : p));
+      return true;
+    }
     if (data?.error === "banned") { setStrikeWarning({ strikes: data.strikes ?? 3, banned: true }); return true; }
     if (data?.error === "inappropriate_prompt") { setStrikeWarning({ strikes: data.strikes ?? 1, banned: data.banned ?? false }); return true; }
     if (data?.error === "prompt_rejected" || data?.error === "review_unavailable" || data?.error === "blocked_keyword") { setReviewError(data.message); return true; }
@@ -668,10 +686,14 @@ export default function SchemaBuilder() {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
+        // Flagged at generation time → locked now; nothing is generated until approved
+        if (data.error === "pending_review" && data.review_id) {
+          startReview(data.review_id, studentPrompt || prompt, { kind: "generate", prompt: studentPrompt || prompt, action });
+          return;
+        }
         setRestrictionError(data.message || "Your prompt could not be checked. Please try again.");
         return;
       }
-      if (data.review_id) startReview(data.review_id, studentPrompt || prompt);
     } catch {
       // Fail closed — an unchecked prompt could skip instructor review
       setRestrictionError("Your prompt could not be checked right now. Please make sure you're online and try again.");
@@ -1080,7 +1102,7 @@ export default function SchemaBuilder() {
       });
       const data = await res.json();
       if (!res.ok) {
-        if (handleSafetyRefusal(data)) return;
+        if (handleSafetyRefusal(data, { kind: "ai_schema", prompt: llmPrompt })) return;
         throw new Error(data.error || "LLM request failed");
       }
       applyReviewResult(data, llmPrompt);
@@ -1139,7 +1161,7 @@ export default function SchemaBuilder() {
       });
       const data = await safetyRes.json().catch(() => ({}));
       if (!safetyRes.ok) {
-        if (handleSafetyRefusal(data)) return;
+        if (handleSafetyRefusal(data, { kind: "ai_search", prompt: llmPrompt })) return;
       } else {
         applyReviewResult(data, llmPrompt);
       }
@@ -1474,7 +1496,7 @@ export default function SchemaBuilder() {
       });
       const data = await safetyRes.json().catch(() => ({}));
       if (!safetyRes.ok) {
-        if (handleSafetyRefusal(data)) return;
+        if (handleSafetyRefusal(data, { kind: "dataset_search", prompt: searchQuery })) return;
       } else {
         applyReviewResult(data, searchQuery);
       }
@@ -2134,6 +2156,25 @@ export default function SchemaBuilder() {
     ? (getActiveTable()?.fields.filter(isChanged).length ?? 0)
     : 0;
 
+  // After approval, "Continue" re-runs the exact step the flag stopped. The input
+  // box is restored first; the handler runs on the next render so it sees it.
+  const continueAfterApproval = () => {
+    if (!reviewResume) { clearReview(); return; }
+    if (reviewResume.kind === "dataset_search") setSearchQuery(reviewResume.prompt);
+    else if (reviewResume.kind !== "generate") setLlmPrompt(reviewResume.prompt);
+    setResumeNow(reviewResume);
+    clearReview();
+  };
+  useEffect(() => {
+    if (!resumeNow) return;
+    const r = resumeNow;
+    setResumeNow(null);
+    if (r.kind === "dataset_search") handleSearch();
+    else if (r.kind === "ai_search") handleLlmGenerate();
+    else if (r.kind === "ai_schema") runPureLlmGenerate();
+    else if (r.kind === "generate") askPurposeThen(r.action);
+  }, [resumeNow]); // eslint-disable-line react-hooks/exhaustive-deps
+
   return (
     <div className="space-y-4">
 
@@ -2148,26 +2189,36 @@ export default function SchemaBuilder() {
           <div className="flex-1 min-w-0">
             {reviewStatus === "pending" && (
               <>
-                <p className="text-xs font-semibold text-amber-900">🔒 Pending instructor review — dataset locked</p>
+                <p className="text-xs font-semibold text-amber-900">🔒 Prompt locked — waiting for instructor approval</p>
                 <p className="text-xs text-amber-800 mt-0.5 leading-relaxed">
-                  Your prompt was flagged and sent to your instructor. You can keep building and generating, but the dataset
-                  can't be previewed, exported, or downloaded until your instructor approves it. You'll get an email when they decide.
+                  Your prompt was flagged and sent to your instructor. It's locked right now: nothing can be searched or
+                  generated with it until your instructor approves it. You'll get an email when they decide, and this message
+                  updates by itself.
                 </p>
+                {sessionStorage.getItem("sb_review_prompt") && (
+                  <p className="text-[11px] text-amber-700 mt-1 truncate">Prompt under review: “{sessionStorage.getItem("sb_review_prompt")}”</p>
+                )}
               </>
             )}
             {reviewStatus === "approved" && (
               <>
-                <p className="text-xs font-semibold text-green-900">✓ Approved by your instructor — dataset unlocked</p>
+                <p className="text-xs font-semibold text-green-900">✓ Approved by your instructor — prompt unlocked</p>
                 <p className="text-xs text-green-800 mt-0.5 leading-relaxed">
-                  Datasets from this prompt can now be previewed and downloaded from My Downloads.
+                  You can now continue where you stopped.
                 </p>
+                <button
+                  onClick={continueAfterApproval}
+                  className="mt-2 px-3 py-1.5 bg-green-600 text-white text-xs font-medium rounded-lg hover:bg-green-700 transition-colors"
+                >
+                  Continue →
+                </button>
               </>
             )}
             {reviewStatus === "rejected" && (
               <>
                 <p className="text-xs font-semibold text-red-900">✗ Rejected by your instructor — access denied</p>
                 <p className="text-xs text-red-800 mt-0.5 leading-relaxed">
-                  Datasets generated from this prompt will stay locked and cannot be downloaded. Start over with a different prompt.
+                  This prompt can't be used. Start over with a different prompt.
                 </p>
               </>
             )}

@@ -18,6 +18,7 @@ export default function AuthCallback() {
       localStorage.setItem("user_id",   userId);
       localStorage.setItem("user_name", userName);
       localStorage.setItem("is_admin",  isAdmin === "true" ? "true" : "false");
+      localStorage.setItem("auth_token", params.get("token") ?? "");
       // Kung admin, papunta sa admin panel. Kung regular user, sa dashboard
       setLocation(isAdmin === "true" ? "/admin" : "/dashboard");
     } else {
