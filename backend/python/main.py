@@ -61,7 +61,30 @@ from temporal_engine import apply_temporal
 from relationship_engine import apply_rules
 from anomaly_injector import inject_anomalies
 
-app = FastAPI(title="SynthCS Python Service")
+from fastapi.responses import JSONResponse as _JSONResponse
+
+
+def _json_safe(value):
+    """∞ / -∞ / NaN can't be represented in JSON — send them as empty (null) instead of crashing."""
+    import math
+    if isinstance(value, float):
+        return value if math.isfinite(value) else None
+    if isinstance(value, dict):
+        return {k: _json_safe(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(v) for v in value]
+    return value
+
+
+class SafeJSONResponse(_JSONResponse):
+    """Every JSON reply goes through _json_safe, so one infinite value in a
+    generated preview can never turn into a 500 "Internal Server Error"."""
+    def render(self, content) -> bytes:
+        import json
+        return json.dumps(_json_safe(content), ensure_ascii=False, allow_nan=False, separators=(",", ":")).encode("utf-8")
+
+
+app = FastAPI(title="SynthCS Python Service", default_response_class=SafeJSONResponse)
 
 app.add_middleware(
     CORSMiddleware,

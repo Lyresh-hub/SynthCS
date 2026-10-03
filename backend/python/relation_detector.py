@@ -24,6 +24,7 @@ import os
 import re
 from typing import Any
 
+import numpy as np
 import pandas as pd
 
 from analyzer import _infer_type
@@ -281,8 +282,10 @@ def profile_table(df: pd.DataFrame, pk: str | None) -> list[dict[str, Any]]:
                 c["date_to"]   = parsed.max().strftime("%Y-%m-%d")
 
         if ftype in ("integer", "float") and not nn.empty:
-            c["min_val"] = float(nn.min())
-            c["max_val"] = float(nn.max())
+            finite = nn[np.isfinite(nn.astype(float))]   # ignore inf/-inf in the real data
+            if not finite.empty:
+                c["min_val"] = float(finite.min())
+                c["max_val"] = float(finite.max())
             try:
                 skew = float(nn.skew())
                 c["distribution"] = "skewed" if abs(skew) > 1 else "normal"

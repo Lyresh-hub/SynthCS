@@ -956,6 +956,13 @@ def gen_col(ftype: str, n: int, c: Any, field_name: str = "", description: str =
     true_ratio   = 0.5 if _tr is None else float(_tr)
     min_val      = getattr(c, "min_val",      None)
     max_val      = getattr(c, "max_val",      None)
+    # Infinite / astronomically large bounds (e.g. profiled from real data like UNSW-NB15)
+    # would make (hi - lo) overflow and produce ∞, which can't be sent as JSON.
+    _LIMIT = 1e15
+    if min_val is not None and not (np.isfinite(float(min_val)) and abs(float(min_val)) <= _LIMIT):
+        min_val = None
+    if max_val is not None and not (np.isfinite(float(max_val)) and abs(float(max_val)) <= _LIMIT):
+        max_val = None
 
     if ftype == "integer":
         lo = int(min_val) if min_val is not None else 1
