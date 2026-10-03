@@ -1606,6 +1606,7 @@ app.patch("/api/admin/users/:id/ban", requireAdmin, async (req, res) => {
       [reason, req.params.id]
     );
     banCache.delete(req.params.id); // takes effect on the user's very next request
+    logActivity(req.params.id, "account_banned", { by: "admin", reason, admin_id: req.query.admin_id ?? null });
     res.json({ success: true });
   } catch (err) {
     console.error("Admin ban user error:", err.message);
@@ -1620,6 +1621,7 @@ app.patch("/api/admin/users/:id/unban", requireAdmin, async (req, res) => {
       [req.params.id]
     );
     banCache.delete(req.params.id);
+    logActivity(req.params.id, "account_unbanned", { admin_id: req.query.admin_id ?? null });
     res.json({ success: true });
   } catch (err) {
     console.error("Admin unban user error:", err.message);
@@ -1635,6 +1637,7 @@ app.patch("/api/admin/users/:id/remove-strikes", requireAdmin, async (req, res) 
       [req.params.id]
     );
     banCache.delete(req.params.id);
+    logActivity(req.params.id, "strikes_reset", { admin_id: req.query.admin_id ?? null });
     res.json({ success: true });
   } catch (err) {
     console.error("Remove strikes error:", err.message);
@@ -2636,16 +2639,21 @@ app.post("/instructor/flagged-prompts/:id/reject", async (req, res) => {
     await pool.query("UPDATE datasets SET status = 'rejected' WHERE review_id = $1", [req.params.id]);
 
     // Apply a strike and check for ban
-    await pool.query(
-      "UPDATE users SET strike_count = COALESCE(strike_count, 0) + 1 WHERE id = $1",
+    const strikeRes = await pool.query(
+      "UPDATE users SET strike_count = COALESCE(strike_count, 0) + 1 WHERE id = $1 RETURNING strike_count",
       [student_id]
     );
-    await pool.query(
+    const newlyBanned = await pool.query(
       `UPDATE users SET is_banned = TRUE, ban_reason = 'Repeated inappropriate dataset generation attempts (3 strikes)'
-       WHERE id = $1 AND strike_count >= 3`,
+       WHERE id = $1 AND strike_count >= 3 AND COALESCE(is_banned, FALSE) = FALSE RETURNING id`,
       [student_id]
     );
     banCache.delete(student_id); // a 3rd strike signs the student out on their next request
+    const reviewer = instructor_id ? await pool.query("SELECT full_name FROM users WHERE id = $1", [instructor_id]) : { rows: [] };
+    logActivity(student_id, "strike_added", { strikes: strikeRes.rows[0]?.strike_count ?? null, by_id: instructor_id ?? null, by_name: reviewer.rows[0]?.full_name ?? null });
+    if (newlyBanned.rowCount) {
+      logActivity(student_id, "account_banned", { by: "system", reason: "Repeated inappropriate dataset generation attempts (3 strikes)", strikes: strikeRes.rows[0]?.strike_count ?? null });
+    }
 
     // Fetch student + instructor info to send rejection email
     const [studentRes, instructorRes] = await Promise.all([
@@ -2682,7 +2690,7 @@ function promptTriggers(promptText, restrictions) {
 // like the stat panels on a Grafana dashboard.
 const SINCE_INTERVALS = { "1h": "1 hour", "24h": "24 hours", "7d": "7 days", "30d": "30 days" };
 
-async function queryLogs(scopeSql, scopeParams, query, restrictions = []) {
+async function queryLogs(scopeSql, scopeParams, query, restrictions = [], { hidePrompts = false } = {}) {
   const where = [scopeSql];
   const params = [...scopeParams];
   const add = (sql, value) => { params.push(value); where.push(sql.replace("?", `$${params.length}`)); };
@@ -2728,7 +2736,8 @@ async function queryLogs(scopeSql, scopeParams, query, restrictions = []) {
     logs: logs.rows.map((row) => ({
       ...row,
       message: row.message || describeLog(row.action_type, row.details).message,
-      triggers: promptTriggers(row.details?.prompt_text, restrictions),
+      details: hidePrompts ? stripPromptFields(row.details) : row.details,
+      triggers: hidePrompts ? [] : promptTriggers(row.details?.prompt_text, restrictions),
     })),
     counts: tally,
   };
@@ -2761,9 +2770,26 @@ app.get("/instructor/logs", requireAuth, async (req, res) => {
 });
 
 // Admin scope: everything, including anonymous failed logins and all system events
+// Prompt content (what students typed) is the instructor's to review, not the
+// admin's: these events are left out of the admin log, and prompt fields are
+// removed from everything else the admin sees.
+const PROMPT_CONTENT_ACTIONS = [
+  "dataset_search", "ai_search", "search_no_results", "schema_generated",
+  "prompt_flagged", "prompt_blocked", "prompt_resubmitted_rejected",
+];
+const PROMPT_DETAIL_KEYS = ["prompt_text", "triggers", "ai", "flag_reason"];
+function stripPromptFields(details) {
+  if (!details || typeof details !== "object") return details;
+  const out = { ...details };
+  for (const k of PROMPT_DETAIL_KEYS) delete out[k];
+  return out;
+}
+
+// Admin scope: every user's account & system activity (logins, logouts, bans,
+// enrollments, datasets, errors) — but no prompt content.
 app.get("/api/admin/logs", requireAdmin, async (req, res) => {
   try {
-    res.json(await queryLogs("TRUE", [], req.query));
+    res.json(await queryLogs("al.action_type <> ALL($1)", [PROMPT_CONTENT_ACTIONS], req.query, [], { hidePrompts: true }));
   } catch (err) {
     console.error("Admin logs error:", err.message);
     res.status(500).json({ error: "Server error" });

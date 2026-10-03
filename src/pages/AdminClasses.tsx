@@ -288,7 +288,7 @@ export default function AdminClasses() {
       {tab === "activity" && (
         <LogViewer
           endpoint={`${BACKEND}/api/admin/logs?admin_id=${adminId}`}
-          scopeNote="All users (students, instructors, admins) and all system events, including failed logins for unknown accounts. Click a row for full details."
+          scopeNote="Account and system activity for all users (students, instructors, admins): logins, logouts, bans, enrollments, datasets, and errors. Prompt content is not shown here — instructors review their students' prompts. Click a row for full details."
         />
       )}
     </div>

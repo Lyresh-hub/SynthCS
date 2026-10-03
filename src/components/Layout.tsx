@@ -3,11 +3,12 @@ import { useLocation, Link, useRoute } from "wouter";
 import {
   LayoutDashboard, Layers, Download,
   Bell, FileJson, Settings, CheckCheck, Trash2, Database, Menu, X, HelpCircle, GraduationCap, ClipboardList,
+  CheckCircle, XCircle,
 } from "lucide-react";
 import { cn } from "../lib/utils";
 import {
   getNotifications, markRead, markAllRead, clearNotifications,
-  subscribeNotifications, type AppNotification,
+  subscribeNotifications, pushNotification, type AppNotification,
 } from "../lib/notifications";
 import OnboardingTour from "./OnboardingTour";
 import { NODE_API } from "../lib/config";
@@ -46,6 +47,40 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   // Kinukuha yung pangalan ng naka-login na user mula sa localStorage
   const userName = localStorage.getItem("user_name") ?? "User";
 
+  // Bell notification when the instructor approves or rejects a flagged prompt.
+  // We remember each request's last seen status per user; a change from pending
+  // (or a decision we haven't seen yet) becomes a notification. On the very first
+  // check we only announce decisions from the last 7 days, not the whole history.
+  function notifyReviewDecisions(rows: Array<{ id: string; status: string; prompt_text: string; reviewed_at: string | null; instructor_name: string | null }>) {
+    const userId = localStorage.getItem("user_id");
+    if (!userId) return;
+    const key = `seen_review_status_${userId}`;
+    let seen: Record<string, string> | null = null;
+    try { seen = JSON.parse(localStorage.getItem(key) ?? "null"); } catch { seen = null; }
+    const firstRun = seen === null;
+    const next: Record<string, string> = {};
+    for (const r of rows) {
+      next[r.id] = r.status;
+      if (r.status !== "approved" && r.status !== "rejected") continue;
+      const before = seen?.[r.id];
+      if (before === r.status) continue;
+      if (firstRun && (!r.reviewed_at || Date.now() - new Date(r.reviewed_at).getTime() > 7 * 86_400_000)) continue;
+      const who = r.instructor_name ?? "Your instructor";
+      const prompt = r.prompt_text.length > 60 ? `${r.prompt_text.slice(0, 60)}…` : r.prompt_text;
+      pushNotification({
+        kind: "review",
+        status: r.status as "approved" | "rejected",
+        link: "/my-requests",
+        dataset_id: "",
+        title: r.status === "approved" ? "Prompt approved ✓" : "Prompt rejected ✗",
+        message: r.status === "approved"
+          ? `${who} approved “${prompt}”. Open My Requests to see the results.`
+          : `${who} rejected “${prompt}”. This prompt can't be used.`,
+      });
+    }
+    localStorage.setItem(key, JSON.stringify(next));
+  }
+
   // Number of the student's flagged prompts still waiting for the instructor (sidebar badge)
   const [pendingRequests, setPendingRequests] = useState(0);
   useEffect(() => {
@@ -53,7 +88,11 @@ export default function Layout({ children }: { children: React.ReactNode }) {
     const check = () =>
       fetch(`${NODE_API}/api/student/reviews`)
         .then((r) => (r.ok ? r.json() : []))
-        .then((rows) => { if (Array.isArray(rows)) setPendingRequests(rows.filter((x) => x.status === "pending").length); })
+        .then((rows) => {
+          if (!Array.isArray(rows)) return;
+          setPendingRequests(rows.filter((x) => x.status === "pending").length);
+          notifyReviewDecisions(rows);
+        })
         .catch(() => {});
     check();
     // Every 30 s — this check-in also signs out a user who gets banned while idle
@@ -142,6 +181,10 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   function handleNotifClick(n: AppNotification) {
     markRead(n.id);
     setBellOpen(false);
+    if (n.kind === "review") {          // instructor's decision → My Requests
+      setLocation(n.link ?? "/my-requests");
+      return;
+    }
     sessionStorage.setItem("preview_params", JSON.stringify({ id: n.dataset_id, name: n.title, rows: 0 }));
     setLocation("/preview");
   }
@@ -343,8 +386,15 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                           !n.read && "bg-purple-50/60"
                         )}
                       >
-                        <div className="w-7 h-7 rounded-full bg-gradient-to-br from-purple-500 to-indigo-600 flex items-center justify-center flex-shrink-0 mt-0.5">
-                          <Database className="w-3.5 h-3.5 text-white" />
+                        <div className={cn(
+                          "w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5",
+                          n.kind === "review"
+                            ? (n.status === "approved" ? "bg-green-500" : "bg-red-500")
+                            : "bg-gradient-to-br from-purple-500 to-indigo-600"
+                        )}>
+                          {n.kind === "review"
+                            ? (n.status === "approved" ? <CheckCircle className="w-3.5 h-3.5 text-white" /> : <XCircle className="w-3.5 h-3.5 text-white" />)
+                            : <Database className="w-3.5 h-3.5 text-white" />}
                         </div>
                         <div className="flex-1 min-w-0">
                           <p className="text-xs font-semibold text-gray-800 truncate">{n.title}</p>

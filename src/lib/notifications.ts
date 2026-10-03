@@ -5,6 +5,11 @@ export interface AppNotification {
   dataset_id: string;
   read: boolean;
   created_at: string;
+  // "dataset" (default) opens the dataset preview; "review" is an instructor's
+  // decision on a flagged prompt and opens `link` (My Requests)
+  kind?: "dataset" | "review";
+  status?: "approved" | "rejected";
+  link?: string;
 }
 
 const KEY = "synthcs_notifications";
