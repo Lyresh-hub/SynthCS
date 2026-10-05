@@ -1,14 +1,17 @@
-import { useState, useLayoutEffect } from "react";
+import { useState, useLayoutEffect, useEffect } from "react";
 import { X, ChevronRight, ChevronLeft } from "lucide-react";
 
-interface TourStep {
+// Guided walkthrough: dims the page, highlights one element per step and explains it.
+// Used for students (default steps below) and instructors (InstructorTour.tsx).
+export interface TourStep {
   title: string;
   description: string;
-  target: string | null;
+  target: string | null;            // CSS selector of the element to highlight; null = centred card
   placement?: "right" | "bottom";
+  onEnter?: () => void;             // e.g. open the tab this step talks about
 }
 
-const STEPS: TourStep[] = [
+const STUDENT_STEPS: TourStep[] = [
   {
     title: "Welcome to SynthCS!",
     description: "Generate realistic synthetic datasets in minutes. Here's a quick look at what you can do.",
@@ -52,7 +55,8 @@ const STEPS: TourStep[] = [
 ];
 
 const PAD = 10; // padding around spotlight target
-const TIP_W = 320; // tooltip width in px
+const TIP_W = 320; // tooltip width in px (narrower on phones)
+const TIP_H = 230; // rough tooltip height, for deciding above/below
 
 /** Find first element matching selector that is actually on-screen (not in hidden mobile drawer). */
 function findVisible(selector: string): DOMRect | null {
@@ -64,27 +68,38 @@ function findVisible(selector: string): DOMRect | null {
   return null;
 }
 
-function tooltipPos(rect: DOMRect, placement: "right" | "bottom"): React.CSSProperties {
+// Where the card goes: beside the element if there's room, otherwise below it,
+// or above it when it sits near the bottom of the screen (phones).
+function resolvePlacement(rect: DOMRect, wanted: "right" | "bottom"): "right" | "bottom" | "top" {
+  const w = Math.min(TIP_W, window.innerWidth - 32);
+  if (wanted === "right" && rect.right + 20 + w <= window.innerWidth - 8) return "right";
+  return rect.bottom + 16 + TIP_H > window.innerHeight && rect.top - 16 - TIP_H > 0 ? "top" : "bottom";
+}
+
+function tooltipPos(rect: DOMRect, placement: "right" | "bottom" | "top"): React.CSSProperties {
+  const w = Math.min(TIP_W, window.innerWidth - 32);
   if (placement === "right") {
     return {
       top: Math.max(16, Math.min(window.innerHeight - 340, rect.top + rect.height / 2 - 110)),
       left: rect.right + 20,
-      width: TIP_W,
+      width: w,
     };
   }
-  return {
-    top: rect.bottom + 16,
-    left: Math.max(16, Math.min(window.innerWidth - TIP_W - 16, rect.left + rect.width / 2 - TIP_W / 2)),
-    width: TIP_W,
-  };
+  const left = Math.max(16, Math.min(window.innerWidth - w - 16, rect.left + rect.width / 2 - w / 2));
+  return placement === "top"
+    ? { bottom: window.innerHeight - rect.top + 16, left, width: w }
+    : { top: Math.min(rect.bottom + 16, window.innerHeight - TIP_H), left, width: w };
 }
 
 interface Props {
   onDone: () => void;
-  onFinish: () => void; // called specifically on "Get Started" — navigate to Schema Builder
+  onFinish: () => void; // called specifically on the last button ("Get Started")
+  steps?: TourStep[];
+  finishLabel?: string;
 }
 
-export default function OnboardingTour({ onDone, onFinish }: Props) {
+export default function OnboardingTour({ onDone, onFinish, steps, finishLabel = "Get Started" }: Props) {
+  const STEPS = steps ?? STUDENT_STEPS;
   const [step, setStep] = useState(0);
   const [rect, setRect] = useState<DOMRect | null>(null);
 
@@ -93,20 +108,33 @@ export default function OnboardingTour({ onDone, onFinish }: Props) {
   const isLast  = step === STEPS.length - 1;
 
   useLayoutEffect(() => {
+    current.onEnter?.();
     if (!current.target) { setRect(null); return; }
-    const r = findVisible(current.target);
-    setRect(r);
-    if (r) {
-      const el = document.querySelector(current.target);
-      el?.scrollIntoView({ block: "nearest", behavior: "smooth" });
-    }
-  }, [step, current.target]);
+    const target = current.target;
+    // Let the page re-render first (e.g. after switching tabs), then highlight
+    const t = setTimeout(() => {
+      const el = Array.from(document.querySelectorAll(target)).find((e) => e.getBoundingClientRect().width > 0);
+      el?.scrollIntoView({ block: "center", behavior: "auto" });
+      setRect(findVisible(target));
+    }, 60);
+    return () => clearTimeout(t);
+  }, [step]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Keep the highlight on the element when the page scrolls or the window resizes
+  useEffect(() => {
+    if (!current.target) return;
+    const target = current.target;
+    const update = () => setRect(findVisible(target));
+    window.addEventListener("resize", update);
+    window.addEventListener("scroll", update, true);
+    return () => { window.removeEventListener("resize", update); window.removeEventListener("scroll", update, true); };
+  }, [current.target]);
 
   function next() { step < STEPS.length - 1 ? setStep((s) => s + 1) : onFinish(); }
   function prev() { if (step > 0) setStep((s) => s - 1); }
 
   const hasSpotlight = !!current.target && !!rect;
-  const placement    = current.placement ?? "right";
+  const placement    = rect ? resolvePlacement(rect, current.placement ?? "right") : "bottom";
 
   const spotlightStyle: React.CSSProperties = hasSpotlight ? {
     position: "fixed",
@@ -136,8 +164,10 @@ export default function OnboardingTour({ onDone, onFinish }: Props) {
       {/* Spotlight cutout */}
       {hasSpotlight && <div style={spotlightStyle} />}
 
-      {/* Tooltip card */}
-      <div style={tipStyle} className="tour-card-enter">
+      {/* Tooltip card — positioned by the outer box; the entrance animation runs on the
+          inner box so it can't override the centring transform */}
+      <div style={tipStyle}>
+      <div className="tour-card-enter relative">
         {/* Arrow for right placement */}
         {hasSpotlight && placement === "right" && (
           <div className="absolute -left-2 top-1/2 -translate-y-1/2 w-0 h-0 border-t-8 border-b-8 border-r-8 border-t-transparent border-b-transparent border-r-white drop-shadow-sm" />
@@ -145,6 +175,10 @@ export default function OnboardingTour({ onDone, onFinish }: Props) {
         {/* Arrow for bottom placement */}
         {hasSpotlight && placement === "bottom" && (
           <div className="absolute -top-2 left-1/2 -translate-x-1/2 w-0 h-0 border-l-8 border-r-8 border-b-8 border-l-transparent border-r-transparent border-b-white drop-shadow-sm" />
+        )}
+        {/* Arrow for top placement (card above the element) */}
+        {hasSpotlight && placement === "top" && (
+          <div className="absolute -bottom-2 left-1/2 -translate-x-1/2 w-0 h-0 border-l-8 border-r-8 border-t-8 border-l-transparent border-r-transparent border-t-white drop-shadow-sm" />
         )}
 
         <div className="relative bg-white rounded-2xl shadow-2xl overflow-hidden">
@@ -176,9 +210,9 @@ export default function OnboardingTour({ onDone, onFinish }: Props) {
           </div>
 
           {/* Footer */}
-          <div className="px-6 pb-5 flex items-center justify-between">
-            {/* Step dots */}
-            <div className="flex items-center gap-1.5">
+          <div className="px-6 pb-5 flex items-center justify-between gap-2">
+            {/* Step dots (hidden on phones and for long tours — "Step X of Y" is shown above) */}
+            <div className={`${STEPS.length <= 7 ? "hidden sm:flex" : "hidden"} items-center gap-1.5`}>
               {STEPS.map((_, i) => (
                 <button
                   key={i}
@@ -193,7 +227,7 @@ export default function OnboardingTour({ onDone, onFinish }: Props) {
             </div>
 
             {/* Nav buttons */}
-            <div className="flex items-center gap-1.5">
+            <div className="flex items-center gap-1.5 ml-auto">
               {!isFirst && (
                 <button
                   onClick={prev}
@@ -212,12 +246,13 @@ export default function OnboardingTour({ onDone, onFinish }: Props) {
                 onClick={next}
                 className="flex items-center gap-1 px-4 py-1.5 bg-purple-600 hover:bg-purple-700 text-white text-xs font-semibold rounded-lg transition-colors"
               >
-                {isLast ? "Get Started" : "Next"}
+                {isLast ? finishLabel : "Next"}
                 {!isLast && <ChevronRight className="w-3.5 h-3.5" />}
               </button>
             </div>
           </div>
         </div>
+      </div>
       </div>
     </>
   );

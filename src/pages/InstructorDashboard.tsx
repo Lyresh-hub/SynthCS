@@ -3,12 +3,14 @@ import { useLocation } from "wouter";
 import {
   LogOut, Clock, CheckCircle, XCircle, Users, AlertTriangle,
   Activity, Link as LinkIcon, Plus, Trash2, UserMinus, UserPlus, Copy, Check,
-  MessageSquare, Search, ChevronDown, ChevronUp, ShieldAlert, Shield, Ban,
+  MessageSquare, Search, ChevronDown, ChevronUp, ShieldAlert, Shield, Ban, HelpCircle,
 } from "lucide-react";
 import { NODE_API as BACKEND } from "../lib/config";
 import { endServerSession } from "../lib/authFetch";
 import { CATEGORY_LABELS, normalizeCategory } from "../lib/categories";
 import ClampedText from "../components/ClampedText";
+import OnboardingTour from "../components/OnboardingTour";
+import { instructorTourSteps } from "../components/InstructorTour";
 import LogViewer from "../components/LogViewer";
 import PromptHistory, { type PromptEntry, type PromptFocus } from "../components/PromptHistory";
 
@@ -104,6 +106,30 @@ export default function InstructorDashboard() {
   const [newKeywordAction,    setNewKeywordAction]    = useState<"flag" | "block">("flag");
   const [quotaInput,          setQuotaInput]          = useState("");
   const [savingRestriction,   setSavingRestriction]   = useState(false);
+
+  // ── Walkthrough: shown once per instructor (saved on the server), replay with "Take a Tour"
+  const tourKey = `instructor_tour_done:${instructorId}`;
+  const [showTour, setShowTour] = useState(false);
+  useEffect(() => {
+    if (!instructorId || localStorage.getItem(tourKey) === "true") return;
+    fetch(`${BACKEND}/api/users/${instructorId}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((u) => {
+        if (u?.instructor_tour_done) localStorage.setItem(tourKey, "true");
+        else if (u) setShowTour(true);
+      })
+      .catch(() => {});
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  const endTour = () => {
+    setShowTour(false);
+    setTab("pending");
+    if (localStorage.getItem(tourKey) === "true") return;
+    localStorage.setItem(tourKey, "true");
+    fetch(`${BACKEND}/api/user/tour-done`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ user_id: instructorId, tour: "instructor" }),
+    }).catch(() => {});
+  };
 
   // Level 3 list comes from the server — the exact list the detector uses
   const [systemTriggers, setSystemTriggers] = useState<SystemTrigger[]>([]);
@@ -389,6 +415,10 @@ export default function InstructorDashboard() {
 
   return (
     <div className="min-h-screen bg-gray-50">
+      {/* Walkthrough of the dashboard (first visit, or "Take a Tour") */}
+      {showTour && (
+        <OnboardingTour steps={instructorTourSteps(setTab)} finishLabel="Done" onDone={endTour} onFinish={endTour} />
+      )}
       <nav className="bg-[#1E1347] border-b border-white/10 px-6 h-16 flex items-center justify-between">
         <div className="flex items-center gap-3">
           <img src="/synthcs-logo.png" alt="SynthCS" className="w-7 h-7 drop-shadow-[0_0_8px_rgba(139,92,246,0.6)]" />
@@ -399,6 +429,10 @@ export default function InstructorDashboard() {
         </div>
         <div className="flex items-center gap-4">
           <span className="text-purple-200/70 text-sm hidden sm:block">{instructorName}</span>
+          <button onClick={() => setShowTour(true)} data-tour="instructor-tour-button" title="Take a Tour"
+            className="flex items-center gap-1.5 text-purple-200/70 hover:text-white text-sm transition-colors">
+            <HelpCircle className="w-4 h-4" /> <span className="hidden sm:inline">Take a Tour</span>
+          </button>
           <button onClick={handleSignOut} className="flex items-center gap-1.5 text-purple-200/70 hover:text-white text-sm transition-colors">
             <LogOut className="w-4 h-4" /> Sign out
           </button>
@@ -413,7 +447,7 @@ export default function InstructorDashboard() {
 
         <div className="flex gap-1 bg-white border border-gray-100 rounded-xl p-1 w-fit mb-6 shadow-sm flex-wrap">
           {TABS.map((t) => (
-            <button key={t.id} onClick={() => setTab(t.id)}
+            <button key={t.id} onClick={() => setTab(t.id)} data-tour={`tab-${t.id}`}
               className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
                 tab === t.id ? "bg-purple-600 text-white shadow-sm" : "text-gray-500 hover:text-gray-700"
               }`}>
@@ -887,9 +921,9 @@ function DetectionBreakdown({ detection, compact = false }: { detection: Detecti
   const flagged = detection.flag ?? (matches.some((m) => m.action !== "exempt") || ai?.status === "unsafe");
 
   const Row = ({ label, children }: { label: string; children: React.ReactNode }) => (
-    <div className="flex gap-2 text-xs">
-      <span className="flex-shrink-0 w-44 font-medium text-gray-500">{label}</span>
-      <span className="text-gray-700 min-w-0">{children}</span>
+    <div className="flex flex-col sm:flex-row gap-0.5 sm:gap-2 text-xs">
+      <span className="flex-shrink-0 sm:w-44 font-medium text-gray-500">{label}</span>
+      <span className="text-gray-700 min-w-0 [overflow-wrap:anywhere]">{children}</span>
     </div>
   );
   const Hits = ({ lvl }: { lvl: number }) => {
