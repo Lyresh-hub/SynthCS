@@ -1822,6 +1822,58 @@ app.post("/api/admin/instructors", requireAdmin, async (req, res) => {
   }
 });
 
+// ── Admin usage numbers (from the activity log, so deleted/expired datasets still count) ──
+// ?days=7|30|90 — totals for the period, a per-day series, and breakdowns.
+app.get("/api/admin/metrics", requireAdmin, async (req, res) => {
+  const days = [7, 30, 90].includes(Number(req.query.days)) ? Number(req.query.days) : 30;
+  const since = `NOW() - INTERVAL '${days} days'`;
+  const count = (sql, params = []) => pool.query(sql, params).then((r) => Number(r.rows[0]?.n ?? 0));
+  const breakdown = (key) => pool.query(
+    `SELECT COALESCE(NULLIF(TRIM(details->>'${key}'), ''), 'Not given') AS label, COUNT(*)::int AS n
+     FROM activity_log WHERE action_type = 'dataset_generated' AND created_at >= ${since}
+     GROUP BY 1 ORDER BY 2 DESC LIMIT 8`
+  ).then((r) => r.rows);
+  try {
+    const [generated, rows, activeUsers, newUsers, searches, flagged, blocked, errors, genFailed, uploadsFailed,
+           perDay, reviews, categories, purposes, sources] = await Promise.all([
+      count(`SELECT COUNT(*) AS n FROM activity_log WHERE action_type = 'dataset_generated' AND created_at >= ${since}`),
+      count(`SELECT COALESCE(SUM(NULLIF(details->>'rows', '')::bigint), 0) AS n FROM activity_log
+             WHERE action_type = 'dataset_generated' AND created_at >= ${since} AND details->>'rows' ~ '^[0-9]+$'`),
+      count(`SELECT COUNT(DISTINCT user_id) AS n FROM activity_log WHERE user_id IS NOT NULL AND created_at >= ${since}`),
+      count(`SELECT COUNT(*) AS n FROM users WHERE created_at >= ${since}`),
+      count(`SELECT COUNT(*) AS n FROM activity_log WHERE action_type IN ('dataset_search', 'ai_search') AND created_at >= ${since}`),
+      count(`SELECT COUNT(*) AS n FROM activity_log WHERE action_type = 'prompt_flagged' AND created_at >= ${since}`),
+      count(`SELECT COUNT(*) AS n FROM activity_log WHERE action_type = 'prompt_blocked' AND created_at >= ${since}`),
+      count(`SELECT COUNT(*) AS n FROM activity_log WHERE level = 'ERROR' AND created_at >= ${since}`),
+      count(`SELECT COUNT(*) AS n FROM activity_log WHERE action_type = 'generation_failed' AND created_at >= ${since}`),
+      count(`SELECT COUNT(*) AS n FROM activity_log WHERE action_type = 'dataset_upload_failed' AND created_at >= ${since}`),
+      // Generations per day (Philippine time), every day included
+      pool.query(`
+        SELECT TO_CHAR(d.day, 'Mon DD') AS day, COUNT(al.id)::int AS count
+        FROM generate_series(
+          date_trunc('day', (NOW() AT TIME ZONE 'Asia/Manila') - INTERVAL '${days - 1} days'),
+          date_trunc('day', NOW() AT TIME ZONE 'Asia/Manila'), '1 day') AS d(day)
+        LEFT JOIN activity_log al ON al.action_type = 'dataset_generated'
+          AND date_trunc('day', al.created_at AT TIME ZONE 'Asia/Manila') = d.day
+        GROUP BY d.day ORDER BY d.day`).then((r) => r.rows),
+      pool.query(`SELECT status, COUNT(*)::int AS n FROM flagged_prompts WHERE created_at >= ${since} GROUP BY status`)
+        .then((r) => Object.fromEntries(r.rows.map((x) => [x.status, x.n]))).catch(() => ({})),
+      breakdown("category"), breakdown("purpose"), breakdown("source"),
+    ]);
+    res.json({
+      days,
+      totals: { generated, rows, active_users: activeUsers, new_users: newUsers, searches, flagged, blocked,
+                errors, generation_failed: genFailed, upload_failed: uploadsFailed },
+      per_day: perDay,
+      reviews: { pending: reviews.pending ?? 0, approved: reviews.approved ?? 0, rejected: reviews.rejected ?? 0 },
+      categories, purposes, sources,
+    });
+  } catch (err) {
+    console.error("Admin metrics error:", err.message);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
 app.get("/api/admin/users", requireAdmin, async (req, res) => {
   try {
     const result = await pool.query(`
@@ -3111,7 +3163,8 @@ async function queryLogs(scopeSql, scopeParams, query, restrictions = [], { hide
 
   const levels = String(query.level ?? "").split(",").map((l) => l.trim().toUpperCase()).filter((l) => ["INFO", "WARN", "ERROR"].includes(l));
   const levelSql = levels.length ? ` AND al.level = ANY($${params.length + 1})` : "";
-  const limit = Math.min(Math.max(parseInt(query.limit, 10) || 500, 1), 1000);
+  // The page shows up to 1,000 entries; a CSV export (export=1) may take up to 10,000
+  const limit = Math.min(Math.max(parseInt(query.limit, 10) || 500, 1), query.export === "1" ? 10000 : 1000);
 
   const [logs, counts] = await Promise.all([
     pool.query(
@@ -3166,12 +3219,24 @@ app.get("/instructor/logs", requireAuth, async (req, res) => {
       )
     )`;
     const restrictions = await loadClassRestrictions(instructorId);
-    res.json(await queryLogs(scope, [instructorId], req.query, restrictions));
+    const result = await queryLogs(scope, [instructorId], req.query, restrictions);
+    noteLogExport(req, result);
+    res.json(result);
   } catch (err) {
     console.error("Instructor logs error:", err.message);
     res.status(500).json({ error: "Server error" });
   }
 });
+
+// A CSV download of the logs is itself recorded (who exported what)
+function noteLogExport(req, result) {
+  if (req.query.export !== "1" || !req.user?.id) return;
+  const q = req.query;
+  logActivity(req.user.id, "logs_exported", {
+    count: result.logs.length, since: q.since || "all", level: q.level || null,
+    category: q.category || null, role: q.role || null, search: q.q || null,
+  });
+}
 
 // Admin scope: everything, including anonymous failed logins and all system events
 // Prompt content (what students typed) is the instructor's to review, not the
@@ -3193,7 +3258,9 @@ function stripPromptFields(details) {
 // enrollments, datasets, errors) — but no prompt content.
 app.get("/api/admin/logs", requireAdmin, async (req, res) => {
   try {
-    res.json(await queryLogs("al.action_type <> ALL($1)", [PROMPT_CONTENT_ACTIONS], req.query, [], { hidePrompts: true }));
+    const result = await queryLogs("al.action_type <> ALL($1)", [PROMPT_CONTENT_ACTIONS], req.query, [], { hidePrompts: true });
+    noteLogExport(req, result);
+    res.json(result);
   } catch (err) {
     console.error("Admin logs error:", err.message);
     res.status(500).json({ error: "Server error" });

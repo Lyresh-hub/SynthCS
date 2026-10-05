@@ -39,7 +39,11 @@ Before the rules run, the prompt is **normalised**. This means the rules also ma
 | Look-alike characters | `ph1shing`, `fr@ud`, `cr3dit`, `h4ck` | phishing, fraud, credit, hack |
 | Accents | `frâud` | fraud |
 | Misspelling of phishing | `fishing emails`, `fishing links` | phishing |
+| Common misspellings | `phising`, `fruad`, `corupt`, `manipulte`, `scamm`, `laundring`, `ilegal` | phishing, fraud, corrupt, manipulate, scam, money laundering, illegal |
+| Filipino / Taglish | `pekeng ID`, `doktorin ang grades`, `mangopya sa exam`, `nakaw`, `suhol`, `kurakot`, `dayaan`, `numero ng mga kaklase ko`, `nang hindi mahuli` | fake documents, tampering, cheating, stolen, bribe, corruption, fraud, personal info, evade detection |
 | Inside a longer phrase | "stock price **manipulation** dataset" | manipulate |
+
+**Filipino words.** Only forms that clearly carry the bad meaning are listed, so ordinary Tagalog prompts are not flagged: *mangopya* (cheat) but not plain *kopya* (copy); *pekeng ID* but not plain *peke*; *nakaw* but not *nakawala* (escaped); *daya* but not *dayap* or *dayuhan*. The test suite includes ordinary Tagalog prompts that must stay unflagged. The AI (Level 2) is also told that prompts may be in Filipino or Taglish.
 
 **Special case: "fishing".** "Fishing" is flagged as a likely misspelling of *phishing*. The only exception is a prompt that is clearly about real fishing, for example "fishing boat catch by species". That exception is cancelled as soon as the prompt also mentions emails, links, passwords, accounts, or similar words.
 

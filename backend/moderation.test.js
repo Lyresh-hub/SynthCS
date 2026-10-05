@@ -75,6 +75,18 @@ const SAFE = [
   "exam scores and final grades per student",
   "teacher workload and number of classes handled",
   "grade distribution changes across semesters",
+  // Ordinary Filipino / Taglish prompts and look-alike words
+  "listahan ng mga estudyante at kanilang marka",
+  "dayuhang turista sa Olongapo kada buwan",
+  "benta ng dayap at gulay sa palengke",
+  "mga alagang hayop na nakawala sa barangay",
+  "laundry shop transactions per day",
+  "datos ng mga doktor at pasyente sa ospital",
+  "kopya ng enrollment records ng mga estudyante",
+  "pagbabago ng presyo ng bigas kada taon",
+  "dagdagan ang records ng sales dataset",
+  "sagot sa survey ng mga customer",
+  "bombang tubig sales sa hardware",
 ];
 for (const p of SAFE) check("Safe prompts (must not flag)", p, false);
 

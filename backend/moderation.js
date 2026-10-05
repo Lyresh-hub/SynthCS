@@ -59,24 +59,24 @@ const SYSTEM_TRIGGERS = [
     examples: ["cvv", "CVV codes", "cvc", "cvv2"] },
   { term: "bank account number", category: "Financial data", pattern: /\bbank\s*account\s*(?:numbers?|nos?)\b|\brouting\s*numbers?\b/,
     examples: ["bank account number", "bank-account numbers", "routing number"] },
-  { term: "fraud", category: "Fraud & deception", pattern: /\bfraud\w*/,
-    examples: ["fraud", "frauds", "fraudulent", "fraudster", "FRAUD", "fr@ud"] },
-  { term: "scam", category: "Fraud & deception", pattern: /\bscam(?:s|med|mer|mers|ming)?\b/,
-    examples: ["scam", "scams", "scammer", "scamming", "SCAM"] },
-  { term: "money laundering", category: "Fraud & deception", pattern: /\blaunder\w*/,
-    examples: ["laundering", "launder money", "laundered", "money-laundering"] },
+  { term: "fraud", category: "Fraud & deception", pattern: /\bfr(?:au|ua)d\w*/,
+    examples: ["fraud", "frauds", "fraudulent", "fraudster", "FRAUD", "fr@ud", "fruad"] },
+  { term: "scam", category: "Fraud & deception", pattern: /\bscam+(?:s|med|mer|mers|ming)?\b/,
+    examples: ["scam", "scams", "scammer", "scamming", "SCAM", "scamm"] },
+  { term: "money laundering", category: "Fraud & deception", pattern: /\blaunde?r(?:ing|ed|s|ers?)?\b/,
+    examples: ["laundering", "launder money", "laundered", "money-laundering", "laundring"] },
   { term: "counterfeit", category: "Fraud & deception", pattern: /\bcounterfeit\w*/,
     examples: ["counterfeit", "counterfeiting", "counterfeited"] },
   { term: "bribe", category: "Corruption", pattern: /\bbrib(?:e|es|ed|ing|ery|eries)\b/,
     examples: ["bribe", "bribes", "bribery", "bribing", "bribed"] },
-  { term: "corrupt", category: "Corruption", pattern: /\bcorrupt\w*/,
-    examples: ["corrupt", "corrupted", "corruption", "corrupting", "corruptible", "CORRUPT", "c0rrupt"] },
+  { term: "corrupt", category: "Corruption", pattern: /\bcorr?upt\w*/,
+    examples: ["corrupt", "corrupted", "corruption", "corrupting", "corruptible", "CORRUPT", "c0rrupt", "corupt"] },
   { term: "embezzle", category: "Corruption", pattern: /\bembezzl\w*/,
     examples: ["embezzle", "embezzlement", "embezzling"] },
 
   // Falsification / academic integrity
-  { term: "manipulate", category: "Manipulation & falsification", pattern: /\bmanipulat\w*/,
-    examples: ["manipulate", "manipulates", "manipulated", "manipulating", "manipulation", "manipulative", "MANIPULATE", "man1pulate", "m a n i p u l a t e"] },
+  { term: "manipulate", category: "Manipulation & falsification", pattern: /\bman[ia]pul\w*/,
+    examples: ["manipulate", "manipulates", "manipulated", "manipulating", "manipulation", "manipulative", "MANIPULATE", "man1pulate", "m a n i p u l a t e", "manipulte", "manapulate"] },
   { term: "falsify", category: "Manipulation & falsification", pattern: /\bfalsif\w*/,
     examples: ["falsify", "falsified", "falsifying", "falsification"] },
   { term: "fabricated results", category: "Manipulation & falsification",
@@ -93,8 +93,8 @@ const SYSTEM_TRIGGERS = [
     examples: ["plagiarism", "plagiarize", "plagiarized"] },
 
   // Cyber attacks
-  { term: "phishing", category: "Cyber attack", pattern: /\bphish\w*/,
-    examples: ["phishing", "phish", "phished", "phisher", "PHISHING", "ph1shing", "phishing emails"] },
+  { term: "phishing", category: "Cyber attack", pattern: /\bphish\w*|\bphis+ing\w*/,
+    examples: ["phishing", "phish", "phished", "phisher", "PHISHING", "ph1shing", "phishing emails", "phising", "phissing"] },
   { term: "fishing (phishing misspelling)", category: "Cyber attack", pattern: /\bfishing\b/,
     // Real fishing/fisheries prompts are left alone — unless they also talk about emails, links, logins, etc.
     exempt: /\b(?:fish|fishes|fisher(?:y|ies|man|men|folk)?|catch(?:es)?|boats?|vessels?|species|marine|aquacultur\w*|harvest\w*|tuna|bangus|milkfish|tilapia|bait|rods?|nets?|coastal|ocean|seas?|rivers?|lakes?|landings?|tonnage|municipal waters|fishing grounds?)\b/,
@@ -137,8 +137,8 @@ const SYSTEM_TRIGGERS = [
     examples: ["patient record", "patient records", "medical record with name"] },
 
   // Violence / illegal activity
-  { term: "illegal", category: "Illegal activity", pattern: /\billegal\w*/,
-    examples: ["illegal", "illegally"] },
+  { term: "illegal", category: "Illegal activity", pattern: /\bil+egal\w*/,
+    examples: ["illegal", "illegally", "ilegal"] },
   { term: "weapon", category: "Illegal activity", pattern: /\bweapon\w*|\bbomb\s*making\b|\bexplosives?\b/,
     examples: ["weapon", "weapons", "bomb making", "explosives"] },
   { term: "drugs", category: "Illegal activity", pattern: /\bnarcotic\w*|\bdrug\s*(?:synthesis|trafficking|dealing)\b/,
@@ -156,6 +156,44 @@ const SYSTEM_TRIGGERS = [
     examples: ["without being detected", "without consent", "undetectable", "evade audits", "tax evasion"] },
   { term: "deceive", category: "Harmful intent", pattern: /\bdeceiv\w*|\bdeception\b|\bmislead\w*/,
     examples: ["deceive", "deceiving", "mislead", "misleading"] },
+
+  // Filipino / Taglish — the same intents in the words students actually type.
+  // Only forms that clearly carry the bad meaning are listed (e.g. "mangopya", not
+  // plain "kopya"; "pekeng ID", not plain "peke"), so normal Tagalog prompts pass.
+  { term: "daya / pandaraya (cheat, fraud)", category: "Fraud & deception",
+    pattern: /\b(?:daya|dinaya|dinadaya|dayain|dayaan|nadaya|madaya|mandaya|nandaya|pandaraya|mandaraya|nandaraya)\b/,
+    examples: ["dayaan", "pandaraya", "dinaya ang botohan", "madaya"] },
+  { term: "panloloko (deceive, scam)", category: "Fraud & deception",
+    pattern: /\b(?:panloloko|manloloko|manloko|nanloko|nanloloko|lokohin|niloko|niloloko)\b/,
+    examples: ["panloloko", "manloloko", "lokohin ang mga customer"] },
+  { term: "nakaw (steal)", category: "Theft & privacy", pattern: /\b\w{0,6}nakaw(?!al)\w*/,
+    examples: ["nakaw", "ninakaw", "pagnanakaw", "magnanakaw", "nakawin ang data"] },
+  { term: "suhol (bribe)", category: "Corruption", pattern: /\b(?:sinuhul|suhul|suhol|panunuhol|nanunuhol|manunuhol)\w*/,
+    examples: ["suhol", "suhulan", "sinuhulan", "panunuhol"] },
+  { term: "kurakot / korapsyon (corruption)", category: "Corruption",
+    pattern: /\b\w{0,6}(?:kurakot|ngurakot)\w*|\bkorap\w*|\bkor(?:u|a)psyon\b|\bkurapsyon\b/,
+    examples: ["kurakot", "nangungurakot", "pangungurakot", "korap", "korapsyon"] },
+  { term: "pekeng dokumento (fake documents)", category: "Manipulation & falsification",
+    pattern: /\b(?:peke|pekeng|pineke|pinekeng|pinepeke|mamemeke|pamemeke|namemeke)\s*(?:na\s*|ang\s*|yung\s*|ung\s*|ng\s*)?(?:mga\s*)?(?:ids?|dokumento\w*|documents?|resibo|receipts?|transcripts?|diploma\w*|grades?|marka|lisensya|licen[cs]e\w*|pirma|signatures?|sertipiko|certificates?|records?|rekord\w*|passports?|pasaporte|resulta|results?)\b/,
+    examples: ["pekeng ID", "pekeng transcript", "pineke ang pirma", "pekeng resibo"] },
+  { term: "doktorin / baguhin ang grades (tampering)", category: "Manipulation & falsification",
+    pattern: /\b(?:dinoktor|dinodoktor|doktorin|dinoctor|doctorin)\w*|\bi\s*(?:doktor|doctor)\s*(?:ang|yung|ung|ng)\b|\b(?:baguhin|binago|binabago|palitan|pinalitan|pinapalitan|taasan|tinaasan|tinataasan)\s*(?:ang|yung|ung|ng)?\s*(?:mga\s*)?(?:grades?|marka|gpa|scores?|iskor|transcripts?)\b/,
+    examples: ["doktorin ang grades", "i-doktor ang records", "baguhin ang grades", "tinaasan ang marka", "palitan yung GPA"] },
+  { term: "mangopya / leak ng sagot (cheating)", category: "Academic integrity",
+    pattern: /\b(?:mangopya|nangopya|nangongopya|pangongopya|mangongopya)\w*|\b(?:leak|nileak|ileak|leaked|pinakalat)\w*\s*(?:ng|ang|yung|ung)?\s*(?:mga\s*)?(?:sagot|answers?|questions?|tanong)\b/,
+    examples: ["mangopya sa exam", "nangongopya", "leak ng sagot", "i-leak ang mga tanong"] },
+  { term: "totoong personal na impormasyon (real personal data)", category: "Theft & privacy",
+    pattern: /\btotoong\s*(?:mga\s*)?(?:pangalan|data|datos|impormasyon|address|tirahan|numero|ids?|estudyante)\w*|\b(?:numero|cellphone|cp|phone\s*number|address|tirahan|password|email)\s*(?:ng|ni|nila|nina)\s*(?:mga\s*)?(?:kaklase|classmates?|kaibigan|guro|propesor|kapitbahay|ex|crush)\w*/,
+    examples: ["totoong pangalan ng mga estudyante", "numero ng mga kaklase ko", "address ng kapitbahay", "password ni crush"] },
+  { term: "hindi mahuli / ilusot (evade detection)", category: "Harmful intent",
+    pattern: /\b(?:hindi|di)\s*(?:mahuli|mahuhuli|nahuhuli|mahalata|mapansin|mapapansin|halata)\b|\b(?:lusutan|ilusot|makalusot|nakalusot)\b/,
+    examples: ["nang hindi mahuli", "para di mahalata", "ilusot sa audit", "makalusot sa system"] },
+  { term: "droga / shabu (drugs)", category: "Illegal activity",
+    pattern: /\bshabu\b|\b(?:bentahan|pagbebenta|tulak|nagtutulak|pagtutulak)\s*(?:ng\s*)?droga\b/,
+    examples: ["shabu", "bentahan ng droga", "pagtutulak ng droga"] },
+  { term: "pampasabog (explosives)", category: "Illegal activity",
+    pattern: /\bpampasabog\b|\bpaggawa\s*ng\s*(?:bomba|baril|pampasabog)\b/,
+    examples: ["pampasabog", "paggawa ng bomba"] },
 ];
 
 // ── Level 1: instructor trigger words → forgiving pattern ────────────────────
@@ -245,7 +283,8 @@ UNSAFE means the request is for: real personal data about real people; fraud, sc
 payment card or bank data meant for misuse; manipulating, falsifying, or fabricating results, grades, records, or evidence;
 corruption or bribery; fake IDs, transcripts, or documents; hacking, malware, or bypassing security; weapons, drugs, terrorism;
 or anything designed to harm, harass, cheat, or deceive. Treat misspellings and disguised words the same as the real word
-(e.g. "fishing emails" meaning phishing, "cr3dit card").
+(e.g. "fishing emails" meaning phishing, "cr3dit card"). Prompts may be in Filipino (Tagalog) or Taglish — judge them
+the same way (e.g. "pekeng ID", "doktorin ang grades", "numero ng mga kaklase ko" are UNSAFE).
 
 Ordinary academic datasets (healthcare, finance, education, retail, sales, HR, research) with made-up records are SAFE.
 

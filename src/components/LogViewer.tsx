@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, Fragment } from "react";
-import { Info, AlertTriangle, XCircle, RefreshCw, Search, ChevronDown, ChevronUp, Activity } from "lucide-react";
+import { Info, AlertTriangle, XCircle, RefreshCw, Search, ChevronDown, ChevronUp, Activity, Download } from "lucide-react";
 
 // ── Log explorer (instructor + admin) ────────────────────────────────────────
 // Modelled on CloudWatch Logs Insights / Grafana Explore: level counters that
@@ -69,6 +69,13 @@ function formatTime(iso: string) {
   return new Date(iso).toLocaleString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
 
+// One CSV cell: quoted, and a leading = + - @ neutralised so Excel never runs it as a formula
+function csvCell(v: unknown): string {
+  let s = v === null || v === undefined ? "" : typeof v === "object" ? JSON.stringify(v) : String(v);
+  if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`;
+  return `"${s.replace(/"/g, '""')}"`;
+}
+
 function formatValue(key: string, v: unknown): string {
   if (v === null || v === undefined || v === "") return "—";
   if (key === "duration_ms" && typeof v === "number") return `${(v / 1000).toFixed(1)} s`;
@@ -105,6 +112,8 @@ export default function LogViewer({
   const [order, setOrder]       = useState<"newest" | "oldest">("newest");
   const [live, setLive]         = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [exporting, setExporting] = useState(false);
+  const [exportMsg, setExportMsg] = useState("");
 
   useEffect(() => { const t = setTimeout(() => setQuery(search.trim()), 350); return () => clearTimeout(t); }, [search]);
 
@@ -136,6 +145,43 @@ export default function LogViewer({
     const t = setInterval(load, 30_000);
     return () => clearInterval(t);
   }, [live, load]);
+
+  // Download every entry matching the current filters (up to 10,000) as a CSV file
+  const exportCsv = async () => {
+    setExporting(true);
+    setExportMsg("");
+    try {
+      const qs = new URLSearchParams({ since, limit: "10000", export: "1" });
+      if (levels.length) qs.set("level", levels.join(","));
+      if (category) qs.set("category", category);
+      if (query) qs.set("q", query);
+      if (role) qs.set("role", role);
+      for (const [k, v] of Object.entries(extraQuery ?? {})) if (v) qs.set(k, v);
+      const res = await fetch(`${endpoint}${endpoint.includes("?") ? "&" : "?"}${qs}`);
+      if (!res.ok) throw new Error();
+      const rows: LogEntry[] = (await res.json()).logs ?? [];
+      const header = ["Time", "Level", "Category", "Who", "Email", "Role", "Action", "Message", "Details"];
+      const lines = rows.map((l) => {
+        const details = { ...(l.details ?? {}) };
+        if (hidePromptText) delete details.prompt_text;   // same as on screen
+        for (const k of HIDDEN_DETAIL_KEYS) delete details[k];
+        return [new Date(l.created_at).toISOString(), l.level, l.category, l.actor_name ?? "System", l.actor_email ?? "",
+                l.actor_role, l.action_type, l.message, Object.keys(details).length ? details : ""].map(csvCell).join(",");
+      });
+      const csv = "\ufeff" + [header.map(csvCell).join(","), ...lines].join("\r\n");   // BOM → Excel reads ñ/é correctly
+      const href = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+      const a = document.createElement("a");
+      a.href = href;
+      a.download = `synthcs-logs-${since}-${new Date().toISOString().slice(0, 10)}.csv`;
+      a.click();
+      URL.revokeObjectURL(href);
+      setExportMsg(`Downloaded ${rows.length.toLocaleString()} entr${rows.length === 1 ? "y" : "ies"}${rows.length >= 10000 ? " (the maximum — narrow the filters for older entries)" : ""}.`);
+    } catch {
+      setExportMsg("Could not export the logs. Please try again.");
+    } finally {
+      setExporting(false);
+    }
+  };
 
   const toggleLevel = (l: LogLevel) =>
     setLevels((prev) => (prev.includes(l) ? prev.filter((x) => x !== l) : [...prev, l]));
@@ -212,7 +258,13 @@ export default function LogViewer({
           <button onClick={load} className="p-1.5 text-gray-400 hover:text-gray-600" title="Refresh">
             <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
           </button>
+          <button onClick={exportCsv} disabled={exporting}
+            title="Download the entries matching these filters as a CSV file (opens in Excel)"
+            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 border border-gray-200 rounded-lg text-xs font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-60">
+            <Download className="w-3.5 h-3.5" /> {exporting ? "Exporting…" : "Download CSV"}
+          </button>
         </div>
+        {exportMsg && <p className="px-4 py-2 text-[11px] text-gray-500 border-b border-gray-50">{exportMsg}</p>}
         {scopeNote && <p className="px-4 py-2 text-[11px] text-gray-400 border-b border-gray-50">{scopeNote}</p>}
 
         {/* Log table */}

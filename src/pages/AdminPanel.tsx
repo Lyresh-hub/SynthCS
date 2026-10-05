@@ -120,6 +120,160 @@ function SplitBar({ kaggle, schema }: { kaggle: number; schema: number }) {
   );
 }
 
+// ── Usage numbers (from the activity log) ────────────────────────────────────
+interface Metrics {
+  days: number;
+  totals: {
+    generated: number; rows: number; active_users: number; new_users: number; searches: number;
+    flagged: number; blocked: number; errors: number; generation_failed: number; upload_failed: number;
+  };
+  per_day: { day: string; count: number }[];
+  reviews: { pending: number; approved: number; rejected: number };
+  categories: { label: string; n: number }[];
+  purposes:   { label: string; n: number }[];
+  sources:    { label: string; n: number }[];
+}
+
+const SOURCE_LABEL: Record<string, string> = {
+  llm: "AI-generated schema", kaggle: "Kaggle", upload: "Own upload", "multi-table": "Multi-table",
+  huggingface: "Hugging Face", uci: "UCI", openml: "OpenML",
+};
+
+function Breakdown({ title, rows, labels }: { title: string; rows: { label: string; n: number }[]; labels?: Record<string, string> }) {
+  const max = Math.max(...rows.map((r) => r.n), 1);
+  return (
+    <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
+      <h3 className="text-sm font-semibold text-gray-800 mb-3">{title}</h3>
+      {rows.length === 0 ? <p className="text-xs text-gray-400 py-4 text-center">No datasets in this period</p> : (
+        <div className="space-y-2.5">
+          {rows.map((r) => (
+            <div key={r.label}>
+              <div className="flex justify-between text-xs mb-1 gap-2">
+                <span className="text-gray-600 truncate">{labels?.[r.label] ?? r.label}</span>
+                <span className="text-gray-500 tabular-nums">{r.n.toLocaleString()}</span>
+              </div>
+              <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                <div className="h-full bg-purple-500 rounded-full" style={{ width: `${(r.n / max) * 100}%` }} />
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function UsageSection() {
+  const [days, setDays] = useState(30);
+  const [m, setM] = useState<Metrics | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    setFailed(false);
+    fetch(`${NODE_API}/api/admin/metrics?days=${days}`)
+      .then((r) => (r.ok ? r.json() : Promise.reject()))
+      .then(setM)
+      .catch(() => setFailed(true));
+  }, [days]);
+
+  const t = m?.totals;
+  const max = Math.max(...(m?.per_day ?? []).map((d) => d.count), 1);
+  const reviewTotal = m ? m.reviews.pending + m.reviews.approved + m.reviews.rejected : 0;
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <h2 className="text-sm font-semibold text-gray-900">Usage</h2>
+          <p className="text-[11px] text-gray-400">From the activity history, so expired and deleted datasets still count.</p>
+        </div>
+        <div className="inline-flex rounded-lg border border-gray-200 overflow-hidden text-xs">
+          {[7, 30, 90].map((d) => (
+            <button key={d} onClick={() => setDays(d)}
+              className={`px-3 py-1.5 font-medium ${days === d ? "bg-gray-900 text-white" : "bg-white text-gray-500 hover:bg-gray-50"}`}>
+              Last {d} days
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {failed ? (
+        <p className="text-xs text-red-500 bg-white border border-gray-100 rounded-xl p-5">Could not load the usage numbers.</p>
+      ) : !m || !t ? (
+        <div className="h-40 bg-white border border-gray-100 rounded-xl animate-pulse" />
+      ) : (
+        <>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            {[
+              { label: "Datasets generated", value: t.generated, sub: `${t.rows.toLocaleString()} rows` },
+              { label: "Active users",       value: t.active_users, sub: `${t.new_users} new sign-up${t.new_users === 1 ? "" : "s"}` },
+              { label: "Searches",           value: t.searches, sub: "dataset + AI searches" },
+              { label: "Flagged prompts",    value: t.flagged, sub: `${t.blocked} blocked outright` },
+            ].map((c) => (
+              <div key={c.label} className="bg-white rounded-xl border border-gray-100 shadow-sm p-4">
+                <div className="text-2xl font-bold text-gray-900 tabular-nums">{c.value.toLocaleString()}</div>
+                <div className="text-xs font-medium text-gray-600">{c.label}</div>
+                <div className="text-[11px] text-gray-400 mt-0.5">{c.sub}</div>
+              </div>
+            ))}
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-5 lg:col-span-2">
+              <h3 className="text-sm font-semibold text-gray-800 mb-3">Datasets generated per day</h3>
+              <div className="flex items-end gap-[2px] h-32">
+                {m.per_day.map((d) => (
+                  <div key={d.day} className="flex-1 h-full flex items-end group relative" title={`${d.day}: ${d.count}`}>
+                    <div className={`w-full rounded-t ${d.count ? "bg-purple-500 group-hover:bg-purple-600" : "bg-gray-100"}`}
+                      style={{ height: `${d.count ? Math.max((d.count / max) * 100, 4) : 2}%` }} />
+                  </div>
+                ))}
+              </div>
+              <div className="flex justify-between text-[10px] text-gray-400 mt-1">
+                <span>{m.per_day[0]?.day}</span><span>{m.per_day[m.per_day.length - 1]?.day}</span>
+              </div>
+            </div>
+
+            <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-5 space-y-4">
+              <div>
+                <h3 className="text-sm font-semibold text-gray-800 mb-2">Instructor reviews</h3>
+                {reviewTotal === 0 ? <p className="text-xs text-gray-400">No flagged prompts in this period</p> : (
+                  <div className="space-y-1.5 text-xs">
+                    {([["Approved", m.reviews.approved, "text-green-600"], ["Rejected", m.reviews.rejected, "text-red-600"],
+                       ["Still pending", m.reviews.pending, "text-amber-600"]] as const).map(([label, n, color]) => (
+                      <div key={label} className="flex justify-between">
+                        <span className="text-gray-600">{label}</span>
+                        <span className={`font-semibold tabular-nums ${color}`}>{n}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <div className="border-t border-gray-100 pt-3">
+                <h3 className="text-sm font-semibold text-gray-800 mb-2">Problems</h3>
+                <div className="space-y-1.5 text-xs">
+                  {([["Errors (all)", t.errors], ["Failed generations", t.generation_failed], ["Failed uploads", t.upload_failed]] as const).map(([label, n]) => (
+                    <div key={label} className="flex justify-between">
+                      <span className="text-gray-600">{label}</span>
+                      <span className={`font-semibold tabular-nums ${n ? "text-red-600" : "text-gray-400"}`}>{n}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <Breakdown title="Top categories" rows={m.categories} />
+            <Breakdown title="Top purposes" rows={m.purposes} />
+            <Breakdown title="Where data came from" rows={m.sources} labels={SOURCE_LABEL} />
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 // Ginagawa nating mas readable ang date — hal. "2m ago", "3h ago", "5d ago"
 function timeAgo(iso: string) {
   const diff = Date.now() - new Date(iso).getTime();
@@ -232,6 +386,9 @@ export default function AdminPanel() {
           </div>
         ))}
       </div>
+
+      {/* Usage over time — generations, active users, reviews, problems, breakdowns */}
+      <UsageSection />
 
       {/* Analytics row — bar chart at generation mode breakdown */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
