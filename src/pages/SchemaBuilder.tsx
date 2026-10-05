@@ -153,6 +153,11 @@ interface SmartResult extends KaggleDataset {
   source:      string;
   sourceLabel: string;
   sourceIcon:  string;
+  matchType?:   "exact" | "related";   // found with the student's own words, or a related word
+  matchedTerm?: string;
+  sourceRank?:  number;                // position in the source's own ranking (Kaggle: "hottest")
+  kaggleRank?:  number;
+  tabular?:     boolean;               // Kaggle: has CSV files the system can use
 }
 
 // Per-source color tokens (used for tabs, badges, and search result cards)
@@ -598,7 +603,13 @@ export default function SchemaBuilder() {
   const [multiPreviewTables,    setMultiPreviewTables]    = useState<MultiPreviewTable[]>([]);
   const [multiPreviewActiveTab, setMultiPreviewActiveTab] = useState(0);
   const [downloadFormat, setDownloadFormat] = useState<"csv" | "json" | "xlsx">("csv");
-  const [sortBy,     setSortBy]     = useState<"downloads" | "rows_desc" | "rows_asc" | "alpha" | "newest" | "oldest">("downloads");
+  const [sortBy,     setSortBy]     = useState<"relevance" | "downloads" | "rows_desc" | "rows_asc" | "alpha" | "newest" | "oldest">("relevance");
+  // Results are shown 20 at a time ("Show more"); "Load more from Kaggle" fetches further pages
+  const RESULTS_PAGE = 20;
+  const [visibleCount, setVisibleCount] = useState(RESULTS_PAGE);
+  const [kaggleNextPage, setKaggleNextPage] = useState(4);   // pages 1–3 come with the first search
+  const [loadingMoreKaggle, setLoadingMoreKaggle] = useState(false);
+  const [kaggleExhausted, setKaggleExhausted] = useState(false);
   const [sizeFilter, setSizeFilter] = useState<"any" | "small" | "medium" | "large">("any");
 
   const [datasetId, setDatasetId]           = useState("");
@@ -1227,7 +1238,8 @@ export default function SchemaBuilder() {
       return;
     }
 
-    setSortBy("downloads");
+    setSortBy("relevance");
+    setVisibleCount(RESULTS_PAGE); setKaggleNextPage(4); setKaggleExhausted(false);
     setSizeFilter("any");
     setPhase("smart_searching");
     setLoadingMsg("Searching all dataset sources for a real match…");
@@ -1508,6 +1520,16 @@ export default function SchemaBuilder() {
     const dateOf = (ds: SmartResult) => ds.lastUpdated ?? "";
     const titleOf = (ds: SmartResult) => (ds.title ?? "").toLowerCase().replace(/^[^a-z0-9]+/i, "").trim();
     switch (activeSortBy) {
+      case "relevance": {
+        // Best match: the search's own order (exact words first, then relevance, then
+        // the source's ranking). On the Kaggle filter, follow Kaggle's ranking exactly.
+        if (sourceFilter === "kaggle") {
+          out.sort((a, b) =>
+            (a.matchType === "related" ? 1 : 0) - (b.matchType === "related" ? 1 : 0)
+            || (a.kaggleRank ?? 999) - (b.kaggleRank ?? 999));
+        }
+        break;
+      }
       case "downloads": out.sort((a, b) => (b.downloadCount || 0) - (a.downloadCount || 0)); break;
       case "rows_desc":  out.sort((a, b) => parseRowCount(b.size) - parseRowCount(a.size)); break;
       case "rows_asc":   out.sort((a, b) => parseRowCount(a.size) - parseRowCount(b.size)); break;
@@ -1540,6 +1562,35 @@ export default function SchemaBuilder() {
     return out;
   };
 
+  // Fetch the next page of Kaggle results (sorted like kaggle.com) and append new ones
+  const loadMoreFromKaggle = async () => {
+    if (loadingMoreKaggle || !searchQuery.trim()) return;
+    setLoadingMoreKaggle(true);
+    try {
+      const res = await fetch(`${PYTHON_API}/api/kaggle/search`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query: searchQuery.trim(), page: kaggleNextPage }),
+      });
+      if (!res.ok) throw new Error();
+      const page: SmartResult[] = (await res.json()).datasets ?? [];
+      const offset = (kaggleNextPage - 1) * 20;
+      setSearchResults((prev) => {
+        const seen = new Set(prev.map((r) => `${r.source}:${r.ref}`));
+        const fresh = page
+          .map((d, i) => ({ ...d, source: "kaggle", sourceLabel: "Kaggle", sourceIcon: "🏆", matchType: "exact" as const, kaggleRank: offset + i + 1, sourceRank: offset + i + 1 }))
+          .filter((d) => !seen.has(`kaggle:${d.ref}`));
+        return [...prev, ...fresh];
+      });
+      setVisibleCount((n) => n + RESULTS_PAGE);
+      setKaggleNextPage((p) => p + 1);
+      if (page.length < 20) setKaggleExhausted(true);
+    } catch {
+      setKaggleExhausted(true);
+    } finally {
+      setLoadingMoreKaggle(false);
+    }
+  };
+
   const handleSearch = async () => {
     if (!searchQuery.trim()) return;
 
@@ -1565,7 +1616,8 @@ export default function SchemaBuilder() {
     }
 
     setExtSourceFilter("all");
-    setSortBy("downloads");
+    setSortBy("relevance");
+    setVisibleCount(RESULTS_PAGE); setKaggleNextPage(4); setKaggleExhausted(false);
     setSizeFilter("any");
     setSelectedExtIds(new Set());
     setExpandedExtIds(new Set());
@@ -2649,6 +2701,7 @@ export default function SchemaBuilder() {
                 onChange={(e) => setSortBy(e.target.value as typeof sortBy)}
                 className="text-xs border border-gray-200 rounded-lg px-2 py-1 text-gray-600 bg-white focus:outline-none focus:ring-2 focus:ring-purple-400"
               >
+                <option value="relevance">Best match</option>
                 <option value="downloads">Most downloaded</option>
                 <option value="rows_desc">Most rows</option>
                 <option value="rows_asc">Fewest rows</option>
@@ -2669,7 +2722,7 @@ export default function SchemaBuilder() {
 
           {/* Result rows */}
           <div className="divide-y divide-gray-50">
-            {applyFiltersSort(smartResults, "all", sortBy, sizeFilter).map((ds) => {
+            {applyFiltersSort(smartResults, "all", sortBy, sizeFilter).slice(0, visibleCount).map((ds) => {
               const key        = `${ds.source}:${ds.ref}`;
               const selected   = selectedSmartIds.has(key);
               const isExpanded = expandedExtIds.has(key);
@@ -2804,6 +2857,14 @@ export default function SchemaBuilder() {
                 </div>
               );
             })}
+            {applyFiltersSort(smartResults, "all", sortBy, sizeFilter).length > visibleCount && (
+              <div className="px-4 py-3 flex justify-center bg-gray-50/50">
+                <button onClick={() => setVisibleCount((n) => n + RESULTS_PAGE)}
+                  className="px-4 py-1.5 border border-gray-200 rounded-lg text-xs font-medium text-gray-600 hover:bg-white">
+                  Show more ({applyFiltersSort(smartResults, "all", sortBy, sizeFilter).length - visibleCount} more)
+                </button>
+              </div>
+            )}
           </div>
 
           {/* Action bar */}
@@ -2924,7 +2985,7 @@ export default function SchemaBuilder() {
                 <p className="text-[10px] font-medium text-gray-400 uppercase tracking-wide">Filter by source</p>
                 <div className="flex flex-wrap gap-1.5">
                   <button
-                    onClick={() => setExtSourceFilter("all")}
+                    onClick={() => { setExtSourceFilter("all"); setVisibleCount(RESULTS_PAGE); }}
                     className={`px-3 py-1 rounded-full text-xs font-medium border transition-all
                       ${extSourceFilter === "all"
                         ? "bg-gray-800 text-white border-gray-800"
@@ -2941,7 +3002,7 @@ export default function SchemaBuilder() {
                     return (
                       <button
                         key={srcId}
-                        onClick={() => setExtSourceFilter(srcId)}
+                        onClick={() => { setExtSourceFilter(srcId); setVisibleCount(RESULTS_PAGE); }}
                         className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium border transition-all
                           ${active
                             ? `${c.activeBg} ${c.activeText} border-transparent shadow-sm`
@@ -2963,7 +3024,8 @@ export default function SchemaBuilder() {
                     onChange={(e) => setSortBy(e.target.value as typeof sortBy)}
                     className="text-xs border border-gray-200 rounded-lg px-2 py-1 text-gray-600 bg-white focus:outline-none focus:ring-2 focus:ring-purple-400"
                   >
-                    <option value="downloads">Most downloaded</option>
+                    <option value="relevance">Best match</option>
+                <option value="downloads">Most downloaded</option>
                     <option value="newest">Newest first</option>
                     <option value="oldest">Oldest first</option>
                     <option value="rows_desc">Most rows</option>
@@ -3015,7 +3077,7 @@ export default function SchemaBuilder() {
             {filtered.length === 0
               ? <p className="p-6 text-sm text-gray-400 text-center">No datasets from this source.</p>
               : <div className="divide-y divide-gray-50">
-                  {filtered.map((ds) => {
+                  {filtered.slice(0, visibleCount).map((ds) => {
                     const key = `${ds.source}:${ds.ref}`;
                     const c = SOURCE_COLORS[ds.source] ?? SOURCE_COLORS["kaggle"];
                     const srcLabel = ds.sourceLabel ?? DATA_SOURCES.find((s) => s.id === ds.source)?.label ?? ds.source;
@@ -3044,9 +3106,18 @@ export default function SchemaBuilder() {
 
                           {/* Info — clicking the text area selects this dataset */}
                           <div className="flex-1 min-w-0 cursor-pointer" onClick={() => handleSelectDataset(ds)}>
-                            <p className="text-sm font-medium text-gray-800 truncate">{ds.title}</p>
+                            <p className="text-sm font-medium text-gray-800 truncate">
+                              {ds.title}
+                              {ds.tabular && (
+                                <span title="Has CSV files the system can use directly"
+                                  className="ml-2 align-middle text-[10px] font-semibold px-1.5 py-0.5 rounded bg-green-50 text-green-700 border border-green-200">CSV</span>
+                              )}
+                            </p>
                             <p className="text-xs text-gray-400 mt-0.5">
                               <span className={`font-medium ${c.text}`}>{srcLabel}</span>
+                              {ds.matchType === "related" && ds.matchedTerm && (
+                                <span className="text-gray-400" title="Found with a related word, not your exact words"> · related: “{ds.matchedTerm}”</span>
+                              )}
                               {ds.size ? ` · ${ds.size}` : ""}
                               {(ds as any).downloadCount ? ` · ${(ds as any).downloadCount.toLocaleString()} downloads` : ""}
                               {ds.lastUpdated ? ` · Updated ${ds.lastUpdated}` : ""}
@@ -3138,6 +3209,22 @@ export default function SchemaBuilder() {
                       </div>
                     );
                   })}
+                  {/* Paging: reveal more of what's loaded, then fetch further Kaggle pages */}
+                  <div className="px-4 py-3 flex flex-wrap items-center justify-center gap-2 bg-gray-50/50">
+                    {filtered.length > visibleCount ? (
+                      <button onClick={() => setVisibleCount((n) => n + RESULTS_PAGE)}
+                        className="px-4 py-1.5 border border-gray-200 rounded-lg text-xs font-medium text-gray-600 hover:bg-white">
+                        Show more ({filtered.length - visibleCount} more)
+                      </button>
+                    ) : (extSourceFilter === "all" || extSourceFilter === "kaggle") && !kaggleExhausted && searchQuery.trim() ? (
+                      <button onClick={loadMoreFromKaggle} disabled={loadingMoreKaggle}
+                        className="px-4 py-1.5 border border-amber-200 bg-amber-50 rounded-lg text-xs font-medium text-amber-700 hover:bg-amber-100 disabled:opacity-60">
+                        {loadingMoreKaggle ? "Loading more from Kaggle…" : "Load more from Kaggle"}
+                      </button>
+                    ) : (
+                      <span className="text-[11px] text-gray-400">That's all the results.</span>
+                    )}
+                  </div>
                 </div>
             }
 

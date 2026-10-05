@@ -108,7 +108,18 @@ def _format_competition(c) -> dict:
     }
 
 
-def search_datasets(query: str) -> list:
+# How the keyword search works (closer to what kaggle.com shows):
+#   depth="deep"    → the user's exact words: 3 pages sorted by "hottest" (kaggle.com's
+#                     default order) + the most-voted page + a CSV-only page to flag
+#                     datasets that have tabular files the system can use
+#   depth="shallow" → related/expanded words: 1 page sorted by "hottest" (keeps the
+#                     multi-source search fast)
+#   page=N          → just page N sorted by "hottest" ("Load more from Kaggle")
+# Each result keeps its Kaggle rank so the page can show them in Kaggle's order.
+KAGGLE_DEEP_PAGES = 3
+
+
+def search_datasets(query: str, depth: str = "deep", page: int | None = None) -> list:
     try:
         api = _api()
     except Exception as e:
@@ -171,38 +182,67 @@ def search_datasets(query: str) -> list:
     results: list[dict] = []
     seen_refs: set[str] = set()
 
-    # Search datasets sorted by votes
-    try:
-        for ds in list(api.dataset_list(search=query, sort_by="votes"))[:15]:
+    def _add(ds_list, limit=None):
+        for ds in list(ds_list)[:limit] if limit else ds_list:
             ref = str(ds.ref)
             if ref not in seen_refs:
                 seen_refs.add(ref)
-                results.append(_format_dataset(ds))
-    except Exception as e:
-        print(f"[kaggle_service] Dataset search (votes) error: {e}")
+                item = _format_dataset(ds)
+                item["kaggleRank"] = len(results) + 1
+                results.append(item)
 
-    # Search datasets sorted by hottest
-    try:
-        for ds in list(api.dataset_list(search=query, sort_by="hottest"))[:10]:
-            ref = str(ds.ref)
-            if ref not in seen_refs:
-                seen_refs.add(ref)
-                results.append(_format_dataset(ds))
-    except Exception as e:
-        print(f"[kaggle_service] Dataset search (hottest) error: {e}")
+    # A single extra page for "Load more from Kaggle"
+    if page is not None:
+        try:
+            _add(api.dataset_list(search=query, sort_by="hottest", page=max(1, int(page))))
+        except Exception as e:
+            print(f"[kaggle_service] Dataset search page {page} error: {e}")
+        return results
 
-    # Search competitions (e.g. "titanic", "house prices")
-    try:
-        comps = list(api.competitions_list(search=query))[:5]
-        for c in comps:
-            c_ref = f"c/{getattr(c, 'ref', '')}"
-            if c_ref not in seen_refs:
-                seen_refs.add(c_ref)
-                results.append(_format_competition(c))
-    except Exception as e:
-        print(f"[kaggle_service] Competition search error: {e}")
+    pages = KAGGLE_DEEP_PAGES if depth == "deep" else 1
+    for p in range(1, pages + 1):
+        try:
+            batch = list(api.dataset_list(search=query, sort_by="hottest", page=p))
+            _add(batch)
+            if len(batch) < 20:      # last page reached
+                break
+        except Exception as e:
+            print(f"[kaggle_service] Dataset search (hottest p{p}) error: {e}")
+            break
 
-    return results[:20]
+    if depth == "deep":
+        # Most-voted datasets the hottest pages may have missed
+        try:
+            _add(api.dataset_list(search=query, sort_by="votes"), limit=20)
+        except Exception as e:
+            print(f"[kaggle_service] Dataset search (votes) error: {e}")
+
+        # Mark datasets that contain CSV files (usable as tables by the system)
+        csv_refs: set[str] = set()
+        for p in (1, 2):
+            try:
+                csv_refs |= {str(ds.ref) for ds in api.dataset_list(search=query, sort_by="hottest", file_type="csv", page=p)}
+            except Exception as e:
+                print(f"[kaggle_service] CSV check error: {str(e).splitlines()[0]}")
+                break
+        for item in results:
+            if item["ref"] in csv_refs:
+                item["tabular"] = True
+
+        # Competitions (e.g. "titanic", "house prices")
+        try:
+            for c in list(api.competitions_list(search=query))[:5]:
+                c_ref = f"c/{getattr(c, 'ref', '')}"
+                if c_ref not in seen_refs:
+                    seen_refs.add(c_ref)
+                    item = _format_competition(c)
+                    item["kaggleRank"] = len(results) + 1
+                    results.append(item)
+        except Exception as e:
+            # Needs the Kaggle account to have accepted competition rules — keep the log short
+            print(f"[kaggle_service] Competition search skipped: {str(e).splitlines()[0]}")
+
+    return results
 
 
 def download_dataset(dataset_ref: str, download_path: str) -> str | None:

@@ -46,6 +46,7 @@ from pydantic import BaseModel
 load_dotenv(Path(__file__).parent / ".env")
 
 import re
+import time
 from kaggle_service import search_datasets, download_dataset, parse_kaggle_ref
 from analyzer import analyze_dataset
 from dataset_importer import process_uploaded_file, SUPPORTED_EXTENSIONS
@@ -101,6 +102,7 @@ os.makedirs(DATASETS_DIR, exist_ok=True)
 
 class SearchRequest(BaseModel):
     query: str
+    page:  int | None = None   # Kaggle only: fetch this page (sorted by "hottest")
 
 
 class DownloadRequest(BaseModel):
@@ -389,9 +391,9 @@ def root():
 
 @app.post("/api/kaggle/search")
 def kaggle_search(req: SearchRequest) -> dict[str, Any]:
-    """Search Kaggle and return up to 10 matching datasets."""
+    """Search Kaggle. With `page`, return just that page (used by "Load more from Kaggle")."""
     try:
-        results = search_datasets(req.query)
+        results = search_datasets(req.query, page=req.page) if req.page else search_datasets(req.query)
         return {"datasets": results}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -1884,6 +1886,12 @@ def _expand_query(prompt: str) -> list[str]:
     return terms[:8]   # cap at 8 variations
 
 
+# Recent searches are remembered for 10 minutes: repeat searches are instant and
+# much less likely to hit the 25-second overall time limit.
+_SEARCH_CACHE: dict = {}
+_SEARCH_CACHE_TTL = 600
+
+
 @app.post("/api/smart-search")
 def smart_search(req: SmartSearchRequest) -> dict[str, Any]:
     from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as _FT
@@ -1917,113 +1925,121 @@ def smart_search(req: SmartSearchRequest) -> dict[str, Any]:
         "psa":         ("PSA",          "📋", psa_service.search_datasets),
     }
 
-    # Ensure the user's RAW prompt is always searched first (highest priority)
+    # The user's EXACT words are searched first and in depth; related/expanded
+    # words get a lighter search so the whole thing stays fast.
     base_terms = _expand_query(raw_prompt)
-    search_terms: list[str] = [raw_prompt]
+    related_terms: list[str] = []
     seen_terms: set[str] = {raw_prompt.lower()}
-
-    # Merge expanded terms after the raw prompt
     for t in (req.expanded_terms or []) + base_terms:
         tl = t.lower().strip()
         if tl and tl not in seen_terms:
             seen_terms.add(tl)
-            search_terms.append(tl)
+            related_terms.append(tl)
+    related_terms = related_terms[:6]
 
-    search_terms = search_terms[:8]
+    # Per source, per search: exact words keep more results than related words
+    EXACT_CAP   = {"kaggle": 100}          # other sources: 15
+    RELATED_CAP = 8
 
-    seen_refs: set[str] = set()
-    results: list[dict] = []
-
-    # Include any direct Kaggle matches found earlier
+    merged: dict[str, dict] = {}
     for ds in direct_kaggle_results:
-        key = f"{ds['source']}:{ds['ref']}"
-        seen_refs.add(key)
-        results.append(ds)
+        ds["matchType"], ds["matchedTerm"] = "exact", raw_prompt
+        merged[f"{ds['source']}:{ds['ref']}"] = ds
 
-    def _search_one(source_id: str, source_label: str, source_icon: str, search_fn, term: str):
-        try:
-            datasets = search_fn(term)
-            for ds in datasets:
-                ds["source"]      = source_id
-                ds["sourceLabel"] = source_label
-                ds["sourceIcon"]  = source_icon
-            return datasets[:8]
-        except Exception as e:
-            print(f"[smart_search] {source_id}/{term!r} error: {e}")
-            return []
+    def _search_one(source_id: str, source_label: str, source_icon: str, search_fn, term: str, exact: bool):
+        depth = "deep" if exact else "shallow"
+        cache_key = (source_id, term.lower(), depth)
+        hit = _SEARCH_CACHE.get(cache_key)
+        if hit and hit[0] > time.time():
+            datasets = [dict(d) for d in hit[1]]
+        else:
+            try:
+                datasets = search_fn(term, depth=depth) if source_id == "kaggle" else search_fn(term)
+                _SEARCH_CACHE[cache_key] = (time.time() + _SEARCH_CACHE_TTL, [dict(d) for d in datasets])
+                if len(_SEARCH_CACHE) > 500:
+                    _SEARCH_CACHE.clear()
+            except Exception as e:
+                print(f"[smart_search] {source_id}/{term!r} error: {e}")
+                return []
+        cap = EXACT_CAP.get(source_id, 15) if exact else RELATED_CAP
+        out = []
+        for rank, ds in enumerate(datasets[:cap], start=1):
+            ds["source"]      = source_id
+            ds["sourceLabel"] = source_label
+            ds["sourceIcon"]  = source_icon
+            ds["sourceRank"]  = ds.get("kaggleRank", rank)
+            ds["matchType"]   = "exact" if exact else "related"
+            ds["matchedTerm"] = term
+            out.append(ds)
+        return out
 
-    # Fan out: every source × every search term
+    def _collect(datasets):
+        for ds in datasets:
+            key = f"{ds['source']}:{ds['ref']}"
+            prev = merged.get(key)
+            # an exact-word match always wins over a related-word match
+            if prev is None or (prev.get("matchType") == "related" and ds["matchType"] == "exact"):
+                merged[key] = ds
+
     with ThreadPoolExecutor(max_workers=12) as executor:
         futures: dict = {}
         for sid, (lbl, ico, fn) in sources.items():
-            for term in search_terms:
-                fut = executor.submit(_search_one, sid, lbl, ico, fn, term)
-                futures[fut] = (sid, term)
-
+            futures[executor.submit(_search_one, sid, lbl, ico, fn, raw_prompt, True)] = sid
+            for term in related_terms:
+                futures[executor.submit(_search_one, sid, lbl, ico, fn, term, False)] = sid
         try:
-            for future in as_completed(futures, timeout=22):
+            for future in as_completed(futures, timeout=25):
                 try:
-                    for ds in future.result():
-                        key = f"{ds['source']}:{ds['ref']}"
-                        if key not in seen_refs:
-                            seen_refs.add(key)
-                            results.append(ds)
+                    _collect(future.result())
                 except Exception:
                     pass
         except _FT:
             for future in futures:
                 if future.done():
                     try:
-                        for ds in future.result():
-                            key = f"{ds['source']}:{ds['ref']}"
-                            if key not in seen_refs:
-                                seen_refs.add(key)
-                                results.append(ds)
+                        _collect(future.result())
                     except Exception:
                         pass
 
-    # Relevance scoring function
+    # Relevance: how well the title / ref match the user's words (+ capped popularity)
     def _relevance_score(ds: dict) -> float:
         score = 0.0
         ref_l = str(ds.get("ref", "")).lower()
         title_l = str(ds.get("title", "")).lower()
         prompt_l = raw_prompt.lower()
-
-        # Direct ref/slug match has highest priority
         if ref_l == prompt_l or (parsed_kaggle and parsed_kaggle.get("ref", "").lower() in ref_l):
             score += 10_000_000
         elif prompt_l in title_l:
             score += 500_000
         elif prompt_l in ref_l:
             score += 200_000
-
-        # Sub-word keyword matching
         words = [w for w in re.findall(r"[a-z0-9]+", prompt_l) if len(w) >= 3 and w not in _STOP_WORDS]
         for w in words:
             if w in title_l:
                 score += 50_000
             if w in ref_l:
                 score += 20_000
-
-        # Secondary factor: downloads (capped so popularity doesn't drown relevance)
-        score += min(float(ds.get("downloadCount", 0) or 0), 50_000)
         return score
 
+    # Ties (e.g. many titles containing the exact words) follow the source's own
+    # ranking — for Kaggle that's its "hottest" order, the same as kaggle.com
+    def _order(d: dict):
+        return (d.get("matchType") != "exact", -_relevance_score(d), d.get("sourceRank", 999),
+                -float(d.get("downloadCount", 0) or 0))
+
+    # Keep each source's best results (Kaggle gets the biggest share), then order:
+    # exact-word matches first → relevance → the source's own ranking.
+    SOURCE_LIMIT = {"kaggle": 60}          # others: 15
     by_source: dict = _dd(list)
-    for r in results:
-        by_source[r["source"]].append(r)
+    for ds in merged.values():
+        by_source[ds["source"]].append(ds)
+    kept: list[dict] = []
+    for src, items in by_source.items():
+        items.sort(key=_order)
+        kept.extend(items[:SOURCE_LIMIT.get(src, 15)])
 
-    # Sort each source by relevance score
-    for src in by_source:
-        by_source[src].sort(key=_relevance_score, reverse=True)
-
-    diverse: list[dict] = []
-    for src in ["kaggle", "huggingface", "uci", "openml", "datagov_ph", "psa"]:
-        limit = 10 if src == "kaggle" else 6
-        diverse.extend(by_source[src][:limit])
-
-    diverse.sort(key=_relevance_score, reverse=True)
-    return {"datasets": diverse[:36]}
+    kept.sort(key=_order)
+    return {"datasets": kept[:150]}
 
 
 # ── Hybrid generate (CTGAN real fields + schema-based LLM fields) ─────────────
