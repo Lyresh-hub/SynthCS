@@ -6,7 +6,7 @@ import {
   MessageSquare, Search, ChevronDown, ChevronUp, ShieldAlert, Shield, Ban,
 } from "lucide-react";
 import { NODE_API as BACKEND } from "../lib/config";
-import { reportEvent } from "../lib/activity";
+import { endServerSession } from "../lib/authFetch";
 import LogViewer from "../components/LogViewer";
 import PromptHistory, { type PromptEntry, type PromptFocus } from "../components/PromptHistory";
 
@@ -370,7 +370,7 @@ export default function InstructorDashboard() {
   };
 
   const handleSignOut = () => {
-    reportEvent("logout"); // before user_id is cleared
+    endServerSession(); // ends the session on the server (and logs it) before the token is cleared
     ["user_id","user_name","is_admin","is_instructor","last_path","auth_token"].forEach((k) => localStorage.removeItem(k));
     setLocation("/login");
   };

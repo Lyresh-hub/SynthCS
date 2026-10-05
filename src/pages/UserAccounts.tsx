@@ -3,7 +3,7 @@ import { useLocation } from "wouter";
 import { cn } from "../lib/utils";
 import ConfirmDialog from "../components/ConfirmDialog";
 import { NODE_API } from "../lib/config";
-import { reportEvent } from "../lib/activity";
+import { endServerSession } from "../lib/authFetch";
 import { ChevronDown, ChevronRight } from "lucide-react";
 
 interface User {
@@ -202,7 +202,7 @@ export default function UserAccounts() {
   }
 
   function handleLogout() {
-    reportEvent("logout"); // before user_id is cleared
+    endServerSession(); // ends the session on the server (and logs it) before the token is cleared
     localStorage.removeItem("auth_token");
     localStorage.removeItem("user_id");
     localStorage.removeItem("user_name");

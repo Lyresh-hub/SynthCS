@@ -13,6 +13,13 @@ export function clearSession(): void {
   SESSION_KEYS.forEach((k) => localStorage.removeItem(k));
 }
 
+// Logout: tell the server to end the session (the old token stops working there,
+// and the server logs the logout). Call this BEFORE clearing localStorage.
+export function endServerSession(): void {
+  if (!localStorage.getItem("auth_token")) return;
+  fetch(`${NODE_API}/api/auth/logout`, { method: "POST", keepalive: true }).catch(() => {});
+}
+
 function isBackendUrl(url: string): boolean {
   return url.startsWith(NODE_API) || url.startsWith(PYTHON_API);
 }

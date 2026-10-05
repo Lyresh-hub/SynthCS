@@ -101,7 +101,7 @@ export default function Login() {
         } else if (json.error === "pending_approval") {
           setLocation("/pending-approval");
         } else {
-          setServerError(json.error ?? "Invalid email or password");
+          setServerError(json.message ?? json.error ?? "Invalid email or password");
         }
         return;
       }

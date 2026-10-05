@@ -330,6 +330,13 @@ def _claim_dataset(dataset_path: str, authorization: str | None) -> None:
         raise HTTPException(status_code=403, detail={"error": "not_owner", "message": "This dataset belongs to another user."})
 
 
+def _safe_name(name: str, fallback: str = "table") -> str:
+    """User-chosen names become file names — keep only letters, digits, _ and -
+    so a name like "../../evil" can never write outside the dataset folder."""
+    cleaned = re.sub(r"[^A-Za-z0-9_\-]+", "_", str(name or "")).strip("._-")[:80]
+    return cleaned or fallback
+
+
 def _require_quota(authorization: str | None) -> None:
     """Refuse a dataset generation when the student has used today's quota.
     The quota itself lives in Node (instructor restrictions); if Node can't be
@@ -1468,6 +1475,23 @@ def generate_multi_table(req: MultiTableRequest, authorization: str | None = Hea
 
     if not req.tables:
         raise HTTPException(status_code=400, detail="No tables provided.")
+
+    # Table names are used as file names → make them safe (and unique), and keep
+    # foreign-key references pointing at the renamed tables
+    renamed: dict[str, str] = {}
+    used: set[str] = set()
+    for t in req.tables:
+        base = _safe_name(t.name)
+        name, n = base, 2
+        while name.lower() in used:
+            name, n = f"{base}_{n}", n + 1
+        used.add(name.lower())
+        renamed[t.name] = name
+        t.name = name
+    for t in req.tables:
+        for f in t.fields:
+            if f.fk_table:
+                f.fk_table = renamed.get(f.fk_table, _safe_name(f.fk_table))
     _require_quota(authorization)   # daily generation limit (server-side)
 
     table_names = {t.name for t in req.tables}

@@ -1,7 +1,7 @@
 import { useLocation, Link, useRoute } from "wouter";
 import { LayoutDashboard, Users, Zap, LogOut, ShieldCheck, GraduationCap, Activity } from "lucide-react";
 import { cn } from "../lib/utils";
-import { reportEvent } from "../lib/activity";
+import { endServerSession } from "../lib/authFetch";
 
 const navItems = [
   { label: "Overview",          icon: LayoutDashboard, href: "/admin" },
@@ -25,7 +25,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   const adminName = localStorage.getItem("user_name") ?? "Admin";
 
   function handleLogout() {
-    reportEvent("logout"); // before user_id is cleared
+    endServerSession(); // ends the session on the server (and logs it) before the token is cleared
     localStorage.removeItem("auth_token");
     localStorage.removeItem("user_id");
     localStorage.removeItem("user_name");

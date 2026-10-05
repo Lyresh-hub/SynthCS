@@ -434,6 +434,7 @@ function reportEmailFailure(emailType, err, userId = null) {
 }
 
 const app = express();
+app.set("trust proxy", 1);   // real client IP behind Railway's proxy (used by login attempt limits)
 app.use(cors({
   origin: (origin, cb) => cb(null, isAllowedOrigin(origin)),
   credentials: true,
@@ -494,8 +495,12 @@ const banLoggedAt = new Map();       // userId → last time we logged the force
 async function getBanStatus(userId) {
   const hit = banCache.get(userId);
   if (hit && Date.now() - hit.at < BAN_CACHE_MS) return hit;
-  const r = await pool.query("SELECT is_banned, ban_reason FROM users WHERE id = $1", [userId]);
-  const status = { banned: !!r.rows[0]?.is_banned, reason: r.rows[0]?.ban_reason ?? null, at: Date.now() };
+  const r = await pool.query("SELECT is_banned, ban_reason, COALESCE(token_version, 0) AS tv FROM users WHERE id = $1", [userId]);
+  const status = {
+    banned: !!r.rows[0]?.is_banned, reason: r.rows[0]?.ban_reason ?? null,
+    tv: r.rows[0] ? Number(r.rows[0].tv) : null,   // null → not in users table (legacy instructor login)
+    at: Date.now(),
+  };
   banCache.set(userId, status);
   return status;
 }
@@ -505,6 +510,10 @@ app.use(async (req, res, next) => {
   if (!user || req.method === "OPTIONS") return next();
   try {
     const ban = await getBanStatus(user.id);
+    // Session ended by logout / password reset → this token is no longer valid
+    if (ban.tv !== null && Number(user.tv ?? 0) !== ban.tv) {
+      return res.status(401).json({ error: "auth_required", message: "Your session has ended. Please log in again." });
+    }
     if (!ban.banned) return next();
     if (Date.now() - (banLoggedAt.get(user.id) ?? 0) > 60 * 60 * 1000) {
       banLoggedAt.set(user.id, Date.now());
@@ -566,6 +575,8 @@ async function initDB() {
     await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_name     VARCHAR(100) NOT NULL DEFAULT ''`).catch(() => {});
     await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS strike_count  INT DEFAULT 0`).catch(() => {});
     await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS is_banned     BOOLEAN DEFAULT FALSE`).catch(() => {});
+    // Session version: logout / password reset increase it, which invalidates older login tokens
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS token_version INT DEFAULT 0`).catch(() => {});
     await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS ban_reason    TEXT`).catch(() => {});
     await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS pending_deletion       BOOLEAN DEFAULT FALSE`).catch(() => {});
     await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS deletion_scheduled_at TIMESTAMPTZ`).catch(() => {});
@@ -902,7 +913,8 @@ function roleOf(user) {
 }
 
 function signAuthToken(user, role = roleOf(user)) {
-  return jwt.sign({ sub: user.id, role }, JWT_SECRET, { expiresIn: AUTH_TOKEN_TTL });
+  // tv = the user's session version; logout / password reset bump it to end old sessions
+  return jwt.sign({ sub: user.id, role, tv: user.token_version ?? 0 }, JWT_SECRET, { expiresIn: AUTH_TOKEN_TTL });
 }
 
 // Returns { id, role } for a valid token, otherwise null
@@ -912,7 +924,7 @@ function authUser(req) {
   if (!token) return null;
   try {
     const payload = jwt.verify(token, JWT_SECRET);
-    return payload?.sub ? { id: String(payload.sub), role: payload.role || "student" } : null;
+    return payload?.sub ? { id: String(payload.sub), role: payload.role || "student", tv: payload.tv ?? 0 } : null;
   } catch {
     return null;
   }
@@ -939,11 +951,14 @@ function oauthSuccessRedirect(res, user, method = "OAuth") {
 }
 
 async function requireAdmin(req, res, next) {
-  const adminId = req.query.admin_id || req.body?.admin_id;
-  if (!adminId) return res.status(401).json({ error: "Unauthorized" });
+  // The admin is whoever is logged in (token), re-checked in the database —
+  // an admin_id in the URL is not trusted.
+  const caller = authUser(req);
+  if (!caller) return res.status(401).json({ error: "auth_required", message: "Please log in again." });
   try {
-    const result = await pool.query("SELECT is_admin FROM users WHERE id = $1", [adminId]);
-    if (!result.rows[0]?.is_admin) return res.status(403).json({ error: "Forbidden" });
+    const result = await pool.query("SELECT is_admin FROM users WHERE id = $1", [caller.id]);
+    if (!result.rows[0]?.is_admin) return res.status(403).json({ error: "forbidden", message: "Administrators only." });
+    req.user = caller;
     next();
   } catch {
     res.status(500).json({ error: "Server error" });
@@ -956,6 +971,215 @@ async function requireAdmin(req, res, next) {
 function isAllowedEmail(email) {
   return typeof email === "string" && email.endsWith("@gordoncollege.edu.ph");
 }
+
+// ═════════════════════════════════════════════════════════════════════════════
+// ACCESS RULES — who may call what
+// ═════════════════════════════════════════════════════════════════════════════
+// Registered BEFORE every route, so each route below runs only after its rule
+// passes. Identity always comes from the login token (req.user), never from an
+// ID typed into the request:
+//   PUBLIC      sign up, login, password reset, invite previews, instructor list
+//   SELF        a user acts only as themselves (user_id / student_id must be theirs)
+//   INSTRUCTOR  only their own class: their students, flags, invites, restrictions
+//   ADMIN       token role "admin", re-checked against the database
+// ─────────────────────────────────────────────────────────────────────────────
+
+function deny(res, status, error, message) {
+  return res.status(status).json({ error, message });
+}
+
+// Wraps a check that returns true (allowed) or a message (refused)
+function rule(check) {
+  return (req, res, next) => requireAuth(req, res, async () => {
+    try {
+      const verdict = await check(req);
+      if (verdict === true) return next();
+      return deny(res, 403, "forbidden", typeof verdict === "string" ? verdict : "You don't have access to this.");
+    } catch (e) {
+      console.error("Access rule error:", e.message);
+      return deny(res, 500, "server_error", "Server error");
+    }
+  });
+}
+
+const isAdminUser = (req) => req.user.role === "admin";
+const isInstructorUser = (req) => req.user.role === "instructor" || isAdminUser(req);
+
+// Identity fields in the body/query must be the caller's own ID (admins excepted);
+// missing ones are filled in with the caller's ID so routes keep working unchanged.
+function bindSelf(req, ...fields) {
+  for (const f of fields) {
+    for (const src of [req.body, req.query]) {
+      if (src && src[f] != null && src[f] !== "" && String(src[f]) !== req.user.id && !isAdminUser(req)) return false;
+    }
+    if (req.body && typeof req.body === "object" && !Array.isArray(req.body)) {
+      if (req.body[f] == null || req.body[f] === "") req.body[f] = req.user.id;
+    }
+    if (req.query && (req.query[f] == null || req.query[f] === "")) req.query[f] = req.user.id;
+  }
+  return true;
+}
+
+const SELF_MSG = "You can only do this for your own account.";
+const INSTRUCTOR_MSG = "Only instructors can do this.";
+const OWN_CLASS_MSG = "This belongs to another instructor's class.";
+
+// ── Any logged-in user ───────────────────────────────────────────────────────
+for (const p of ["/api/llm/suggest-field", "/api/llm/augment-schema", "/api/llm/expand-search-query",
+                 "/api/class-restrictions", "/api/restrictions"]) {
+  app.all(p, rule(() => true));
+}
+
+// ── Self only ────────────────────────────────────────────────────────────────
+app.all("/api/users/:id", rule((req) => isAdminUser(req) || req.params.id === req.user.id || SELF_MSG));
+app.post("/api/schemas", rule((req) => bindSelf(req, "user_id") || SELF_MSG));
+app.get("/api/schemas/:userId", rule((req) => isAdminUser(req) || req.params.userId === req.user.id || SELF_MSG));
+const ownSchema = rule(async (req) => {
+  if (isAdminUser(req)) return true;
+  const r = await pool.query("SELECT user_id FROM schemas WHERE id = $1", [req.params.id]).catch(() => ({ rows: [] }));
+  return !r.rows.length || r.rows[0].user_id === req.user.id || SELF_MSG;   // unknown id → route answers 404
+});
+app.get("/api/schema/:id", ownSchema);
+app.delete("/api/schemas/:id", ownSchema);
+app.post("/api/llm/check-prompt", rule((req) => bindSelf(req, "user_id") || SELF_MSG));
+app.post("/api/llm/generate-schema", rule((req) => bindSelf(req, "user_id") || SELF_MSG));
+app.patch("/api/user/tour-done", rule((req) => bindSelf(req, "user_id") || SELF_MSG));
+app.post("/api/activity/log", rule((req) => bindSelf(req, "user_id") || SELF_MSG));
+app.post("/api/moderation/check-generation", rule((req) => bindSelf(req, "student_id") || SELF_MSG));
+app.post("/api/student/flag-prompt", rule((req) => bindSelf(req, "student_id") || SELF_MSG));
+app.post("/api/class-invite/join", rule((req) => bindSelf(req, "user_id") || SELF_MSG));
+app.post("/api/invitation/accept", rule((req) => bindSelf(req, "user_id") || SELF_MSG));
+app.all("/api/student/:id/classes", rule((req) => isAdminUser(req) || req.params.id === req.user.id || SELF_MSG));
+app.all("/api/student/:id/classes/:classId", rule((req) => isAdminUser(req) || req.params.id === req.user.id || SELF_MSG));
+
+// ── Instructor: only their own class ─────────────────────────────────────────
+const instructorSelf = rule((req) => {
+  if (!isInstructorUser(req)) return INSTRUCTOR_MSG;
+  return bindSelf(req, "instructor_id") || OWN_CLASS_MSG;
+});
+for (const p of ["/instructor/students", "/instructor/flagged-prompts", "/instructor/invite", "/instructor/invites",
+                 "/instructor/students/add", "/instructor/activity"]) {
+  app.all(p, instructorSelf);
+}
+app.all("/api/moderation/test", rule((req) => isInstructorUser(req) || INSTRUCTOR_MSG));
+app.all(["/api/instructor/:id/restrictions", "/api/instructor/:id/restrictions/:rId", "/api/instructor/:id/course-restrictions"],
+  rule((req) => {
+    if (req.method === "GET" && req.path.endsWith("/course-restrictions") && !isInstructorUser(req)) return true; // students read their class limits
+    if (!isInstructorUser(req)) return INSTRUCTOR_MSG;
+    return isAdminUser(req) || req.params.id === req.user.id || OWN_CLASS_MSG;
+  }));
+
+// Approving / rejecting a student: the student must be in this instructor's class
+const ownStudent = rule(async (req) => {
+  if (!isInstructorUser(req)) return INSTRUCTOR_MSG;
+  if (!bindSelf(req, "instructor_id")) return OWN_CLASS_MSG;
+  if (isAdminUser(req)) return true;
+  const sid = req.params.userId || req.params.studentId;
+  const r = await pool.query(
+    `SELECT 1 FROM student_classes WHERE student_id = $1 AND instructor_id = $2
+     UNION SELECT 1 FROM users s JOIN users i ON i.id = $2 WHERE s.id = $1 AND s.instructor = i.full_name LIMIT 1`,
+    [sid, req.user.id]
+  );
+  return r.rows.length > 0 || OWN_CLASS_MSG;
+});
+app.post("/instructor/approve/:userId", ownStudent);
+app.post("/instructor/reject/:userId", ownStudent);
+app.patch("/instructor/students/:studentId/remove", ownStudent);
+
+// Flagged prompt decisions: only the instructor the flag was sent to
+const ownFlag = rule(async (req) => {
+  if (!isInstructorUser(req)) return INSTRUCTOR_MSG;
+  bindSelf(req, "instructor_id");
+  if (isAdminUser(req)) return true;
+  const r = await pool.query("SELECT instructor_id FROM flagged_prompts WHERE id = $1", [req.params.id]).catch(() => ({ rows: [] }));
+  if (!r.rows.length) return true;   // unknown id → route answers 404
+  return r.rows[0].instructor_id === req.user.id || OWN_CLASS_MSG;
+});
+app.post("/instructor/flagged-prompts/:id/approve", ownFlag);
+app.post("/instructor/flagged-prompts/:id/reject", ownFlag);
+
+// Invite links: only their owner can switch them on/off or delete them
+const ownInvite = rule(async (req) => {
+  if (!isInstructorUser(req)) return INSTRUCTOR_MSG;
+  if (isAdminUser(req)) return true;
+  const r = await pool.query("SELECT instructor_id FROM class_invitations WHERE id = $1", [req.params.id]).catch(() => ({ rows: [] }));
+  return !r.rows.length || r.rows[0].instructor_id === req.user.id || OWN_CLASS_MSG;
+});
+app.delete("/instructor/invites/:id", ownInvite);
+app.patch("/instructor/invites/:id/toggle", ownInvite);
+
+// ── Admin ────────────────────────────────────────────────────────────────────
+app.all(["/api/admin/classes", "/api/admin/activity"], (req, res, next) => requireAdmin(req, res, next));
+
+// ═════════════════════════════════════════════════════════════════════════════
+// LOGIN ATTEMPT LIMITS
+// ═════════════════════════════════════════════════════════════════════════════
+// Counts failed attempts in memory. Too many in 15 minutes → 429 with how long
+// to wait. Successful logins clear the count.
+const ATTEMPT_WINDOW_MS = 15 * 60 * 1000;
+const attemptLog = new Map();   // key → [timestamps]
+
+function minutesLocked(key, max) {
+  const now = Date.now();
+  const recent = (attemptLog.get(key) ?? []).filter((t) => now - t < ATTEMPT_WINDOW_MS);
+  attemptLog.set(key, recent);
+  if (recent.length < max) return 0;
+  return Math.max(1, Math.ceil((ATTEMPT_WINDOW_MS - (now - recent[0])) / 60000));
+}
+function noteAttempt(key) {
+  attemptLog.set(key, [...(attemptLog.get(key) ?? []), Date.now()]);
+  if (attemptLog.size > 10000) attemptLog.clear();
+}
+
+// limits: [{ key(req) → string, max }]; failures = status codes that count as a failed attempt
+function attemptLimiter(kind, limits, failures = [401]) {
+  return (req, res, next) => {
+    const email = String(req.body?.email ?? "").trim().toLowerCase();
+    for (const l of limits) {
+      const key = `${kind}:${l.key(req, email)}`;
+      const wait = minutesLocked(key, l.max);
+      if (wait > 0) {
+        logActivity(null, "login_rate_limited", { email: email || null, kind, minutes: wait });
+        return deny(res, 429, "too_many_attempts",
+          `Too many attempts. Please wait ${wait} minute${wait === 1 ? "" : "s"} and try again.`);
+      }
+    }
+    res.on("finish", () => {
+      if (failures.includes(res.statusCode) || failures.includes("any")) {
+        for (const l of limits) noteAttempt(`${kind}:${l.key(req, email)}`);
+      } else if (res.statusCode === 200) {
+        for (const l of limits) attemptLog.delete(`${kind}:${l.key(req, email)}`);
+      }
+    });
+    next();
+  };
+}
+const byEmail = (req, email) => `email:${email}`;
+const byIp    = (req) => `ip:${req.ip}`;
+
+app.post("/login",              attemptLimiter("login",  [{ key: byEmail, max: 5 }, { key: byIp, max: 30 }]));
+app.post("/instructor/login",   attemptLimiter("login",  [{ key: byEmail, max: 5 }, { key: byIp, max: 30 }]));
+app.post("/verify-reset-code",  attemptLimiter("reset",  [{ key: byEmail, max: 5 }, { key: byIp, max: 20 }], [400, 401, 403, 404]));
+app.post("/forgot-password",    attemptLimiter("forgot", [{ key: byEmail, max: 3 }, { key: byIp, max: 10 }], ["any"]));
+
+// ═════════════════════════════════════════════════════════════════════════════
+// LOGOUT ends the session on the server
+// ═════════════════════════════════════════════════════════════════════════════
+// Each user has a token_version; it's inside every login token. Logging out (or
+// resetting the password) increases it, so every older token stops working
+// immediately — a copied token can't be reused after logout.
+app.post("/api/auth/logout", requireAuth, async (req, res) => {
+  try {
+    await pool.query("UPDATE users SET token_version = COALESCE(token_version, 0) + 1 WHERE id = $1", [req.user.id]);
+    banCache.delete(req.user.id);
+    logActivity(req.user.id, "logout", {});
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("Logout error:", err.message);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
 
 app.get("/", (_req, res) => res.json({ status: "Backend running" }));
 
@@ -1148,7 +1372,7 @@ app.post("/reset-password", async (req, res) => {
 
     const hashed = await bcrypt.hash(password, 10);
     await pool.query(
-      "UPDATE users SET password = $1, reset_token = NULL, reset_token_expires = NULL WHERE email = $2",
+      "UPDATE users SET password = $1, reset_token = NULL, reset_token_expires = NULL, token_version = COALESCE(token_version, 0) + 1 WHERE email = $2",
       [hashed, email]
     );
     res.json({ ok: true });
@@ -3537,6 +3761,12 @@ app.post("/api/invitation/accept", async (req, res) => {
     );
     if (!inv.rows.length) return res.status(404).json({ error: "Invitation not found or already used" });
     const { instructor_name, course } = inv.rows[0];
+
+    // Only the invited person can accept (the link alone isn't enough)
+    const me = await pool.query("SELECT LOWER(email) AS email FROM users WHERE id = $1", [user_id]);
+    if (!me.rows.length || me.rows[0].email !== String(inv.rows[0].student_email ?? "").toLowerCase()) {
+      return res.status(403).json({ error: "This invitation was sent to a different email address. Log in with the invited account to accept it." });
+    }
 
     const { instructor_id } = inv.rows[0];
     await pool.query(

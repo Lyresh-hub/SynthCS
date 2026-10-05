@@ -714,7 +714,8 @@ def generate_relational_dataset(
             entity_tables[prefix] = ext_df
             if save_dir:
                 import os
-                ext_df.to_csv(os.path.join(save_dir, f"{prefix}_master.csv"), index=False)
+                safe_prefix = re.sub(r"[^A-Za-z0-9_\-]+", "_", str(prefix)).strip("._-")[:60] or "entity"
+                ext_df.to_csv(os.path.join(save_dir, f"{safe_prefix}_master.csv"), index=False)
 
     field_to_prefix: dict[str, str] = {
         name: prefix

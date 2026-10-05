@@ -23,7 +23,7 @@ export default function InstructorLogin() {
       });
       const json = await res.json();
       if (!res.ok) {
-        setError(json.error ?? "Invalid email or password");
+        setError(json.message ?? json.error ?? "Invalid email or password");
         return;
       }
       localStorage.setItem("instructor_id",   json.id);
