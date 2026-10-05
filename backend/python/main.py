@@ -32,15 +32,17 @@
 # =============================================================================
 
 import os
+import shutil
 import uuid
-from typing import Any
+from typing import Any, Annotated
 from pathlib import Path
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, UploadFile, File, Header
+from fastapi import FastAPI, HTTPException, UploadFile, File, Header, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 # Load Kaggle credentials from the local .env before anything else
 load_dotenv(Path(__file__).parent / ".env")
@@ -51,7 +53,7 @@ from kaggle_service import search_datasets, download_dataset, parse_kaggle_ref
 from analyzer import analyze_dataset
 from dataset_importer import process_uploaded_file, SUPPORTED_EXTENSIONS
 from relation_detector import build_related_tables, list_tabular_files
-from generator import generate_synthetic_data, expand_template_with_ctgan
+from generator import generate_synthetic_data, expand_template_with_ctgan, DataTooSmallError
 import huggingface_service
 import uci_service
 import openml_service
@@ -87,6 +89,21 @@ class SafeJSONResponse(_JSONResponse):
 
 app = FastAPI(title="SynthCS Python Service", default_response_class=SafeJSONResponse)
 
+@app.exception_handler(RequestValidationError)
+async def _validation_error(request: Request, exc: RequestValidationError):
+    """Too-long text / too many items → a clear 400 message instead of a raw 422 list."""
+    for err in exc.errors():
+        kind = err.get("type", "")
+        if kind in ("string_too_long", "too_long"):
+            field = next((str(p) for p in reversed(err.get("loc", ())) if isinstance(p, str)), "text")
+            label = {"query": "search text", "prompt": "prompt", "name": "name", "table_name": "table name",
+                     "new_name": "column name", "description": "description"}.get(field, field.replace("_", " "))
+            limit = (err.get("ctx") or {}).get("max_length")
+            what, unit = ("has too many items", "items") if kind == "too_long" else ("is too long", "characters")
+            return SafeJSONResponse(status_code=400, content={"detail": f"The {label} {what}" + (f" (maximum {limit} {unit})." if limit else ".") + " Please shorten it and try again."})
+    return SafeJSONResponse(status_code=422, content={"detail": exc.errors()})
+
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -95,13 +112,21 @@ app.add_middleware(
 )
 
 DATASETS_DIR = os.path.join(os.path.dirname(__file__), "temp_datasets")
+MAX_UPLOAD_MB = int(os.getenv("MAX_UPLOAD_MB", "100"))   # biggest file a student can upload
+MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024
 os.makedirs(DATASETS_DIR, exist_ok=True)
 
 
 # ── Request / Response models ────────────────────────────────────────────────
+# Length limits: names typed by the student 100, names that come from a real
+# dataset's columns 255, descriptions 500, prompts 2000, searches 300.
+Name      = Annotated[str, Field(max_length=100)]
+ColName   = Annotated[str, Field(max_length=255)]
+Desc      = Annotated[str, Field(max_length=500)]
+ShortText = Annotated[str, Field(max_length=300)]
 
 class SearchRequest(BaseModel):
-    query: str
+    query: ShortText
     page:  int | None = None   # Kaggle only: fetch this page (sorted by "hottest")
 
 
@@ -111,7 +136,7 @@ class DownloadRequest(BaseModel):
 
 class FieldChange(BaseModel):
     original_name: str
-    new_name: str
+    new_name: ColName
     original_type: str
     new_type: str
     nullable: bool
@@ -313,11 +338,58 @@ def _read_owner(dataset_path: str) -> str | None:
         return _json.load(f).get("user_id")
 
 
-def _write_owner(dataset_path: str, user_id: str) -> None:
+_KEEP_DAYS = 30            # dataset files are deleted after this…
+_PRIVACY_KEEP_HOURS = 24   # …or after 24 hours when the owner has Privacy Mode on
+
+
+def _write_owner(dataset_path: str, user_id: str, keep_hours: float | None = None) -> None:
     import json as _json
+    import time
     os.makedirs(dataset_path, exist_ok=True)
+    hours = keep_hours if keep_hours is not None else _KEEP_DAYS * 24
     with open(os.path.join(dataset_path, _OWNER_FILE), "w", encoding="utf-8") as f:
-        _json.dump({"user_id": user_id}, f)
+        _json.dump({"user_id": user_id, "expires_at": time.time() + hours * 3600}, f)
+
+
+def _cleanup_expired_datasets() -> int:
+    """Delete dataset folders whose time is up (owner.json expires_at), and any
+    folder older than 30 days. Returns how many were removed."""
+    import json as _json
+    import time
+    now, removed = time.time(), 0
+    for name in os.listdir(DATASETS_DIR):
+        path = os.path.join(DATASETS_DIR, name)
+        if not os.path.isdir(path):
+            continue
+        try:
+            expires = None
+            owner_file = os.path.join(path, _OWNER_FILE)
+            if os.path.exists(owner_file):
+                with open(owner_file, encoding="utf-8") as f:
+                    expires = _json.load(f).get("expires_at")
+            if expires is None:
+                expires = os.path.getmtime(path) + _KEEP_DAYS * 86400
+            if now > float(expires):
+                shutil.rmtree(path, ignore_errors=True)
+                removed += 1
+        except Exception as e:
+            print(f"[cleanup] skipped {name}: {e}")
+    return removed
+
+
+@app.on_event("startup")
+def _start_cleanup_loop() -> None:
+    import threading
+    import time
+
+    def loop():
+        while True:
+            n = _cleanup_expired_datasets()
+            if n:
+                print(f"[cleanup] removed {n} expired dataset folder(s)")
+            time.sleep(3600)   # every hour
+
+    threading.Thread(target=loop, daemon=True).start()
 
 
 def _claim_dataset(dataset_path: str, authorization: str | None) -> None:
@@ -325,7 +397,7 @@ def _claim_dataset(dataset_path: str, authorization: str | None) -> None:
     user = _require_caller(authorization)
     owner = _read_owner(dataset_path)
     if owner is None:
-        _write_owner(dataset_path, user["id"])
+        _write_owner(dataset_path, user["id"], _PRIVACY_KEEP_HOURS if user.get("privacy_mode") else None)
     elif owner != user["id"] and user.get("role") != "admin":
         raise HTTPException(status_code=403, detail={"error": "not_owner", "message": "This dataset belongs to another user."})
 
@@ -605,25 +677,36 @@ async def upload_dataset(file: UploadFile = File(...), authorization: str | None
             detail=f"Unsupported file format '{ext}'. Supported formats: {supported_str}",
         )
 
+    # Size limit — read one byte past the limit so a huge file is refused without loading it all
+    content = await file.read(MAX_UPLOAD_BYTES + 1)
+    if len(content) > MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail=f"The file is too large. The maximum upload size is {MAX_UPLOAD_MB} MB.")
+    if not content:
+        raise HTTPException(status_code=400, detail="The file is empty (0 bytes). Please choose a file that contains data.")
+
     dataset_id = str(uuid.uuid4())
     dest = os.path.join(DATASETS_DIR, dataset_id)
     _claim_dataset(dest, authorization)
 
     try:
-        content = await file.read()
-        csv_path, table_name = process_uploaded_file(content, filename, dest)
+        csv_path, table_name, notes = process_uploaded_file(content, filename, dest)
     except ValueError as ve:
+        shutil.rmtree(dest, ignore_errors=True)
         raise HTTPException(status_code=400, detail=str(ve))
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Could not process uploaded file: {e}")
+    except Exception:
+        shutil.rmtree(dest, ignore_errors=True)
+        raise HTTPException(status_code=400, detail="We couldn't read this file as a table. Check that it is a valid "
+                                                    ".csv, .xlsx, .json or .parquet file and try again.")
 
     try:
         schema = analyze_dataset(csv_path)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Schema analysis failed: {e}")
+    except Exception:
+        shutil.rmtree(dest, ignore_errors=True)
+        raise HTTPException(status_code=400, detail="The file was read, but its columns couldn't be analyzed. "
+                                                    "Check that the first row holds the column names and try again.")
 
     return _with_related(
-        {"dataset_id": dataset_id, "table_name": table_name, "schema": schema},
+        {"dataset_id": dataset_id, "table_name": table_name, "schema": schema, "notes": notes},
         dest, table_name, exclude={"dataset.csv"},
     )
 
@@ -655,6 +738,8 @@ def generate(req: GenerateRequest, authorization: str | None = Header(default=No
             changes=changes,
             row_count=req.row_count,
         )
+    except DataTooSmallError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Generation failed: {e}")
 
@@ -742,24 +827,24 @@ class FieldConstraints(BaseModel):
 
 
 class SchemaField(BaseModel):
-    name:        str
+    name:        Name
     field_type:  str
     nullable:    bool              = False
-    description: str               = ""
+    description: Desc              = ""
     constraints: FieldConstraints  = FieldConstraints()
 
 
 class SchemaGenerateRequest(BaseModel):
-    table_name: str
-    fields:     list[SchemaField]
+    table_name: Name
+    fields:     Annotated[list[SchemaField], Field(max_length=300)]
     review_id:  str | None = None   # flagged-prompt review → dataset locked until approved
 
 
 class MultiTableFieldDef(BaseModel):
-    name:        str
+    name:        ColName
     field_type:  str
     nullable:    bool             = False
-    description: str              = ""
+    description: Desc             = ""
     constraints: FieldConstraints = FieldConstraints()
     fk_table:    str | None       = None   # referenced table name
     fk_field:    str | None       = None   # referenced field name
@@ -767,19 +852,19 @@ class MultiTableFieldDef(BaseModel):
 
 
 class MultiTableDef(BaseModel):
-    name:      str
-    fields:    list[MultiTableFieldDef]
+    name:      ColName
+    fields:    Annotated[list[MultiTableFieldDef], Field(max_length=300)]
     row_count: int = 1000
 
 
 class MultiTableRequest(BaseModel):
-    tables:  list[MultiTableDef]
+    tables:  Annotated[list[MultiTableDef], Field(max_length=30)]
     format:  str = "csv"   # "csv" | "json" | "xlsx"
     review_id:  str | None = None   # flagged-prompt review → dataset locked until approved
 
 
 class ExpandFieldDef(BaseModel):
-    name:      str
+    name:      ColName
     null_rate: float = 0.0
 
 
@@ -794,8 +879,8 @@ class ExpandRequest(BaseModel):
 
 
 class SmartSearchRequest(BaseModel):
-    prompt:         str
-    expanded_terms: list[str] = []   # pre-generated by LLM on the frontend side
+    prompt:         Annotated[str, Field(max_length=2000)]
+    expanded_terms: Annotated[list[ShortText], Field(max_length=30)] = []   # pre-generated by LLM on the frontend side
 
 
 class PeekRequest(BaseModel):
@@ -804,9 +889,9 @@ class PeekRequest(BaseModel):
 
 
 class ExtraFieldDef(BaseModel):
-    name:        str
+    name:        Name
     field_type:  str
-    description: str              = ""
+    description: Desc             = ""
     constraints: FieldConstraints = FieldConstraints()
 
 
@@ -2095,6 +2180,8 @@ def generate_hybrid(req: HybridGenerateRequest, authorization: str | None = Head
             changes=changes,
             row_count=req.row_count,
         )
+    except DataTooSmallError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"CTGAN generation failed: {e}")
 

@@ -14,6 +14,7 @@ interface User {
   email: string;
   username: string | null;
   created_at: string;
+  privacy_mode?: boolean;
 }
 
 interface EditableFieldProps {
@@ -152,9 +153,8 @@ export default function UserAccounts() {
 
   const [user, setUser]                   = useState<User | null>(null);
   const [loading, setLoading]             = useState(true);
-  const [privacyMode, setPrivacyMode]     = useState(false);
-  const [autoDelete, setAutoDelete]       = useState(true);
-  const [anonymize, setAnonymize]         = useState(true);
+  const [privacySaving, setPrivacySaving] = useState(false);
+  const [privacyError, setPrivacyError]   = useState("");
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
 
   const isAdmin = localStorage.getItem("is_admin") === "true";
@@ -170,7 +170,7 @@ export default function UserAccounts() {
       .finally(() => setLoading(false));
   }, [userId]);
 
-  async function updateUser(patch: Record<string, string>): Promise<string | null> {
+  async function updateUser(patch: Record<string, string | boolean>): Promise<string | null> {
     try {
       const res = await fetch(`${NODE_API}/api/users/${userId}`, {
         method: "PUT",
@@ -192,6 +192,16 @@ export default function UserAccounts() {
   }
 
   const userEmail = user?.email ?? "—";
+  const privacyMode = !!user?.privacy_mode;
+
+  // Saved on the server: while on, every NEW dataset is deleted after 24 hours (instead of 30 days)
+  async function togglePrivacyMode() {
+    setPrivacySaving(true);
+    setPrivacyError("");
+    const err = await updateUser({ privacy_mode: !privacyMode });
+    if (err) setPrivacyError(err);
+    setPrivacySaving(false);
+  }
 
   function obfuscateEmail(email: string) {
     if (!email || !email.includes("@")) return email;
@@ -267,34 +277,36 @@ export default function UserAccounts() {
         <h2 className="text-sm font-semibold text-gray-900 mb-1">🛡️ Privacy & Security</h2>
         <div className="border-b border-gray-100 mb-3" />
         <div className="space-y-4">
-          {[
-            { label: "Privacy Mode",              desc: "All generated datasets are automatically deleted after 24h.",           value: privacyMode, set: setPrivacyMode },
-            { label: "Auto-delete datasets",       desc: "Automatically remove datasets older than 30 days.",                    value: autoDelete,  set: setAutoDelete  },
-            { label: "Anonymize exported names",   desc: "Replace real-looking names with fully synthetic ones on export.",      value: anonymize,   set: setAnonymize   },
-          ].map((item) => (
-            <div key={item.label} className="flex justify-between items-start gap-3">
-              <div>
-                <div className="text-sm font-semibold text-gray-800 mb-0.5">{item.label}</div>
-                <div className="text-xs text-gray-400 leading-relaxed max-w-xs">{item.desc}</div>
+          <div className="flex justify-between items-start gap-3">
+            <div>
+              <div className="text-sm font-semibold text-gray-800 mb-0.5">Privacy Mode</div>
+              <div className="text-xs text-gray-400 leading-relaxed max-w-xs">
+                Datasets you generate while this is on are deleted after 24 hours instead of 30 days.
               </div>
-              <button
-                onClick={() => item.set(!item.value)}
-                className={cn(
-                  "relative w-10 h-5 flex-shrink-0 rounded-full transition-colors duration-200 mt-0.5",
-                  item.value ? "bg-purple-600" : "bg-gray-200"
-                )}
-              >
-                <span
-                  className="absolute top-[2px] w-4 h-4 rounded-full bg-white shadow transition-all duration-200"
-                  style={{ left: item.value ? "22px" : "2px" }}
-                />
-              </button>
             </div>
-          ))}
+            <button
+              onClick={togglePrivacyMode}
+              disabled={privacySaving}
+              aria-pressed={privacyMode}
+              className={cn(
+                "relative w-10 h-5 flex-shrink-0 rounded-full transition-colors duration-200 mt-0.5 disabled:opacity-60",
+                privacyMode ? "bg-purple-600" : "bg-gray-200"
+              )}
+            >
+              <span
+                className="absolute top-[2px] w-4 h-4 rounded-full bg-white shadow transition-all duration-200"
+                style={{ left: privacyMode ? "22px" : "2px" }}
+              />
+            </button>
+          </div>
+          <p className="text-xs text-gray-400 leading-relaxed">
+            Datasets are always deleted automatically after 30 days. All generated data is synthetic, so it contains no real personal information.
+          </p>
         </div>
+        {privacyError && <p className="text-xs text-red-600 mt-3">{privacyError}</p>}
         {privacyMode && (
           <div className="bg-yellow-50 border border-yellow-200 rounded-lg px-3 py-2 text-xs text-yellow-800 mt-3">
-            ⚠️ Enabling <strong>Privacy Mode</strong> will delete all stored datasets automatically after 24 hours.
+            ⚠️ <strong>Privacy Mode is on.</strong> New datasets will be deleted 24 hours after you generate them — download what you need before then.
           </div>
         )}
       </div>
@@ -380,7 +392,7 @@ export default function UserAccounts() {
 
             <div>
               <p className="font-semibold text-gray-800 mb-1">3. Data Storage</p>
-              <p>Account information is stored securely in a PostgreSQL database hosted on Railway. Generated dataset files are stored temporarily and automatically deleted after 30 days. Enabling Privacy Mode reduces this to 24 hours.</p>
+              <p>Account information is stored securely in a PostgreSQL database hosted on Railway. Generated dataset files are stored temporarily and automatically deleted after 30 days. With Privacy Mode on, datasets you generate are deleted after 24 hours.</p>
             </div>
 
             <div>

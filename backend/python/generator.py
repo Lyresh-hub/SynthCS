@@ -179,6 +179,30 @@ def _gaussian_copula_sample(df: pd.DataFrame, n: int) -> pd.DataFrame:
     return synthetic.reindex(columns=df.columns)
 
 
+def _keep_in_real_range(synthetic: pd.DataFrame, real: pd.DataFrame) -> pd.DataFrame:
+    """CTGAN can invent numbers outside what the real data ever had (a negative age,
+    a GPA of 5.3). Keep every numeric column inside the real column's min–max, and
+    keep whole-number columns whole."""
+    for col in synthetic.columns:
+        if col not in real.columns:
+            continue
+        if not (pd.api.types.is_numeric_dtype(real[col]) and pd.api.types.is_numeric_dtype(synthetic[col])):
+            continue
+        if pd.api.types.is_bool_dtype(real[col]):
+            continue
+        r = real[col].dropna()
+        if r.empty:
+            continue
+        lo, hi = float(r.min()), float(r.max())
+        clipped = synthetic[col].clip(lower=lo, upper=hi)
+        if (r % 1 == 0).all():
+            clipped = clipped.round()
+            synthetic[col] = clipped.astype("Int64") if clipped.isna().any() else clipped.astype("int64")
+        else:
+            synthetic[col] = clipped
+    return synthetic
+
+
 # ── CTGAN ─────────────────────────────────────────────────────────────────────
 
 def _ctgan_sample(train_df: pd.DataFrame, row_count: int) -> pd.DataFrame:
@@ -205,6 +229,12 @@ def _ctgan_sample(train_df: pd.DataFrame, row_count: int) -> pd.DataFrame:
 # ── Public API ────────────────────────────────────────────────────────────────
 # These two are the only functions main.py actually calls.
 
+MIN_TRAINING_ROWS = 10   # CTGAN can't learn from fewer real rows than this
+
+
+class DataTooSmallError(ValueError):
+    """The real dataset is too small to train on — shown to the student as-is."""
+
 
 def expand_template_with_ctgan(dataset_path: str, row_count: int) -> str:
     # Called on the LLM path — scales the 200-row generated template up to row_count rows.
@@ -225,6 +255,7 @@ def expand_template_with_ctgan(dataset_path: str, row_count: int) -> str:
             df[col] = df[col].fillna(median_val if pd.notna(median_val) else 0)
 
     synthetic = _gaussian_copula_sample(df, row_count)
+    synthetic = _keep_in_real_range(synthetic, df)
     synthetic = _decode_dates(synthetic, date_cols)
 
     output_path = os.path.join(dataset_path, "synthetic_output.csv")
@@ -260,6 +291,11 @@ def generate_synthetic_data(dataset_path: str, changes: list[dict], row_count: i
         df = df.sample(_MAX_TRAINING_ROWS, random_state=42).reset_index(drop=True)
 
     df = df.dropna(axis=1, how="all")
+    if len(df) < MIN_TRAINING_ROWS or len(df.columns) == 0:
+        raise DataTooSmallError(
+            f"This dataset has only {len(df)} usable row{'s' if len(df) != 1 else ''}. CTGAN needs at least "
+            f"{MIN_TRAINING_ROWS} real rows to learn from. Add more rows to your file, or describe the dataset "
+            f"and use AI generation instead.")
     df, date_cols = _encode_dates(df)
 
     # Step 3: fill nulls — CTGAN hard requirement, no NaNs allowed
@@ -297,6 +333,7 @@ def generate_synthetic_data(dataset_path: str, changes: list[dict], row_count: i
     except Exception:
         synthetic = _gaussian_copula_sample(train_df, row_count)
 
+    synthetic = _keep_in_real_range(synthetic, df)   # no values outside the real min–max
     synthetic = _decode_dates(synthetic, date_cols)
 
     # Step 7: apply whatever the user changed in the Schema Editor

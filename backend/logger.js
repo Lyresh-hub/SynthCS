@@ -33,6 +33,7 @@ const CATALOG = {
   login_success:            { level: "INFO",  category: "auth",       msg: (d) => `Logged in${d.method && d.method !== "password" ? ` with ${d.method}` : ""}` },
   login_failed:             { level: "WARN",  category: "auth",       msg: (d) => `Failed login for ${s(d.email) || "unknown account"} — ${s(d.reason) || "invalid credentials"}` },
   login_rate_limited:       { level: "WARN",  category: "auth",       msg: (d) => `Too many ${d.kind === "login" ? "failed logins" : d.kind === "reset" ? "wrong reset codes" : "reset requests"}${d.email ? ` for ${s(d.email)}` : ""} — locked for ${d.minutes ?? "?"} min` },
+  privacy_mode_changed:     { level: "INFO",  category: "auth",       msg: (d) => `Privacy Mode turned ${d.enabled ? "on — new datasets are deleted after 24 hours" : "off — new datasets are kept for 30 days"}` },
   logout:                   { level: "INFO",  category: "auth",       msg: () => "Logged out" },
   banned_session_ended:     { level: "WARN",  category: "auth",       msg: () => "Banned account was signed out automatically" },
   strike_added:             { level: "WARN",  category: "auth",       msg: (d) => `Received strike ${d.strikes ?? "?"} of 3 (flagged prompt rejected${d.by_name ? ` by ${d.by_name}` : ""})` },

@@ -577,6 +577,14 @@ async function initDB() {
     await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS is_banned     BOOLEAN DEFAULT FALSE`).catch(() => {});
     // Session version: logout / password reset increase it, which invalidates older login tokens
     await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS token_version INT DEFAULT 0`).catch(() => {});
+    // Privacy Mode: datasets generated while it's on are deleted after 24 hours (instead of 30 days)
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS privacy_mode BOOLEAN DEFAULT FALSE`).catch(() => {});
+    // Emails are stored lowercase (login/signup lowercase what the user types)
+    await pool.query(`
+      UPDATE users u SET email = LOWER(TRIM(u.email))
+      WHERE u.email <> LOWER(TRIM(u.email))
+        AND NOT EXISTS (SELECT 1 FROM users o WHERE o.id <> u.id AND LOWER(TRIM(o.email)) = LOWER(TRIM(u.email)))
+    `).catch((e) => console.error("Email lowercase migration:", e.message));
     await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS ban_reason    TEXT`).catch(() => {});
     await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS pending_deletion       BOOLEAN DEFAULT FALSE`).catch(() => {});
     await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS deletion_scheduled_at TIMESTAMPTZ`).catch(() => {});
@@ -811,6 +819,14 @@ async function initDB() {
         created_at      TIMESTAMPTZ DEFAULT NOW()
       )
     `).catch(() => {});
+    // Category names now match the student's list (src/lib/categories.ts)
+    for (const [oldName, newName] of [["E-Commerce / Retail", "E-commerce / Retail"], ["Human Resources", "Business / HR"],
+                                      ["Technology / Software", "Technology / IT"], ["Government / Public Records", "Government / Public"]]) {
+      await pool.query(
+        "UPDATE instructor_restrictions SET value = $2 WHERE restriction_type = 'allowed_category' AND value = $1",
+        [oldName, newName]
+      ).catch(() => {});
+    }
 
     console.log("✅ Database connected — all tables ready.");
   } catch (err) {
@@ -836,7 +852,7 @@ async function findOrCreateOAuthUser(provider, providerId, profile) {
   let userId = null;
 
   if (email) {
-    const existing = await pool.query("SELECT id FROM users WHERE email = $1", [email]);
+    const existing = await pool.query("SELECT id FROM users WHERE LOWER(email) = LOWER($1)", [email]);
     if (existing.rows.length > 0) userId = existing.rows[0].id;
   }
 
@@ -1023,6 +1039,55 @@ function bindSelf(req, ...fields) {
 const SELF_MSG = "You can only do this for your own account.";
 const INSTRUCTOR_MSG = "Only instructors can do this.";
 const OWN_CLASS_MSG = "This belongs to another instructor's class.";
+
+// ── Input clean-up (every request) ──────────────────────────────────────────
+// Emails: spaces trimmed, lowercase — "QA.Student1@GordonCollege.edu.ph " is the
+// same account as "qa.student1@gordoncollege.edu.ph".
+// Text: each field has a maximum length, so a huge paste gets a clear message
+// instead of being sent to the AI (credits) or stored in the logs.
+const TEXT_LIMITS = {
+  prompt: 2000, prompt_text: 2000, user_prompt: 2000, query: 300,
+  name: 150, table_name: 150, field_name: 150, description: 500,
+  first_name: 60, last_name: 60, username: 60, course: 100, instructor: 120, semester: 50,
+  value: 100, reason: 500, flag_reason: 500, note: 500, rejection_reason: 500,
+  email: 254, student_email: 254, password: 200, new_password: 200, current_password: 200,
+};
+const TEXT_LABELS = {
+  prompt: "prompt", prompt_text: "prompt", user_prompt: "prompt", query: "search text",
+  name: "name", table_name: "table name", field_name: "column name", value: "word or value",
+  first_name: "first name", last_name: "last name", reason: "reason", flag_reason: "reason",
+};
+const ANY_TEXT_MAX = 5000;   // any other text anywhere in the request
+
+function tooLongField(body, depth = 0) {
+  if (!body || typeof body !== "object" || depth > 6) return null;
+  for (const [k, v] of Object.entries(body)) {
+    if (typeof v === "string") {
+      const max = depth === 0 && TEXT_LIMITS[k] ? TEXT_LIMITS[k] : ANY_TEXT_MAX;
+      if (v.length > max) return { field: k, max };
+    } else if (v && typeof v === "object") {
+      const inner = tooLongField(v, depth + 1);
+      if (inner) return inner;
+    }
+  }
+  return null;
+}
+
+app.use((req, res, next) => {
+  const b = req.body;
+  if (b && typeof b === "object" && !Array.isArray(b)) {
+    for (const f of ["email", "student_email"]) {
+      if (typeof b[f] === "string") b[f] = b[f].trim().toLowerCase();
+    }
+    const long = tooLongField(b);
+    if (long) {
+      const label = TEXT_LABELS[long.field] ?? "text";
+      return deny(res, 400, "too_long",
+        `The ${label} is too long (maximum ${long.max.toLocaleString()} characters). Please shorten it and try again.`);
+    }
+  }
+  next();
+});
 
 // ── Any logged-in user ───────────────────────────────────────────────────────
 for (const p of ["/api/llm/suggest-field", "/api/llm/augment-schema", "/api/llm/expand-search-query",
@@ -1292,7 +1357,7 @@ app.post("/resend-verification", async (req, res) => {
   if (!email) return res.status(400).json({ error: "email is required" });
   try {
     const result = await pool.query(
-      "SELECT * FROM users WHERE email = $1", [email]
+      "SELECT * FROM users WHERE LOWER(email) = $1", [email]
     );
     if (result.rows.length === 0) return res.json({ ok: true }); // don't leak existence
     const user = result.rows[0];
@@ -1317,14 +1382,14 @@ app.post("/forgot-password", async (req, res) => {
   const { email } = req.body;
   if (!email) return res.status(400).json({ error: "email is required" });
   try {
-    const result = await pool.query("SELECT * FROM users WHERE email = $1", [email]);
+    const result = await pool.query("SELECT * FROM users WHERE LOWER(email) = $1", [email]);
     if (result.rows.length === 0) return res.json({ ok: true }); // don't leak existence
 
     logActivity(result.rows[0].id, "password_reset_requested");
     const code    = Math.floor(100000 + Math.random() * 900000).toString();
     const expires = new Date(Date.now() + 1 * 60 * 1000); // 1 minute — same as frontend timer
     await pool.query(
-      "UPDATE users SET reset_token = $1, reset_token_expires = $2 WHERE email = $3",
+      "UPDATE users SET reset_token = $1, reset_token_expires = $2 WHERE LOWER(email) = $3",
       [code, expires, email]
     );
 
@@ -1346,7 +1411,7 @@ app.post("/verify-reset-code", async (req, res) => {
   if (!email || !code) return res.status(400).json({ error: "email and code are required" });
   try {
     const result = await pool.query(
-      "SELECT * FROM users WHERE email = $1 AND reset_token = $2 AND reset_token_expires > NOW()",
+      "SELECT * FROM users WHERE LOWER(email) = $1 AND reset_token = $2 AND reset_token_expires > NOW()",
       [email, code]
     );
     if (result.rows.length === 0)
@@ -1364,7 +1429,7 @@ app.post("/reset-password", async (req, res) => {
   if (!email || !code || !password) return res.status(400).json({ error: "email, code, and password are required" });
   try {
     const result = await pool.query(
-      "SELECT * FROM users WHERE email = $1 AND reset_token = $2 AND reset_token_expires > NOW()",
+      "SELECT * FROM users WHERE LOWER(email) = $1 AND reset_token = $2 AND reset_token_expires > NOW()",
       [email, code]
     );
     if (result.rows.length === 0)
@@ -1372,7 +1437,7 @@ app.post("/reset-password", async (req, res) => {
 
     const hashed = await bcrypt.hash(password, 10);
     await pool.query(
-      "UPDATE users SET password = $1, reset_token = NULL, reset_token_expires = NULL, token_version = COALESCE(token_version, 0) + 1 WHERE email = $2",
+      "UPDATE users SET password = $1, reset_token = NULL, reset_token_expires = NULL, token_version = COALESCE(token_version, 0) + 1 WHERE LOWER(email) = $2",
       [hashed, email]
     );
     res.json({ ok: true });
@@ -1391,7 +1456,7 @@ app.post("/login", async (req, res) => {
     if (!isAllowedEmail(email))
       return res.status(403).json({ error: "Only Gordon College email addresses (@gordoncollege.edu.ph) are allowed." });
 
-    const result = await pool.query("SELECT * FROM users WHERE email = $1", [email]);
+    const result = await pool.query("SELECT * FROM users WHERE LOWER(email) = $1", [email]);
     if (result.rows.length === 0) {
       logActivity(null, "login_failed", { email, reason: "no account with this email" });
       return res.status(401).json({ error: "Invalid email or password" });
@@ -1460,7 +1525,7 @@ app.get("/auth/google/callback",
 app.get("/api/users/:id", async (req, res) => {
   try {
     const result = await pool.query(
-      "SELECT id, first_name, last_name, full_name, email, username, created_at, tour_done, instructor, course FROM users WHERE id = $1",
+      "SELECT id, first_name, last_name, full_name, email, username, created_at, tour_done, instructor, course, COALESCE(privacy_mode, FALSE) AS privacy_mode FROM users WHERE id = $1",
       [req.params.id]
     );
     if (result.rows.length === 0) return res.status(404).json({ error: "User not found" });
@@ -1473,7 +1538,11 @@ app.get("/api/users/:id", async (req, res) => {
 
 app.put("/api/users/:id", async (req, res) => {
   try {
-    const { first_name, last_name, email, username, new_password, current_password } = req.body;
+    const { first_name, last_name, email, username, new_password, current_password, privacy_mode } = req.body;
+    if (email !== undefined && !isAllowedEmail(email))
+      return res.status(400).json({ error: "Only Gordon College email addresses (@gordoncollege.edu.ph) are allowed." });
+    if (new_password !== undefined && String(new_password).length < 8)
+      return res.status(400).json({ error: "The new password must be at least 8 characters." });
     const updates = [];
     const values = [];
     let idx = 1;
@@ -1489,6 +1558,7 @@ app.put("/api/users/:id", async (req, res) => {
     }
     if (email     !== undefined) { updates.push(`email = $${idx++}`);     values.push(email); }
     if (username  !== undefined) { updates.push(`username = $${idx++}`);  values.push(username); }
+    if (privacy_mode !== undefined) { updates.push(`privacy_mode = $${idx++}`); values.push(privacy_mode === true); }
 
     if (new_password !== undefined) {
       const user = await pool.query("SELECT password FROM users WHERE id = $1", [req.params.id]);
@@ -1504,10 +1574,11 @@ app.put("/api/users/:id", async (req, res) => {
 
     values.push(req.params.id);
     const result = await pool.query(
-      `UPDATE users SET ${updates.join(", ")} WHERE id = $${idx} RETURNING id, first_name, last_name, full_name, email, username, created_at`,
+      `UPDATE users SET ${updates.join(", ")} WHERE id = $${idx} RETURNING id, first_name, last_name, full_name, email, username, created_at, COALESCE(privacy_mode, FALSE) AS privacy_mode`,
       values
     );
     if (result.rowCount === 0) return res.status(404).json({ error: "User not found" });
+    if (privacy_mode !== undefined) logActivity(req.params.id, "privacy_mode_changed", { enabled: privacy_mode === true });
     res.json(result.rows[0]);
   } catch (err) {
     if (err.code === "23505") return res.status(400).json({ error: "Email already in use" });
@@ -2496,7 +2567,11 @@ app.get("/api/reviews/:id/status", async (req, res) => {
 });
 
 // Who is calling — used by the Python service before it serves or writes a dataset
-app.get("/api/auth/me", requireAuth, (req, res) => res.json(req.user));
+app.get("/api/auth/me", requireAuth, async (req, res) => {
+  // privacy_mode → the Python service deletes this user's new dataset files after 24 hours
+  const r = await pool.query("SELECT privacy_mode FROM users WHERE id = $1", [req.user.id]).catch(() => ({ rows: [] }));
+  res.json({ ...req.user, privacy_mode: !!r.rows[0]?.privacy_mode });
+});
 
 // May the caller access this generated dataset? (owner or admin)
 app.get("/api/datasets/access/:pythonDatasetId", requireAuth, async (req, res) => {
@@ -2537,8 +2612,10 @@ app.post("/api/datasets", requireAuth, async (req, res) => {
     }
 
     const result = await pool.query(
-      `INSERT INTO datasets (user_id, name, kaggle_ref, python_dataset_id, row_count, source, status, review_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+      `INSERT INTO datasets (user_id, name, kaggle_ref, python_dataset_id, row_count, source, status, review_id, expires_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8,
+               NOW() + CASE WHEN (SELECT privacy_mode FROM users WHERE id = $1) THEN INTERVAL '24 hours' ELSE INTERVAL '30 days' END)
+       RETURNING *`,
       [user_id, name, kaggle_ref || null, python_dataset_id || null, row_count || 0, source || "llm", status, reviewId]
     );
     logActivity(user_id, "dataset_generated", {
@@ -2660,7 +2737,7 @@ app.post("/instructor/login", async (req, res) => {
     if (!email || !password)
       return res.status(400).json({ error: "email and password are required" });
 
-    const result = await pool.query("SELECT * FROM instructors WHERE email = $1", [email]);
+    const result = await pool.query("SELECT * FROM instructors WHERE LOWER(email) = $1", [email]);
     if (result.rows.length === 0) {
       logActivity(null, "login_failed", { email, reason: "no instructor account with this email" });
       return res.status(401).json({ error: "Invalid email or password" });

@@ -24,7 +24,6 @@ import SavedSchemas from "./pages/SavedSchemas";
 import Downloads from "./pages/Downloads";
 import DataPreview from "./pages/DataPreview";
 import APIAccess from "./pages/APIAccess";
-import PrivacyMode from "./pages/PrivacyMode";
 import UserAccounts from "./pages/UserAccounts";
 import AdminPanel from "./pages/AdminPanel";
 import AdminUsers from "./pages/AdminUsers";
@@ -162,7 +161,6 @@ export default function App() {
               <Route path="/preview" component={DataPreview} />
               <Route path="/validation-report" component={ValidationReport} />
               <Route path="/api-access" component={APIAccess} />
-              <Route path="/privacy-mode" component={PrivacyMode} />
               <Route path="/user-accounts" component={UserAccounts} />
               {/* Catch-all: kapag wala talagang nagtugmang route, ipakita ang 404 */}
               <Route component={NotFound} />

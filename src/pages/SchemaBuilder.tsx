@@ -9,6 +9,13 @@ import GeneratingLoader from "../components/GeneratingLoader";
 
 import { NODE_API, PYTHON_API } from "../lib/config";
 import { reportEvent, SLOW_GENERATION_MS } from "../lib/activity";
+import { CATEGORIES, normalizeCategory } from "../lib/categories";
+
+// Input length limits (the server enforces the same ones)
+const MAX_PROMPT = 2000;
+const MAX_SEARCH = 300;
+const MAX_NAME   = 100;
+const MAX_UPLOAD_MB = 100;   // same as the Python service (MAX_UPLOAD_MB)
 
 /** Parse an error response from the Python backend.
  *  HF Spaces returns an HTML 500 page when the container crashes — detect that
@@ -591,6 +598,11 @@ export default function SchemaBuilder() {
     if (data?.error === "banned") { setStrikeWarning({ strikes: data.strikes ?? 3, banned: true }); return true; }
     if (data?.error === "inappropriate_prompt") { setStrikeWarning({ strikes: data.strikes ?? 1, banned: data.banned ?? false }); return true; }
     if (data?.error === "prompt_rejected" || data?.error === "review_unavailable" || data?.error === "blocked_keyword") { setReviewError(data.message); return true; }
+    if (data?.error === "too_long") {
+      setReviewError(data.message);
+      setPhase((p) => (p === "smart_searching" || p === "loading" ? "idle" : p));
+      return true;
+    }
     return false;
   };
 
@@ -630,6 +642,8 @@ export default function SchemaBuilder() {
   const [showPurposeModal, setShowPurposeModal]   = useState(false);
   const [purposeStep, setPurposeStep]             = useState<1 | 2>(1);
   const [selectedCategory, setSelectedCategory]   = useState("");
+  // Things the student should know about their uploaded file (empty columns removed, too few rows…)
+  const [uploadNotes, setUploadNotes]             = useState<string[]>([]);
   const [categoryOther, setCategoryOther]         = useState("");
   const [detectedCategory, setDetectedCategory]   = useState("");
   const [selectedUsage, setSelectedUsage]         = useState("");
@@ -684,17 +698,7 @@ export default function SchemaBuilder() {
       .catch(() => {});
   }, []);
 
-  const CATEGORIES = [
-    { label: "Healthcare / Medical",   keywords: ["patient","hospital","doctor","medical","disease","health","diagnosis","treatment","prescription","nurse","clinic","medication","symptom","surgery","pharmacy"] },
-    { label: "Finance / Banking",      keywords: ["bank","loan","credit","payment","transaction","fraud","account","balance","interest","mortgage","insurance","invest","stock","financial","money","billing"] },
-    { label: "Education / Academic",   keywords: ["student","grade","school","course","teacher","exam","enrollment","university","college","score","class","lecture","academic","professor","curriculum"] },
-    { label: "E-commerce / Retail",    keywords: ["product","order","customer","purchase","inventory","price","cart","sale","shipping","retail","store","shop","item","vendor","marketplace"] },
-    { label: "Technology / IT",        keywords: ["software","server","network","user","system","app","database","code","device","error","log","api","web","tech","computer","bug","deploy"] },
-    { label: "Government / Public",    keywords: ["citizen","government","policy","tax","vote","election","permit","license","public","municipal","regulation","census"] },
-    { label: "Business / HR",          keywords: ["employee","salary","department","performance","hire","payroll","company","manager","staff","workforce","job","position","leave","attendance"] },
-    { label: "Research / Science",     keywords: ["experiment","sample","observation","measurement","study","analysis","lab","research","hypothesis","scientific","survey","variable"] },
-    { label: "Other",                  keywords: [] },
-  ];
+  // CATEGORIES: shared with the instructor's "Allowed categories" (src/lib/categories.ts)
 
   const USAGES = ["Homework", "Project", "Research", "Testing / Evaluation", "Other"];
 
@@ -1108,6 +1112,12 @@ export default function SchemaBuilder() {
   const handleUploadDataset = async (file: File) => {
     sessionStorage.removeItem("sb_purpose_set");   // new data, no search → ask the purpose at generate
     failureKind.current = "upload";
+    setUploadNotes([]);
+    if (file.size > MAX_UPLOAD_MB * 1024 * 1024) {
+      setErrorMsg(`The file is too large (${(file.size / 1024 / 1024).toFixed(0)} MB). The maximum upload size is ${MAX_UPLOAD_MB} MB.`);
+      setPhase("error");
+      return;
+    }
     setLoadingMsg(`Reading ${file.name} and detecting tables…`);
     setPhase("loading");
     try {
@@ -1138,6 +1148,7 @@ export default function SchemaBuilder() {
       if (!applyRelatedTables(data)) {
         setTables([{ id: "1", name: data.table_name || "uploaded_dataset", fields }]);
       }
+      setUploadNotes(Array.isArray(data.notes) ? data.notes : []);
       setPhase("schema");
     } catch (e: any) {
       setErrorMsg(e.message ?? "Upload failed.");
@@ -1170,7 +1181,7 @@ export default function SchemaBuilder() {
       const data = await res.json();
       if (!res.ok) {
         if (handleSafetyRefusal(data, { kind: "ai_schema", prompt: llmPrompt })) return;
-        throw new Error(data.error || "LLM request failed");
+        throw new Error(data.message || data.error || "LLM request failed");
       }
       applyReviewResult(data, llmPrompt);
       const fields: Field[] = data.fields.map((f: any, i: number) =>
@@ -2436,7 +2447,7 @@ export default function SchemaBuilder() {
 
             {/* ── Step 1: Category ── */}
             {purposeStep === 1 && (() => {
-              const allowedCats = classRestrictions.filter((r) => r.restriction_type === "allowed_category").map((r) => r.value);
+              const allowedCats = classRestrictions.filter((r) => r.restriction_type === "allowed_category").map((r) => normalizeCategory(r.value));
               const visibleCats = allowedCats.length > 0
                 ? CATEGORIES.filter((c) => allowedCats.includes(c.label) || c.label === "Other")
                 : CATEGORIES;
@@ -2576,6 +2587,7 @@ export default function SchemaBuilder() {
           <div className="px-4 py-3 flex gap-2">
             <input
               value={llmPrompt}
+              maxLength={MAX_PROMPT}
               onChange={(e) => setLlmPrompt(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && askPurposeThen("template")}
               placeholder="e.g. A cybersecurity attack dataset with IP addresses and threat levels"
@@ -2587,6 +2599,12 @@ export default function SchemaBuilder() {
               {llmLoading ? "Searching…" : "Generate Schema"}
             </button>
           </div>
+          {llmPrompt.length >= MAX_PROMPT * 0.9 && (
+            <p className={`px-4 -mt-1 mb-2 text-[11px] ${llmPrompt.length >= MAX_PROMPT ? "text-red-600" : "text-amber-600"}`}>
+              {llmPrompt.length.toLocaleString()} / {MAX_PROMPT.toLocaleString()} characters
+              {llmPrompt.length >= MAX_PROMPT && " — maximum reached; extra text was cut off."}
+            </p>
+          )}
           {llmError && (
             <div className="mx-4 mb-3 flex items-start gap-2.5 bg-red-50 border border-red-200 rounded-lg px-3 py-2.5">
               <AlertCircle className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5" />
@@ -2961,6 +2979,7 @@ export default function SchemaBuilder() {
           <div className="flex gap-2">
             <input
               value={searchQuery}
+              maxLength={MAX_SEARCH}
               onChange={(e) => setSearchQuery(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && searchQuery.trim() && askPurposeThen("search")}
               placeholder="Search topics (e.g. employee salary) or paste Kaggle URL / slug (e.g. zillow/zecon)..."
@@ -3571,6 +3590,18 @@ export default function SchemaBuilder() {
         </div>
       )}
 
+      {/* Notes about the uploaded file */}
+      {phase === "schema" && uploadNotes.length > 0 && (
+        <div className="flex items-start gap-2.5 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
+          <AlertCircle className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
+          <div className="flex-1 text-xs text-amber-800 space-y-1">
+            <p className="font-semibold">About your uploaded file</p>
+            {uploadNotes.map((n, i) => <p key={i}>{n}</p>)}
+          </div>
+          <button onClick={() => setUploadNotes([])} className="text-amber-500 hover:text-amber-700 text-xs" title="Dismiss">✕</button>
+        </div>
+      )}
+
       {/* Table tabs — shown when 2+ tables */}
       {/* Auto-detected relationships between the tables of a real dataset */}
       {phase === "schema" && tables.length >= 2 && (() => {
@@ -3733,6 +3764,7 @@ export default function SchemaBuilder() {
                 <Layers className="w-4 h-4 text-purple-600 flex-shrink-0" />
                 <input
                   value={table.name}
+                  maxLength={MAX_NAME}
                   onChange={(e) => updateTableName(table.id, e.target.value)}
                   className="text-sm font-semibold text-gray-800 bg-transparent focus:outline-none focus:underline min-w-0 flex-1"
                   title="Click to rename table"
@@ -3791,7 +3823,7 @@ export default function SchemaBuilder() {
                         <td className="py-2 px-3">
                           <div className="flex flex-col gap-0.5 min-w-[140px]">
                             <div className="flex items-center gap-1.5">
-                              <input value={field.name}
+                              <input value={field.name} maxLength={MAX_NAME}
                                 onChange={(e) => updateField(table.id, field.id, { name: e.target.value })}
                                 className="text-sm bg-transparent focus:outline-none text-gray-800 flex-1 min-w-0" />
                               {field.llmGenerated && (

@@ -144,6 +144,8 @@ def list_tabular_files(root: str) -> list[str]:
     out = []
     for dirpath, _, files in os.walk(root):
         for f in files:
+            if f in ("owner.json", "review.json"):   # system files (dataset owner, review lock), not data
+                continue
             if os.path.splitext(f)[1].lower() in TABULAR_EXTS:
                 out.append(os.path.join(dirpath, f))
     return out

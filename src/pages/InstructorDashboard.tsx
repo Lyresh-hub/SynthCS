@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import { NODE_API as BACKEND } from "../lib/config";
 import { endServerSession } from "../lib/authFetch";
+import { CATEGORY_LABELS, normalizeCategory } from "../lib/categories";
 import LogViewer from "../components/LogViewer";
 import PromptHistory, { type PromptEntry, type PromptFocus } from "../components/PromptHistory";
 
@@ -67,11 +68,8 @@ type Restriction = {
   created_at: string;
 };
 
-const ALL_CATEGORIES = [
-  "Healthcare / Medical", "Finance / Banking", "E-Commerce / Retail",
-  "Education / Academic", "Human Resources", "Logistics / Supply Chain",
-  "Government / Public Records", "Technology / Software", "Other",
-];
+// Same list the student picks from in the Schema Builder
+const ALL_CATEGORIES = CATEGORY_LABELS;
 const ALL_PURPOSES = ["Homework", "Project", "Research", "Testing / Evaluation"];
 
 const FRONTEND = "https://synthcs.site";
@@ -320,7 +318,7 @@ export default function InstructorDashboard() {
       });
       if (res.ok) { const r = await res.json(); setRestrictions((p) => [...p, r]); }
     } else {
-      const existing = restrictions.find((r) => r.restriction_type === "allowed_category" && r.value === cat);
+      const existing = restrictions.find((r) => r.restriction_type === "allowed_category" && normalizeCategory(r.value) === cat);
       if (!existing) return;
       await fetch(`${BACKEND}/api/instructor/${instructorId}/restrictions/${existing.id}`, { method: "DELETE" });
       setRestrictions((p) => p.filter((r) => r.id !== existing.id));
@@ -720,7 +718,7 @@ export default function InstructorDashboard() {
                   <div className="px-5 py-4">
                     <div className="grid grid-cols-2 gap-2">
                       {ALL_CATEGORIES.map((cat) => {
-                        const isAllowed = restrictions.some((r) => r.restriction_type === "allowed_category" && r.value === cat);
+                        const isAllowed = restrictions.some((r) => r.restriction_type === "allowed_category" && normalizeCategory(r.value) === cat);
                         return (
                           <label key={cat} className="flex items-center gap-2.5 px-3 py-2.5 rounded-lg border border-gray-100 hover:bg-gray-50 cursor-pointer">
                             <input

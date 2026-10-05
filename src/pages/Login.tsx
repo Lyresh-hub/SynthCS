@@ -8,7 +8,7 @@ import { Eye, EyeOff, ArrowLeft } from "lucide-react";
 import { NODE_API as BACKEND } from "../lib/config";
 
 const loginSchema = z.object({
-  email: z.string().email("Please enter a valid email address")
+  email: z.string().trim().toLowerCase().email("Please enter a valid email address")
     .refine((e) => e.endsWith("@gordoncollege.edu.ph"), {
       message: "Only Gordon College email addresses (@gordoncollege.edu.ph) are allowed.",
     }),
