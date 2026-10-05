@@ -494,19 +494,20 @@ export default function DataPreview() {
       <div className="flex-1 bg-white border border-gray-100 rounded-xl overflow-hidden shadow-sm flex flex-col min-h-0">
 
         {/* Card header */}
-        <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100 gap-3">
+        {/* Phones: the Back button goes under the name, so the name and details have the full width */}
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between px-4 py-3 border-b border-gray-100 gap-3">
           <div className="flex items-center gap-3 min-w-0">
             <div className="w-8 h-8 rounded-lg bg-purple-600 flex items-center justify-center text-white text-sm flex-shrink-0">
               👁
             </div>
             <div className="min-w-0">
               <div className="flex items-center gap-2 flex-wrap">
-                <span className="font-semibold text-sm text-gray-900 truncate max-w-[220px]">{datasetName}</span>
+                <span className="font-semibold text-sm text-gray-900 truncate max-w-full sm:max-w-[320px]" title={datasetName}>{datasetName}</span>
                 <span className="bg-green-100 text-green-700 text-[11px] px-2 py-0.5 rounded-full font-medium flex-shrink-0">
                   ● Generated
                 </span>
               </div>
-              <p className="text-[11px] text-gray-400 mt-0.5 truncate">
+              <p className="text-[11px] text-gray-400 mt-0.5 [overflow-wrap:anywhere]">
                 {columns.length} columns · {total_rows.toLocaleString()} rows
                 {entityTables.length > 0 && ` · ${entityTables.length + 1} tables`}
                 {kaggleRef && ` · source: ${kaggleRef}`}
@@ -515,7 +516,7 @@ export default function DataPreview() {
           </div>
           <button
             onClick={() => setLocation(backPath)}
-            className="flex-shrink-0 px-3 py-1.5 border border-gray-200 rounded-md text-xs text-gray-600 hover:bg-gray-50 transition-colors"
+            className="flex-shrink-0 self-start sm:self-auto px-3 py-1.5 border border-gray-200 rounded-md text-xs text-gray-600 hover:bg-gray-50 transition-colors"
           >
             ← Back to {backPath === "/downloads" ? "My Downloads" : "Schema Builder"}
           </button>
@@ -537,7 +538,7 @@ export default function DataPreview() {
               </button>
             ))}
           </div>
-          <div className="flex items-center gap-2 flex-shrink-0 py-2 sm:py-1.5 overflow-x-auto scrollbar-hide border-t border-gray-50 sm:border-t-0">
+          <div className="flex flex-wrap items-center gap-2 flex-shrink-0 py-2 sm:py-1.5 border-t border-gray-50 sm:border-t-0">
             <div className="flex items-center border border-gray-200 rounded-md overflow-hidden text-xs flex-shrink-0">
               {exportFormats.map((f) => (
                 <button

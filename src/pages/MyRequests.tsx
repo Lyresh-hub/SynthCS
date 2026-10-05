@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import ClampedText from "../components/ClampedText";
 import { useLocation } from "wouter";
 import { Clock, CheckCircle, XCircle, RefreshCw, Search, Sparkles, Layers, Play, Inbox } from "lucide-react";
 import { NODE_API } from "../lib/config";
@@ -143,9 +144,7 @@ export default function MyRequests() {
                   <span className="ml-auto text-[11px] text-gray-400">Submitted {formatTime(r.created_at)}</span>
                 </div>
 
-                <p className="text-sm text-gray-800 bg-gray-50 border border-gray-100 rounded-lg px-3 py-2 break-words">
-                  {r.prompt_text}
-                </p>
+                <ClampedText text={r.prompt_text} className="text-sm text-gray-800 bg-gray-50 border border-gray-100 rounded-lg px-3 py-2" />
 
                 {r.status === "pending" && (
                   <p className="text-xs text-amber-700">

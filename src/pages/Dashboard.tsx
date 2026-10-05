@@ -333,7 +333,7 @@ export default function Dashboard() {
                   <Icon className="w-4 h-4 text-purple-600" />
                 </div>
               </div>
-              <div className="text-2xl font-bold text-gray-900">{stat.value}</div>
+              <div className="text-xl lg:text-2xl font-bold text-gray-900 tabular-nums">{stat.value}</div>
               <div className="text-xs text-gray-400 mt-0.5">{stat.label}</div>
             </div>
           );
@@ -532,13 +532,13 @@ export default function Dashboard() {
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="text-sm font-medium text-gray-800 truncate">{ds.name}</div>
-                  <div className="text-xs text-gray-400">
+                  <div className="text-xs text-gray-400 truncate" title={ds.kaggle_ref || undefined}>
                     {ds.kaggle_ref ? ds.kaggle_ref : "CTGAN"} · {ds.row_count.toLocaleString()} rows
                   </div>
                 </div>
-                <div className="flex items-center gap-3">
-                  <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-green-100 text-green-700">CSV</span>
-                  <span className="text-xs text-gray-400 w-16 text-right">{timeAgo(ds.created_at)}</span>
+                <div className="flex items-center gap-3 flex-shrink-0">
+                  <span className="hidden sm:inline text-xs font-medium px-2 py-0.5 rounded-full bg-green-100 text-green-700">CSV</span>
+                  <span className="text-xs text-gray-400 sm:w-16 text-right whitespace-nowrap">{timeAgo(ds.created_at)}</span>
                   {/* Download button na lumalabas lang kapag naka-hover sa row */}
                   <button
                     onClick={() => setLocation("/downloads")}

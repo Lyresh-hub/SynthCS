@@ -326,6 +326,8 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                 {isAccountPage    ? "Account Settings"
                   : isAdminPage       ? "Admin — Overview"
                   : isAdminUsersPage  ? "Admin — User Management"
+                  : isPreviewPage     ? "Data Preview"
+                  : isValidationPage  ? "Validation Report"
                   : navItems.find((n) => n.href === location)?.label ?? "Dashboard"}
               </h1>
               <p className="text-xs text-gray-400 hidden sm:block">

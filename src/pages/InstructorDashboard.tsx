@@ -8,6 +8,7 @@ import {
 import { NODE_API as BACKEND } from "../lib/config";
 import { endServerSession } from "../lib/authFetch";
 import { CATEGORY_LABELS, normalizeCategory } from "../lib/categories";
+import ClampedText from "../components/ClampedText";
 import LogViewer from "../components/LogViewer";
 import PromptHistory, { type PromptEntry, type PromptFocus } from "../components/PromptHistory";
 
@@ -461,9 +462,7 @@ export default function InstructorDashboard() {
                             <span className="font-medium text-amber-600">Flag reason:</span> {fp.flag_reason}
                           </p>
                         )}
-                        <div className="bg-gray-50 border border-gray-100 rounded-lg px-3 py-2 text-xs text-gray-700 leading-relaxed">
-                          {fp.prompt_text}
-                        </div>
+                        <ClampedText text={fp.prompt_text} className="bg-gray-50 border border-gray-100 rounded-lg px-3 py-2 text-xs text-gray-700 leading-relaxed" />
                         {(fp.locked_datasets ?? 0) > 0 && (
                           <p className={`text-xs mt-1.5 ${fp.status === "pending" ? "text-amber-700" : fp.status === "approved" ? "text-green-700" : "text-red-600"}`}>
                             {fp.status === "pending"
