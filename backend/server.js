@@ -858,17 +858,11 @@ async function findOrCreateOAuthUser(provider, providerId, profile) {
     if (existing.rows.length > 0) userId = existing.rows[0].id;
   }
 
-  // 3. Brand-new user
+  // 3. No account yet → not allowed: accounts are created only from an instructor's invite
   if (!userId) {
-    const displayName = profile.displayName || profile.username || "User";
-    const parts = displayName.split(" ");
-    const oFirstName = parts[0] || displayName;
-    const oLastName  = parts.slice(1).join(" ") || "";
-    const newUser = await pool.query(
-      "INSERT INTO users (full_name, first_name, last_name, email) VALUES ($1, $2, $3, $4) RETURNING id",
-      [displayName, oFirstName, oLastName, email]
-    );
-    userId = newUser.rows[0].id;
+    const err = new Error("No SynthCS account for this email. Create your account with your instructor's invite link first.");
+    err.code = "invite_required";
+    throw err;
   }
 
   // 4. Link the OAuth account
@@ -893,7 +887,7 @@ if (process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET) {
     },
     async (_at, _rt, profile, done) => {
       try { done(null, await findOrCreateOAuthUser("github", profile.id, profile)); }
-      catch (err) { done(err); }
+      catch (err) { err.code === "invite_required" ? done(null, false) : done(err); }
     }
   ));
   console.log("✅ GitHub OAuth ready.");
@@ -910,7 +904,7 @@ if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
     },
     async (_at, _rt, profile, done) => {
       try { done(null, await findOrCreateOAuthUser("google", profile.id, profile)); }
-      catch (err) { done(err); }
+      catch (err) { err.code === "invite_required" ? done(null, false) : done(err); }
     }
   ));
   console.log("✅ Google OAuth ready.");
@@ -1253,23 +1247,56 @@ app.get("/", (_req, res) => res.json({ status: "Backend running" }));
 // SIGNUP (email + password)
 app.post("/signup", async (req, res) => {
   try {
-    const { first_name, last_name, email, password, course, instructor } = req.body;
+    const { first_name, last_name, email, password, invite_token, invitation_token } = req.body;
     if (!first_name || !last_name || !email || !password)
       return res.status(400).json({ error: "first_name, last_name, email, and password are required" });
     if (!isAllowedEmail(email))
       return res.status(403).json({ error: "Only Gordon College email addresses (@gordoncollege.edu.ph) are allowed." });
+
+    // Accounts are created only through an instructor: a class invite link (joins the
+    // class, waits for approval) or an email invitation (that student only, auto-approved).
+    // Course and instructor come from the invite, never from the form.
+    let invite = null;
+    if (invite_token) {
+      const r = await pool.query(
+        `SELECT ci.instructor_id, ci.course, u.full_name AS instructor_name FROM class_invitations ci
+         JOIN users u ON u.id = ci.instructor_id WHERE ci.token = $1 AND ci.active = TRUE`, [String(invite_token)]);
+      if (r.rows.length) invite = { ...r.rows[0], via: "class invite link", approved: false };
+    } else if (invitation_token) {
+      const r = await pool.query(
+        `SELECT si.instructor_id, si.course, si.student_email, u.full_name AS instructor_name FROM student_invitations si
+         JOIN users u ON u.id = si.instructor_id WHERE si.token = $1 AND si.status = 'pending'`, [String(invitation_token)]);
+      if (r.rows.length && String(r.rows[0].student_email).toLowerCase() === email)
+        invite = { ...r.rows[0], via: "email invitation", approved: true };
+      else if (r.rows.length)
+        return res.status(403).json({ error: "invite_required", message: `This invitation was sent to ${r.rows[0].student_email}. Sign up with that email address.` });
+    }
+    if (!invite) {
+      return res.status(403).json({
+        error: "invite_required",
+        message: "Accounts can only be created with your instructor's invite link. Please ask your instructor for the class link.",
+      });
+    }
+    const course = invite.course, instructor = invite.instructor_name;
 
     const full_name = `${first_name} ${last_name}`.trim();
     const hashed = await bcrypt.hash(password, 10);
     const token  = crypto.randomUUID();
 
     const result = await pool.query(
-      `INSERT INTO users (first_name, last_name, full_name, email, password, email_verified, verification_token, verification_token_expires, course, instructor)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id, first_name, last_name, full_name, email, created_at`,
-      [first_name, last_name, full_name, email, hashed, !EMAIL_READY, EMAIL_READY ? token : null, EMAIL_READY ? new Date(Date.now() + 24 * 60 * 60 * 1000) : null, course || null, instructor || null]
+      `INSERT INTO users (first_name, last_name, full_name, email, password, email_verified, verification_token, verification_token_expires, course, instructor, approval_status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING id, first_name, last_name, full_name, email, created_at`,
+      [first_name, last_name, full_name, email, hashed, !EMAIL_READY, EMAIL_READY ? token : null, EMAIL_READY ? new Date(Date.now() + 24 * 60 * 60 * 1000) : null, course, instructor,
+       invite.approved ? "approved" : "pending"]
     );
     const user = result.rows[0];
-    logActivity(user.id, "signup", { role: "student", course: course || null, instructor: instructor || null });
+    await pool.query(
+      `INSERT INTO student_classes (student_id, instructor_id, course, status) VALUES ($1, $2, $3, $4)
+       ON CONFLICT (student_id, instructor_id, course) DO NOTHING`,
+      [user.id, invite.instructor_id, course, invite.approved ? "approved" : "pending"]
+    );
+    if (invitation_token) await pool.query("UPDATE student_invitations SET status = 'accepted' WHERE token = $1", [String(invitation_token)]);
+    logActivity(user.id, "signup", { role: "student", course, instructor, via: invite.via });
 
     if (EMAIL_READY) {
       res.status(201).json({ pending_verification: true, email });
@@ -1277,8 +1304,9 @@ app.post("/signup", async (req, res) => {
       return;
     }
 
-    // New students start as 'pending' — never sign them in here, even when email
-    // verification is off; they must wait for instructor approval like /login enforces
+    // Never signed in here. Class-link students wait for instructor approval (like /login
+    // enforces); email-invited students are already approved and can log in.
+    if (invite.approved) return res.status(201).json({ approved: true, email: user.email });
     res.status(201).json({ pending_approval: true, email: user.email });
   } catch (err) {
     if (err.code === "23505") return res.status(400).json({ error: "Email already exists" });
@@ -1507,7 +1535,7 @@ app.get("/auth/github", (req, res, next) => {
 });
 
 app.get("/auth/github/callback",
-  passport.authenticate("github", { failureRedirect: `${FRONTEND_URL}/?oauth_error=GitHub+login+failed` }),
+  passport.authenticate("github", { failureRedirect: `${FRONTEND_URL}/?oauth_error=${encodeURIComponent("GitHub sign-in failed. New students: create your account with your instructor's invite link first.")}` }),
   (req, res) => oauthSuccessRedirect(res, req.user, "GitHub")
 );
 
@@ -1519,7 +1547,7 @@ app.get("/auth/google", (req, res, next) => {
 });
 
 app.get("/auth/google/callback",
-  passport.authenticate("google", { failureRedirect: `${FRONTEND_URL}/?oauth_error=Google+login+failed` }),
+  passport.authenticate("google", { failureRedirect: `${FRONTEND_URL}/?oauth_error=${encodeURIComponent("Google sign-in failed. New students: create your account with your instructor's invite link first.")}` }),
   (req, res) => oauthSuccessRedirect(res, req.user, "Google")
 );
 

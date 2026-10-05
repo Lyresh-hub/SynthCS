@@ -30,8 +30,6 @@ const signupSchema = z
       .regex(/[0-9]/,  "Password must contain at least one number")
       .regex(/[^A-Za-z0-9]/, "Password must contain at least one special character"),
     confirmPassword: z.string(),
-    course:     z.string().min(1, "Please select a course"),
-    instructor: z.string().min(1, "Please select an instructor"),
     agreeTerms: z.boolean().refine((v) => v === true, {
       message: "You must agree to the Terms of Service",
     }),
@@ -56,40 +54,34 @@ export default function Signup() {
   const [modalOpen, setModalOpen] = useState<"tos" | "privacy" | null>(null);
   const [resendStatus, setResendStatus] = useState<"idle"|"sending"|"sent">("idle");
 
-  const [inviteToken,   setInviteToken]   = useState("");
-  const [instructors,   setInstructors]   = useState<{ id: string; full_name: string }[]>([]);
-  const [invitePrefill, setInvitePrefill] = useState<{ course?: string; instructor_name?: string } | null>(null);
+  // ── Invite only ────────────────────────────────────────────────────────────
+  // An account can only be created from an instructor's class invite link
+  // (?invite=…) or an email invitation ("Create my account" on the invitation page).
+  // The class (course + instructor) comes from the invite.
+  const [inviteToken,     setInviteToken]     = useState("");
+  const [invitationToken, setInvitationToken] = useState("");
+  const [invite, setInvite] = useState<{ course: string; instructor_name: string; student_email?: string } | null>(null);
+  const [inviteState, setInviteState] = useState<"checking" | "valid" | "missing" | "invalid">("checking");
 
-  // Fetch instructors from DB (replaces hardcoded list)
-  useEffect(() => {
-    fetch(`${BACKEND}/api/instructors`)
-      .then((r) => r.json())
-      .then((data) => Array.isArray(data) ? setInstructors(data) : [])
-      .catch(() => {});
-  }, []);
-
-  // Apply invite pre-fills once instructors have loaded
-  useEffect(() => {
-    if (!invitePrefill || instructors.length === 0) return;
-    if (invitePrefill.course)           setValue("course",     invitePrefill.course);
-    if (invitePrefill.instructor_name)  setValue("instructor", invitePrefill.instructor_name);
-  }, [invitePrefill, instructors]);
-
-  // Handle invite token and OAuth error from URL params
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    const oauthError = params.get("oauth_error");
-    if (oauthError) setServerError(decodeURIComponent(oauthError));
-
-    const token = params.get("invite");
-    if (token) {
-      setInviteToken(token);
-      fetch(`${BACKEND}/invite/${token}`)
-        .then((r) => r.json())
-        .then((data) => setInvitePrefill(data))
-        .catch(() => {});
-    }
-  }, []);
+    const classToken = params.get("invite") || sessionStorage.getItem("signup_invite") || "";
+    const emailToken = classToken ? "" : sessionStorage.getItem("signup_invitation") || "";
+    if (!classToken && !emailToken) { setInviteState("missing"); return; }
+    setInviteToken(classToken);
+    setInvitationToken(emailToken);
+    const url = classToken
+      ? `${BACKEND}/invite/${encodeURIComponent(classToken)}`
+      : `${BACKEND}/api/invitation/accept?token=${encodeURIComponent(emailToken)}`;
+    fetch(url)
+      .then((r) => (r.ok ? r.json() : Promise.reject()))
+      .then((data) => {
+        setInvite(data);
+        setInviteState("valid");
+        if (data.student_email) setValue("email", data.student_email);   // email invitation: that address only
+      })
+      .catch(() => setInviteState("invalid"));
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const {
     register,
@@ -106,8 +98,6 @@ export default function Signup() {
       email: "",
       password: "",
       confirmPassword: "",
-      course: "",
-      instructor: "",
       agreeTerms: false,
     },
   });
@@ -124,14 +114,13 @@ export default function Signup() {
           last_name:  data.lastName,
           email: data.email,
           password: data.password,
-          course: data.course,
-          instructor: data.instructor,
           invite_token: inviteToken || undefined,
+          invitation_token: invitationToken || undefined,
         }),
       });
       const json = await res.json();
       if (!res.ok) {
-        const msg = json.error ?? "Failed to create account";
+        const msg = json.message ?? json.error ?? "Failed to create account";
         if (res.status === 400 && msg.toLowerCase().includes("exists")) {
           setError("email", { message: "An account with this email already exists" });
         } else {
@@ -139,8 +128,16 @@ export default function Signup() {
         }
         return;
       }
+      sessionStorage.removeItem("signup_invite");
+      sessionStorage.removeItem("signup_invitation");
       if (json.pending_verification) {
         setPendingEmail(json.email);
+        return;
+      }
+      if (json.approved) {
+        // Invited by email → already approved by the instructor
+        sessionStorage.setItem("login_notice", "Account created! Your instructor invited you, so you can sign in now.");
+        setLocation("/login");
         return;
       }
       // Account created but needs instructor approval — no automatic sign-in
@@ -192,6 +189,33 @@ export default function Signup() {
             Back to Sign in
           </Link>
         </p>
+      </div>
+    </div>
+  );
+
+  if (inviteState === "checking") return (
+    <div className="min-h-screen flex items-center justify-center bg-white text-sm text-gray-400">Checking your invite link…</div>
+  );
+
+  if (inviteState !== "valid") return (
+    <div className="min-h-screen flex items-center justify-center bg-white px-6">
+      <div className="w-full max-w-md text-center space-y-5">
+        <img src="/synthcs-logo.png" alt="SynthCS" className="w-16 h-16 mx-auto" />
+        <h2 className="text-2xl font-bold text-gray-900">
+          {inviteState === "invalid" ? "This invite link isn't active" : "You need an invite link"}
+        </h2>
+        <p className="text-sm text-gray-500 leading-relaxed">
+          {inviteState === "invalid"
+            ? "The link may have been switched off or deleted by your instructor. Please ask your instructor for a new class invite link."
+            : "SynthCS accounts are created from your instructor's class invite link. Please ask your instructor for the link, then open it to create your account."}
+        </p>
+        <div className="bg-purple-50 border border-purple-100 rounded-xl p-4 text-xs text-purple-700 text-left space-y-1">
+          <p>• The link looks like <code className="bg-white/70 px-1 rounded">synthcs.site/?invite=…</code></p>
+          <p>• Already have an account? Just sign in.</p>
+        </div>
+        <Link href="/login" className="inline-block px-5 py-2.5 bg-purple-600 hover:bg-purple-700 text-white text-sm font-semibold rounded-lg">
+          Go to Sign in
+        </Link>
       </div>
     </div>
   );
@@ -345,33 +369,11 @@ export default function Signup() {
               {errors.confirmPassword && <p className="mt-1 text-xs text-red-500">{errors.confirmPassword.message}</p>}
             </div>
 
-            {/* Course + Instructor */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Course</label>
-                <select
-                  {...register("course")}
-                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500 bg-white text-gray-700"
-                >
-                  <option value="">Select a course</option>
-                  <option value="Data Science">Data Science</option>
-                  <option value="Thesis Writing">Thesis Writing</option>
-                </select>
-                {errors.course && <p className="mt-1 text-xs text-red-500">{errors.course.message}</p>}
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Instructor</label>
-                <select
-                  {...register("instructor")}
-                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500 bg-white text-gray-700"
-                >
-                  <option value="">Select an instructor</option>
-                  {instructors.map((ins) => (
-                    <option key={ins.id} value={ins.full_name}>{ins.full_name}</option>
-                  ))}
-                </select>
-                {errors.instructor && <p className="mt-1 text-xs text-red-500">{errors.instructor.message}</p>}
-              </div>
+            {/* The class this invite is for (set by the instructor, not editable) */}
+            <div className="bg-purple-50 border border-purple-100 rounded-lg px-3 py-2.5 text-sm">
+              <p className="text-[11px] font-semibold text-purple-500 uppercase tracking-wide">You're joining</p>
+              <p className="text-gray-800 font-medium">{invite?.course} <span className="text-gray-400">·</span> {invite?.instructor_name}</p>
+              {invitationToken && <p className="text-[11px] text-purple-600 mt-0.5">Email invitation — use the invited address: {invite?.student_email}</p>}
             </div>
 
             {/* Agree Terms */}

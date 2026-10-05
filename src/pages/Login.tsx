@@ -69,6 +69,8 @@ export default function Login() {
     const params = new URLSearchParams(window.location.search);
     if (params.get("oauth_error")) setServerError(decodeURIComponent(params.get("oauth_error")!));
     if (params.get("verified") === "1") setSuccessMsg("Email verified! You can now sign in.");
+    const notice = sessionStorage.getItem("login_notice");   // e.g. "Account created" from signup
+    if (notice) { setSuccessMsg(notice); sessionStorage.removeItem("login_notice"); }
     const error = params.get("error");
     if (error === "expired_token" || error === "invalid_token") {
       setExpiredIsInvalid(error === "invalid_token");
@@ -344,9 +346,9 @@ export default function Login() {
                   {isPending ? "Signing in…" : "Sign In"}
                 </button>
               </form>
-              <p className="mt-5 text-center text-sm text-gray-500">
-                Don't have an account?{" "}
-                <Link href="/signup" className="text-purple-600 font-medium hover:underline">Sign up</Link>
+              <p className="mt-5 text-center text-xs text-gray-500 leading-relaxed">
+                New student? Accounts are created from your instructor's <strong className="font-medium text-gray-600">class invite link</strong>.
+                Ask your instructor for the link.
               </p>
             </>
           )}

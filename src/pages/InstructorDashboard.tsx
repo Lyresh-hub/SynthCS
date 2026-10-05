@@ -439,16 +439,18 @@ export default function InstructorDashboard() {
         </div>
       </nav>
 
-      <div className="max-w-5xl mx-auto px-6 py-8">
+      <div className="max-w-6xl mx-auto px-4 sm:px-6 py-8">
         <div className="mb-6">
           <h1 className="text-2xl font-bold text-gray-900">Instructor Dashboard</h1>
           <p className="text-sm text-gray-500 mt-1">Manage students, review prompts, and monitor activity.</p>
         </div>
 
-        <div className="flex gap-1 bg-white border border-gray-100 rounded-xl p-1 w-fit mb-6 shadow-sm flex-wrap">
+        {/* One row of tabs: on computers they share the bar's full width evenly; on smaller
+            screens the row scrolls sideways instead of breaking into uneven rows */}
+        <div className="flex gap-1 bg-white border border-gray-100 rounded-xl p-1 mb-6 shadow-sm overflow-x-auto scrollbar-hide">
           {TABS.map((t) => (
             <button key={t.id} onClick={() => setTab(t.id)} data-tour={`tab-${t.id}`}
-              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+              className={`flex flex-shrink-0 lg:flex-1 items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm font-medium whitespace-nowrap transition-colors ${
                 tab === t.id ? "bg-purple-600 text-white shadow-sm" : "text-gray-500 hover:text-gray-700"
               }`}>
               {t.icon}
@@ -616,10 +618,10 @@ export default function InstructorDashboard() {
 
                 {/* Test a prompt */}
                 <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
-                  <div className="px-5 py-4 border-b border-gray-100 flex items-center gap-2">
-                    <Search className="w-4 h-4 text-blue-500" />
+                  <div className="px-5 py-4 border-b border-gray-100 flex flex-wrap items-center gap-x-2 gap-y-1">
+                    <Search className="w-4 h-4 text-blue-500 flex-shrink-0" />
                     <p className="text-sm font-semibold text-gray-800">Test a prompt</p>
-                    <span className="ml-auto text-xs text-gray-400">Nothing is saved or sent to students</span>
+                    <span className="w-full sm:w-auto sm:ml-auto text-xs text-gray-400">Nothing is saved or sent to students</span>
                   </div>
                   <div className="px-5 py-4 space-y-3">
                     <div className="flex flex-col sm:flex-row gap-2">
@@ -649,10 +651,10 @@ export default function InstructorDashboard() {
 
                 {/* System Keywords (Level 3) — served by the backend, identical to what the detector uses */}
                 <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
-                  <div className="px-5 py-4 border-b border-gray-100 flex items-center gap-2">
-                    <ShieldAlert className="w-4 h-4 text-red-500" />
+                  <div className="px-5 py-4 border-b border-gray-100 flex flex-wrap items-center gap-x-2 gap-y-1.5">
+                    <ShieldAlert className="w-4 h-4 text-red-500 flex-shrink-0" />
                     <p className="text-sm font-semibold text-gray-800">Level 3 · System-level Trigger Words</p>
-                    <span className="ml-auto text-xs text-gray-400 bg-gray-100 px-2 py-0.5 rounded-full">Always on · Read-only</span>
+                    <span className="sm:ml-auto text-xs text-gray-400 bg-gray-100 px-2 py-0.5 rounded-full whitespace-nowrap">Always on · Read-only</span>
                   </div>
                   <div className="px-5 py-4 space-y-3">
                     <p className="text-xs text-gray-500">
@@ -847,7 +849,7 @@ export default function InstructorDashboard() {
                 <LinkIcon className="w-4 h-4 text-purple-500" /> Generate invitation link
               </p>
               <p className="text-xs text-gray-500 mb-3">
-                Share with students — they land on signup with your name and course pre-filled.
+                Students can only create a SynthCS account through this link. They join your class and wait for your approval.
               </p>
               <div className="flex gap-2">
                 <select value={newCourse} onChange={(e) => setNewCourse(e.target.value)}
@@ -870,18 +872,18 @@ export default function InstructorDashboard() {
               ) : (
                 <div className="divide-y divide-gray-50">
                   {invites.map((inv) => (
-                    <div key={inv.id} className={`px-5 py-4 flex items-center justify-between gap-4 ${!inv.active ? "bg-gray-50/60" : ""}`}>
+                    <div key={inv.id} className={`px-5 py-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4 ${!inv.active ? "bg-gray-50/60" : ""}`}>
                       <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 mb-1">
+                        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mb-1">
                           <span className="text-sm font-medium text-gray-900">{inv.course}</span>
                           <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full border ${inv.active ? "bg-green-50 text-green-700 border-green-200" : "bg-gray-100 text-gray-400 border-gray-200"}`}>
                             {inv.active ? "Active" : "Inactive"}
                           </span>
-                          <span className="text-xs text-gray-400">
+                          <span className="text-xs text-gray-400 whitespace-nowrap">
                             {new Date(inv.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
                           </span>
                         </div>
-                        <p className={`text-xs font-mono truncate max-w-[300px] ${inv.active ? "text-gray-400" : "text-gray-300 line-through"}`}>
+                        <p className={`text-xs font-mono truncate sm:max-w-[300px] ${inv.active ? "text-gray-400" : "text-gray-300 line-through"}`}>
                           {FRONTEND}/?invite={inv.token}
                         </p>
                       </div>

@@ -32,12 +32,7 @@ export default function Landing() {
             >
               Sign in
             </button>
-            <button
-              onClick={() => setLocation("/signup")}
-              className="text-sm font-semibold text-white bg-purple-600 hover:bg-purple-500 px-4 py-2 rounded-lg transition-colors shadow-md shadow-purple-900/40"
-            >
-              Get started
-            </button>
+
           </div>
         </div>
       </nav>
@@ -94,17 +89,11 @@ export default function Landing() {
 
           <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
             <button
-              onClick={() => setLocation("/signup")}
+              onClick={() => setLocation("/login")}
               className="w-full sm:w-auto flex items-center justify-center gap-2 bg-purple-600 hover:bg-purple-500 text-white font-semibold px-7 py-3.5 rounded-xl text-sm transition-colors shadow-lg shadow-purple-900/40"
             >
-              Get started free
-              <ChevronRight className="w-4 h-4" />
-            </button>
-            <button
-              onClick={() => setLocation("/login")}
-              className="w-full sm:w-auto flex items-center justify-center gap-2 bg-white/10 hover:bg-white/15 text-white font-medium px-7 py-3.5 rounded-xl text-sm transition-colors border border-white/20"
-            >
               Sign in to your account
+              <ChevronRight className="w-4 h-4" />
             </button>
           </div>
         </div>
@@ -277,19 +266,12 @@ export default function Landing() {
             <code className="text-purple-300 bg-white/10 px-1.5 py-0.5 rounded">
               @gordoncollege.edu.ph
             </code>{" "}
-            email.
+            email. New students get their account from their instructor's class invite link.
           </p>
           <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
             <button
-              onClick={() => setLocation("/signup")}
-              className="w-full sm:w-auto flex items-center justify-center gap-2 bg-white text-purple-700 hover:bg-purple-50 font-semibold px-7 py-3.5 rounded-xl text-sm transition-colors"
-            >
-              Create your account
-              <ChevronRight className="w-4 h-4" />
-            </button>
-            <button
               onClick={() => setLocation("/login")}
-              className="w-full sm:w-auto flex items-center justify-center gap-2 bg-white/10 hover:bg-white/15 text-white font-medium px-7 py-3.5 rounded-xl text-sm transition-colors border border-white/20"
+              className="w-full sm:w-auto flex items-center justify-center gap-2 bg-white text-purple-700 hover:bg-purple-50 font-semibold px-7 py-3.5 rounded-xl text-sm transition-colors"
             >
               Sign in
             </button>
@@ -313,12 +295,6 @@ export default function Landing() {
               className="hover:text-gray-300 transition-colors"
             >
               Sign in
-            </button>
-            <button
-              onClick={() => setLocation("/signup")}
-              className="hover:text-gray-300 transition-colors"
-            >
-              Sign up
             </button>
           </div>
         </div>

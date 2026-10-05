@@ -103,7 +103,7 @@ export default function AcceptInvitation() {
 
             {!userId && (
               <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-4">
-                You need to be logged in to accept. You'll be redirected to login and then brought back here.
+                Already have an account? Log in to accept. New to SynthCS? Create your account below with the invited email address.
               </p>
             )}
 
@@ -113,6 +113,16 @@ export default function AcceptInvitation() {
                 ? <><Loader2 className="w-4 h-4 animate-spin" /> Accepting…</>
                 : userId ? "Accept Invitation" : "Log in to Accept"}
             </button>
+            {!userId && (
+              <button onClick={() => {
+                  sessionStorage.setItem("signup_invitation", token);
+                  sessionStorage.removeItem("signup_invite");
+                  setLocation("/signup");
+                }}
+                className="w-full mt-2 py-3 border border-purple-200 text-purple-700 hover:bg-purple-50 font-semibold rounded-xl transition-colors">
+                Create my account
+              </button>
+            )}
           </>
         )}
 

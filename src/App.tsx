@@ -51,9 +51,12 @@ function getInitialPath() {
   if (params.get("invite")) {
     const uid = localStorage.getItem("user_id");
     if (uid) return `/join-class?token=${encodeURIComponent(params.get("invite")!)}`;
+    // Accounts are created only from an instructor's link — remember it for the signup page
+    sessionStorage.setItem("signup_invite", params.get("invite")!);
+    sessionStorage.removeItem("signup_invitation");
     return `/signup?invite=${encodeURIComponent(params.get("invite")!)}`;
   }
-  if (params.get("oauth_error")) return `/signup?oauth_error=${encodeURIComponent(params.get("oauth_error")!)}`;
+  if (params.get("oauth_error")) return `/login?oauth_error=${encodeURIComponent(params.get("oauth_error")!)}`;
   if (params.get("error")) {
     const email = params.get("email");
     const base  = `/login?error=${encodeURIComponent(params.get("error")!)}`;
