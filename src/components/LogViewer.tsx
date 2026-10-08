@@ -103,6 +103,7 @@ export default function LogViewer({
   const [counts, setCounts]     = useState<Record<LogLevel, number>>({ INFO: 0, WARN: 0, ERROR: 0 });
   const [loading, setLoading]   = useState(true);
   const [failed, setFailed]     = useState(false);
+  const [failReason, setFailReason] = useState("");   // why loading failed, shown under the message
   const [levels, setLevels]     = useState<LogLevel[]>([]);          // empty = all
   const [category, setCategory] = useState("");
   const [since, setSince]       = useState("7d");
@@ -127,13 +128,19 @@ export default function LogViewer({
       if (role) qs.set("role", role);
       for (const [k, v] of Object.entries(extraQuery ?? {})) if (v) qs.set(k, v);
       const res = await fetch(`${endpoint}${endpoint.includes("?") ? "&" : "?"}${qs}`);
-      if (!res.ok) throw new Error();
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        throw new Error(body?.message || body?.error || `The server answered with status ${res.status}.`);
+      }
       const data = await res.json();
       setLogs(data.logs ?? []);
       setCounts(data.counts ?? { INFO: 0, WARN: 0, ERROR: 0 });
       setFailed(false);
-    } catch {
+      setFailReason("");
+    } catch (e) {
       setFailed(true);
+      setFailReason(e instanceof Error && e.message && e.message !== "Failed to fetch"
+        ? e.message : "The server could not be reached. Check your connection and try again.");
     } finally {
       setLoading(false);
     }
@@ -269,7 +276,11 @@ export default function LogViewer({
 
         {/* Log table */}
         {failed ? (
-          <div className="py-12 text-center text-sm text-red-500">Could not load logs.</div>
+          <div className="py-12 px-4 text-center">
+            <p className="text-sm text-red-500">Could not load logs.</p>
+            {failReason && <p className="mt-1 text-xs text-gray-500 [overflow-wrap:anywhere]">{failReason}</p>}
+            <button onClick={load} className="mt-3 text-xs font-medium text-purple-600 hover:underline">Try again</button>
+          </div>
         ) : loading && logs.length === 0 ? (
           <div className="py-12 text-center text-sm text-gray-400">Loading…</div>
         ) : shown.length === 0 ? (

@@ -3222,12 +3222,20 @@ async function queryLogs(scopeSql, scopeParams, query, restrictions = [], { hide
   const tally = { INFO: 0, WARN: 0, ERROR: 0 };
   for (const r of counts.rows) tally[r.level] = r.n;
   return {
-    logs: logs.rows.map((row) => ({
-      ...row,
-      message: row.message || describeLog(row.action_type, row.details).message,
-      details: hidePrompts ? stripPromptFields(row.details) : row.details,
-      triggers: hidePrompts ? [] : promptTriggers(row.details?.prompt_text, restrictions),
-    })),
+    // Each entry is prepared on its own: one unusual entry can't break the whole list
+    logs: logs.rows.map((row) => {
+      try {
+        return {
+          ...row,
+          message: row.message || describeLog(row.action_type, row.details).message,
+          details: hidePrompts ? stripPromptFields(row.details) : row.details,
+          triggers: hidePrompts ? [] : promptTriggers(row.details?.prompt_text, restrictions),
+        };
+      } catch (e) {
+        console.error(`Log entry ${row.id} could not be prepared:`, e.message);
+        return { ...row, message: row.message || String(row.action_type).replace(/_/g, " "), details: {}, triggers: [] };
+      }
+    }),
     counts: tally,
   };
 }
@@ -3256,7 +3264,7 @@ app.get("/instructor/logs", requireAuth, async (req, res) => {
     res.json(result);
   } catch (err) {
     console.error("Instructor logs error:", err.message);
-    res.status(500).json({ error: "Server error" });
+    res.status(500).json({ error: "server_error", message: `The server could not read the logs (${err.message}).` });
   }
 });
 
@@ -3295,7 +3303,7 @@ app.get("/api/admin/logs", requireAdmin, async (req, res) => {
     res.json(result);
   } catch (err) {
     console.error("Admin logs error:", err.message);
-    res.status(500).json({ error: "Server error" });
+    res.status(500).json({ error: "server_error", message: `The server could not read the logs (${err.message}).` });
   }
 });
 
