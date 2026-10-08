@@ -1,3 +1,5 @@
+// Must stay FIRST: gives each browser tab its own login before App reads it
+import "./lib/tabSession";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 // React Query — siya yung nag-aalaga ng data fetching, caching, at pag-refresh ng data mula sa server

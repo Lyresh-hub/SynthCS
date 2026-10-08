@@ -1,5 +1,6 @@
 // Ini-import natin lahat ng pages na magagamit sa app
 import Landing from "./pages/Landing";
+import { tabWasReloaded } from "./lib/tabSession";
 import Signup from "./pages/signup";
 import Login from "./pages/Login";
 import PendingApproval from "./pages/PendingApproval";
@@ -64,7 +65,13 @@ function getInitialPath() {
   }
   const userId   = localStorage.getItem("user_id");
   const lastPath = localStorage.getItem("last_path");
-  if (userId && lastPath && !lastPath.startsWith("/preview")) return lastPath;
+  if (userId && lastPath && !lastPath.startsWith("/preview") && !PUBLIC_PATHS.has(lastPath)) return lastPath;
+  // Reloaded tab, signed in, but no page remembered: go to this role's home
+  if (tabWasReloaded && userId && localStorage.getItem("auth_token")) {
+    if (localStorage.getItem("is_admin") === "true") return "/admin";
+    if (localStorage.getItem("is_instructor") === "true") return "/instructor/dashboard";
+    return "/dashboard";
+  }
   return "/";
 }
 
@@ -72,7 +79,10 @@ function getInitialPath() {
 // sa sessionStorage para kapag nag-refresh ang user, mabalik siya sa tamang page.
 // /preview ay hindi sine-save kasi kailangan niya ng live dataset ID na mawawala pagkatapos ng session
 // Ginagamit natin localStorage (hindi sessionStorage) para maalala kahit isara ang browser
-const UNSAVEABLE_PATHS = new Set(["/", "/signup", "/login", "/pending-approval", "/instructor/login", "/instructor/register", "/instructor/dashboard", "/auth/callback", "/preview", "/validation-report", "/admin", "/admin/users", "/admin/classes", "/admin/activity"]);
+// Admin and instructor pages ARE remembered (a reload keeps you on the same page);
+// public pages and pages that need data from the previous screen are not.
+const PUBLIC_PATHS = new Set(["/", "/signup", "/login", "/pending-approval", "/instructor/login", "/instructor/register", "/auth/callback", "/accept-invitation"]);
+const UNSAVEABLE_PATHS = new Set([...PUBLIC_PATHS, "/preview", "/validation-report"]);
 function LocationPersist() {
   const [location] = useLocation();
   useEffect(() => {
