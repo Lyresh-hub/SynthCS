@@ -3189,7 +3189,10 @@ async function queryLogs(scopeSql, scopeParams, query, restrictions = [], { hide
   if (query.q) {
     params.push(`%${String(query.q).slice(0, 100)}%`);
     const n = `$${params.length}`;
-    where.push(`(al.message ILIKE ${n} OR al.action_type ILIKE ${n} OR u.full_name ILIKE ${n} OR u.email ILIKE ${n} OR al.details::text ILIKE ${n})`);
+    where.push(hidePrompts
+      ? `(al.action_type ILIKE ${n} OR u.full_name ILIKE ${n} OR u.email ILIKE ${n}
+          OR (al.action_type <> ALL('{${PROMPT_CONTENT_ACTIONS.join(",")}}') AND (al.message ILIKE ${n} OR al.details::text ILIKE ${n})))`
+      : `(al.message ILIKE ${n} OR al.action_type ILIKE ${n} OR u.full_name ILIKE ${n} OR u.email ILIKE ${n} OR al.details::text ILIKE ${n})`);
   }
   const baseWhere = where.join(" AND ");
 
@@ -3227,7 +3230,9 @@ async function queryLogs(scopeSql, scopeParams, query, restrictions = [], { hide
       try {
         return {
           ...row,
-          message: row.message || describeLog(row.action_type, row.details).message,
+          message: hidePrompts && PROMPT_CONTENT_ACTIONS.includes(row.action_type)
+            ? adminSafeMessage(row.action_type, row.details)
+            : row.message || describeLog(row.action_type, row.details).message,
           details: hidePrompts ? stripPromptFields(row.details) : row.details,
           triggers: hidePrompts ? [] : promptTriggers(row.details?.prompt_text, restrictions),
         };
@@ -3294,11 +3299,28 @@ function stripPromptFields(details) {
   return out;
 }
 
-// Admin scope: every user's account & system activity (logins, logouts, bans,
-// enrollments, datasets, errors) — but no prompt content.
+// The admin sees THAT a student searched, generated a schema or was flagged — with
+// the declared category/purpose — but never WHAT they typed (instructors review that).
+const ADMIN_SAFE_LABEL = {
+  dataset_search: "Searched for datasets",
+  ai_search: "Searched for datasets with AI",
+  search_no_results: "A dataset search found no results",
+  schema_generated: "Generated a schema with AI",
+  prompt_flagged: "A prompt was flagged for instructor review",
+  prompt_blocked: "A prompt was blocked by a class trigger word",
+  prompt_resubmitted_rejected: "Resubmitted a prompt the instructor had rejected",
+};
+function adminSafeMessage(action, details) {
+  const d = details && typeof details === "object" ? details : {};
+  const extra = [d.category, d.purpose].filter((v) => typeof v === "string" && v.trim()).join(" · ");
+  return `${ADMIN_SAFE_LABEL[action] ?? action.replace(/_/g, " ")}${extra ? ` — ${extra}` : ""} (prompt visible to the instructor only)`;
+}
+
+// Admin scope: every user's activity, including searches, AI schemas and flags
+// (described without the prompt text), logins, bans, enrollments, datasets, errors.
 app.get("/api/admin/logs", requireAdmin, async (req, res) => {
   try {
-    const result = await queryLogs("al.action_type <> ALL($1)", [PROMPT_CONTENT_ACTIONS], req.query, [], { hidePrompts: true });
+    const result = await queryLogs("TRUE", [], req.query, [], { hidePrompts: true });
     noteLogExport(req, result);
     res.json(result);
   } catch (err) {
