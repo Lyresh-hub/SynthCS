@@ -778,6 +778,22 @@ async function initDB() {
       )
     `).catch(() => {});
 
+    // Instructor invite links made by an administrator: one use, expires after 7 days.
+    // Signing up with one creates the instructor account and assigns the course.
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS instructor_invitations (
+        id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        token       VARCHAR(64) UNIQUE NOT NULL,
+        course      VARCHAR(100) NOT NULL,
+        created_by  UUID,
+        active      BOOLEAN DEFAULT TRUE,
+        used_by     UUID,
+        used_at     TIMESTAMPTZ,
+        expires_at  TIMESTAMPTZ DEFAULT (NOW() + INTERVAL '7 days'),
+        created_at  TIMESTAMPTZ DEFAULT NOW()
+      )
+    `).catch((e) => console.error("instructor_invitations:", e.message));
+
     // Activity log — schema saves, generations, downloads
     await pool.query(`
       CREATE TABLE IF NOT EXISTS activity_log (
@@ -1315,36 +1331,139 @@ app.post("/signup", async (req, res) => {
   }
 });
 
-// INSTRUCTOR SIGNUP
+// INSTRUCTOR SIGNUP — only with an administrator's instructor invite link.
+// The link (one use, 7 days) creates the instructor account and assigns its course:
+// the instructor gets that course with a ready-to-share student invite link.
+const INSTRUCTOR_INVITE_OPEN = `active = TRUE AND used_at IS NULL AND expires_at > NOW()`;
+
 app.post("/instructor/signup", async (req, res) => {
+  let claimedInvite = null;
   try {
-    const { first_name, last_name, email, password } = req.body;
+    const { first_name, last_name, email, password, instructor_invite } = req.body;
     if (!first_name || !last_name || !email || !password)
       return res.status(400).json({ error: "first_name, last_name, email, and password are required" });
     if (!isAllowedEmail(email))
       return res.status(403).json({ error: "Only Gordon College email addresses (@gordoncollege.edu.ph) are allowed." });
+
+    // Claim the invite first (atomically), so one link can't create two accounts
+    const claim = instructor_invite ? await pool.query(
+      `UPDATE instructor_invitations SET used_at = NOW()
+       WHERE token = $1 AND ${INSTRUCTOR_INVITE_OPEN} RETURNING id, course, created_by`,
+      [String(instructor_invite)]
+    ) : { rows: [] };
+    if (!claim.rows.length) {
+      return res.status(403).json({
+        error: "invite_required",
+        message: "Instructor accounts can only be created with an invite link from the administrator. The link may be used already, switched off, or expired — please ask the administrator for a new one.",
+      });
+    }
+    claimedInvite = claim.rows[0];
 
     const full_name = `${first_name} ${last_name}`.trim();
     const hashed = await bcrypt.hash(password, 10);
     const token  = crypto.randomUUID();
 
     const created = await pool.query(
-      `INSERT INTO users (first_name, last_name, full_name, email, password, email_verified, verification_token, verification_token_expires, is_instructor, approval_status)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, TRUE, 'approved') RETURNING id`,
-      [first_name, last_name, full_name, email, hashed, !EMAIL_READY, EMAIL_READY ? token : null, EMAIL_READY ? new Date(Date.now() + 24 * 60 * 60 * 1000) : null]
+      `INSERT INTO users (first_name, last_name, full_name, email, password, email_verified, verification_token, verification_token_expires, is_instructor, approval_status, course)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, TRUE, 'approved', $9) RETURNING id`,
+      [first_name, last_name, full_name, email, hashed, !EMAIL_READY, EMAIL_READY ? token : null, EMAIL_READY ? new Date(Date.now() + 24 * 60 * 60 * 1000) : null, claimedInvite.course]
     );
-    logActivity(created.rows[0].id, "signup", { role: "instructor" });
+    const instructorId = created.rows[0].id;
+
+    // Assign the course: a course is an instructor + course name with its own student invite link
+    await pool.query(
+      "INSERT INTO class_invitations (instructor_id, course, token) VALUES ($1, $2, $3)",
+      [instructorId, claimedInvite.course, crypto.randomBytes(24).toString("hex")]
+    );
+    await pool.query("UPDATE instructor_invitations SET used_by = $1, active = FALSE WHERE id = $2", [instructorId, claimedInvite.id]);
+    claimedInvite = null;   // fully used
+    logActivity(instructorId, "instructor_registered", { via: "admin invite link", course: claim.rows[0].course, by_admin: claim.rows[0].created_by });
 
     if (EMAIL_READY) {
-      res.status(201).json({ pending_verification: true, email });
-      sendVerificationEmail(email, token).catch((e) => reportEmailFailure("Instructor verification email", e, created.rows[0].id));
+      res.status(201).json({ pending_verification: true, email, course: claim.rows[0].course });
+      sendVerificationEmail(email, token).catch((e) => reportEmailFailure("Instructor verification email", e, instructorId));
       return;
     }
 
-    res.status(201).json({ pending_verification: false, email });
+    res.status(201).json({ pending_verification: false, email, course: claim.rows[0].course });
   } catch (err) {
+    // Account wasn't created → give the invite back so it can still be used
+    if (claimedInvite) await pool.query("UPDATE instructor_invitations SET used_at = NULL WHERE id = $1", [claimedInvite.id]).catch(() => {});
     if (err.code === "23505") return res.status(400).json({ error: "Email already exists" });
     console.error("Instructor signup error:", err.message);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+// Public: what an instructor invite link is for (shown on the sign-up page)
+app.get("/instructor-invite/:token", async (req, res) => {
+  try {
+    const r = await pool.query(
+      `SELECT course, expires_at FROM instructor_invitations WHERE token = $1 AND ${INSTRUCTOR_INVITE_OPEN}`,
+      [req.params.token]
+    );
+    if (!r.rows.length) return res.status(404).json({ error: "This instructor invite link is no longer valid." });
+    res.json(r.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+// ── Admin: instructor invite links ────────────────────────────────────────────
+app.get("/api/admin/instructor-invites", requireAdmin, async (req, res) => {
+  try {
+    const r = await pool.query(
+      `SELECT ii.*, u.full_name AS used_by_name, u.email AS used_by_email,
+              CASE WHEN ii.used_at IS NOT NULL AND ii.used_by IS NOT NULL THEN 'used'
+                   WHEN ii.expires_at <= NOW() THEN 'expired'
+                   WHEN ii.active THEN 'active' ELSE 'inactive' END AS status
+       FROM instructor_invitations ii LEFT JOIN users u ON u.id = ii.used_by
+       ORDER BY ii.created_at DESC`
+    );
+    res.json(r.rows);
+  } catch (err) {
+    console.error("Instructor invites error:", err.message);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+app.post("/api/admin/instructor-invites", requireAdmin, async (req, res) => {
+  const course = String(req.body.course ?? "").trim();
+  if (!course) return res.status(400).json({ error: "Please enter the course this instructor will handle." });
+  if (course.length > 100) return res.status(400).json({ error: "The course name is too long (maximum 100 characters)." });
+  try {
+    const r = await pool.query(
+      `INSERT INTO instructor_invitations (token, course, created_by) VALUES ($1, $2, $3) RETURNING *, 'active' AS status`,
+      [crypto.randomBytes(24).toString("hex"), course, req.user.id]
+    );
+    logActivity(req.user.id, "instructor_invite_created", { course });
+    res.status(201).json(r.rows[0]);
+  } catch (err) {
+    console.error("Create instructor invite error:", err.message);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+app.patch("/api/admin/instructor-invites/:id/toggle", requireAdmin, async (req, res) => {
+  try {
+    const r = await pool.query(
+      "UPDATE instructor_invitations SET active = NOT active WHERE id = $1 AND used_by IS NULL RETURNING course, active",
+      [req.params.id]
+    );
+    if (!r.rows.length) return res.status(404).json({ error: "Invite not found or already used." });
+    logActivity(req.user.id, "instructor_invite_toggled", r.rows[0]);
+    res.json(r.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+app.delete("/api/admin/instructor-invites/:id", requireAdmin, async (req, res) => {
+  try {
+    const r = await pool.query("DELETE FROM instructor_invitations WHERE id = $1 RETURNING course", [req.params.id]);
+    if (r.rows.length) logActivity(req.user.id, "instructor_invite_deleted", { course: r.rows[0].course });
+    res.json({ ok: true });
+  } catch (err) {
     res.status(500).json({ error: "Server error" });
   }
 });

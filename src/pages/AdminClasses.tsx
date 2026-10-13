@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
-import { BookOpen, Activity, ChevronDown, ChevronRight, CheckCircle, XCircle, Clock, Plus, Copy, Trash2, X } from "lucide-react";
+import { BookOpen, Activity, ChevronDown, ChevronRight, CheckCircle, XCircle, Clock, Plus, Copy, Trash2, X, UserPlus } from "lucide-react";
 import { NODE_API as BACKEND } from "../lib/config";
+import InstructorInvites from "../components/InstructorInvites";
 
 const FRONTEND_URL = "https://synthcs.site";
 
@@ -26,7 +27,7 @@ type Course = {
 
 type Instructor = { id: string; full_name: string };
 
-type Tab = "courses" | "activity";
+type Tab = "courses" | "activity" | "instructor-invites";
 
 const STATUS_META: Record<string, { label: string; icon: React.ReactNode; cls: string }> = {
   approved:   { label: "Approved",   icon: <CheckCircle className="w-3 h-3" />, cls: "text-green-600 bg-green-50 border-green-100" },
@@ -165,7 +166,13 @@ export default function AdminClasses() {
       {/* Tabs */}
       <div className="flex gap-1 bg-white border border-gray-100 rounded-xl p-1 w-fit shadow-sm">
         <TabBtn active={tab === "courses"}  onClick={() => setTab("courses")}  icon={<BookOpen className="w-3.5 h-3.5" />}  label="Courses" />
+        <TabBtn active={tab === "instructor-invites"} onClick={() => setTab("instructor-invites")} icon={<UserPlus className="w-3.5 h-3.5" />} label="Instructor Invites" />
       </div>
+
+      {/* ── Instructor invite links ── */}
+      {tab === "instructor-invites" && (
+        <InstructorInvites knownCourses={[...new Set(courses.map((c) => c.course))]} />
+      )}
 
       {/* ── Courses ── */}
       {tab === "courses" && (

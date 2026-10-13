@@ -190,7 +190,12 @@ export default function InstructorDashboard() {
     setLoadingInvites(true);
     try {
       const res = await fetch(`${BACKEND}/instructor/invites?instructor_id=${instructorId}`);
-      if (res.ok) setInvites(await res.json());
+      if (res.ok) {
+        const list = await res.json();
+        setInvites(list);
+        // Default the course picker to a course assigned to this instructor
+        if (Array.isArray(list) && list.length) setNewCourse((cur) => (list.some((i: Invite) => i.course === cur) ? cur : list[0].course));
+      }
     } finally { setLoadingInvites(false); }
   }, [instructorId]);
 
@@ -854,8 +859,10 @@ export default function InstructorDashboard() {
               <div className="flex gap-2">
                 <select value={newCourse} onChange={(e) => setNewCourse(e.target.value)}
                   className="border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-purple-500">
-                  <option value="Data Science">Data Science</option>
-                  <option value="Thesis Writing">Thesis Writing</option>
+                  {/* The instructor's assigned courses, plus the standard ones */}
+                  {[...new Set([...invites.map((i) => i.course), "Data Science", "Thesis Writing"])].map((c) => (
+                    <option key={c} value={c}>{c}</option>
+                  ))}
                 </select>
                 <button onClick={handleCreateInvite}
                   className="flex items-center gap-1.5 px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white text-sm font-medium rounded-lg transition-colors">

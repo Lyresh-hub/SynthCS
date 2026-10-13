@@ -42,7 +42,10 @@ const CATALOG = {
   account_unbanned:         { level: "INFO",  category: "auth",       msg: () => "Account unbanned by an administrator (strikes reset)" },
   strikes_reset:            { level: "INFO",  category: "auth",       msg: () => "Strikes removed by an administrator" },
   signup:                   { level: "INFO",  category: "auth",       msg: (d) => `Created an account${d.role ? ` (${d.role})` : ""}` },
-  instructor_registered:    { level: "INFO",  category: "auth",       msg: () => "Instructor account registered by an administrator" },
+  instructor_registered:    { level: "INFO",  category: "auth",       msg: (d) => d.via === "admin invite link" ? `Instructor signed up with an administrator's invite link${d.course ? ` for ${s(d.course)}` : ""}` : "Instructor account registered by an administrator" },
+  instructor_invite_created: { level: "INFO", category: "auth",       msg: (d) => `Created an instructor invite link for ${s(d.course)}` },
+  instructor_invite_toggled: { level: "INFO", category: "auth",       msg: (d) => `${d.active ? "Activated" : "Deactivated"} the instructor invite link for ${s(d.course)}` },
+  instructor_invite_deleted: { level: "INFO", category: "auth",       msg: (d) => `Deleted the instructor invite link for ${s(d.course)}` },
   email_verified:           { level: "INFO",  category: "auth",       msg: () => "Verified email address" },
   password_reset_requested: { level: "INFO",  category: "auth",       msg: () => "Requested a password reset" },
 

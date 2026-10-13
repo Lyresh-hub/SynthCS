@@ -46,6 +46,11 @@ import JoinClass from "./pages/JoinClass";
 function getInitialPath() {
   const params = new URLSearchParams(window.location.search);
   if (params.get("verified"))    return `/login?verified=1`;
+  if (params.get("instructor_invite")) {
+    // Administrator's instructor invite link → instructor sign-up (the page reads the token)
+    sessionStorage.setItem("instructor_invite", params.get("instructor_invite")!);
+    return `/instructor/register`;
+  }
   if (params.get("role") === "instructor") return `/instructor/register`;
   if (window.location.pathname === "/accept-invitation" && params.get("token"))
     return `/accept-invitation?token=${encodeURIComponent(params.get("token")!)}`;

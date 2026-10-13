@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useLocation, Link } from "wouter";
 import { z } from "zod";
 import { useForm } from "react-hook-form";
@@ -48,6 +48,19 @@ export default function InstructorSignup() {
   const [showConfirm, setShowConfirm]   = useState(false);
   const [pendingEmail, setPendingEmail] = useState("");
 
+  // Instructor accounts are created only with an administrator's invite link,
+  // which also decides the course this instructor will handle
+  const [inviteToken] = useState(() => sessionStorage.getItem("instructor_invite") ?? "");
+  const [inviteCourse, setInviteCourse] = useState("");
+  const [inviteState, setInviteState] = useState<"checking" | "valid" | "missing" | "invalid">(inviteToken ? "checking" : "missing");
+  useEffect(() => {
+    if (!inviteToken) return;
+    fetch(`${BACKEND}/instructor-invite/${encodeURIComponent(inviteToken)}`)
+      .then((r) => (r.ok ? r.json() : Promise.reject()))
+      .then((d) => { setInviteCourse(d.course); setInviteState("valid"); })
+      .catch(() => setInviteState("invalid"));
+  }, [inviteToken]);
+
   const {
     register,
     handleSubmit,
@@ -75,11 +88,12 @@ export default function InstructorSignup() {
           last_name:  data.lastName,
           email:      data.email,
           password:   data.password,
+          instructor_invite: inviteToken,
         }),
       });
       const json = await res.json();
       if (!res.ok) {
-        const msg = json.error ?? "Failed to create account";
+        const msg = json.message ?? json.error ?? "Failed to create account";
         if (res.status === 400 && msg.toLowerCase().includes("exists")) {
           setError("email", { message: "An account with this email already exists" });
         } else {
@@ -87,10 +101,12 @@ export default function InstructorSignup() {
         }
         return;
       }
+      sessionStorage.removeItem("instructor_invite");
       if (json.pending_verification) {
         setPendingEmail(json.email);
         return;
       }
+      sessionStorage.setItem("login_notice", `Instructor account created for ${json.course ?? inviteCourse}. Sign in to open the Instructor Dashboard.`);
       setLocation("/login");
     } catch {
       setServerError("Could not reach the server. Make sure the backend is running.");
@@ -116,6 +132,29 @@ export default function InstructorSignup() {
         <p className="text-sm text-gray-400">
           <Link href="/login" className="text-purple-600 font-medium hover:underline">Go to Sign in</Link>
         </p>
+      </div>
+    </div>
+  );
+
+  if (inviteState === "checking") return (
+    <div className="min-h-screen flex items-center justify-center bg-white text-sm text-gray-400">Checking your invite link…</div>
+  );
+
+  if (inviteState !== "valid") return (
+    <div className="min-h-screen flex items-center justify-center bg-white px-6">
+      <div className="w-full max-w-md text-center space-y-5">
+        <img src="/synthcs-logo.png" alt="SynthCS" className="w-16 h-16 mx-auto" />
+        <h2 className="text-2xl font-bold text-gray-900">
+          {inviteState === "invalid" ? "This instructor invite link isn't valid" : "Instructor sign-up is by invitation"}
+        </h2>
+        <p className="text-sm text-gray-500 leading-relaxed">
+          {inviteState === "invalid"
+            ? "The link may have been used already, switched off, or expired (links last 7 days). Please ask the administrator for a new instructor invite link."
+            : "Instructor accounts are created with an invite link from the SynthCS administrator. Please ask the administrator to send you one."}
+        </p>
+        <Link href="/login" className="inline-block px-5 py-2.5 bg-purple-600 hover:bg-purple-700 text-white text-sm font-semibold rounded-lg">
+          Go to Sign in
+        </Link>
       </div>
     </div>
   );
@@ -163,7 +202,12 @@ export default function InstructorSignup() {
         <div className="w-full max-w-md">
           <div className="mb-6">
             <h2 className="text-2xl font-bold text-gray-900">Create instructor account</h2>
-            <p className="text-sm text-gray-500 mt-1">Register as an instructor to manage student approvals</p>
+            <p className="text-sm text-gray-500 mt-1">You were invited by the SynthCS administrator.</p>
+          </div>
+
+          <div className="mb-4 bg-purple-50 border border-purple-100 rounded-lg px-3 py-2.5 text-sm">
+            <p className="text-[11px] font-semibold text-purple-500 uppercase tracking-wide">Course assigned to you</p>
+            <p className="text-gray-800 font-medium">{inviteCourse}</p>
           </div>
 
           {serverError && (
