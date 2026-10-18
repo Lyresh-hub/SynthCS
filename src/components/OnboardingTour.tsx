@@ -96,11 +96,13 @@ interface Props {
   onFinish: () => void; // called specifically on the last button ("Get Started")
   steps?: TourStep[];
   finishLabel?: string;
+  initialStep?: number;                    // continue a tour (e.g. after moving to another page)
+  onStepChange?: (step: number) => void;   // called before the step's onEnter runs
 }
 
-export default function OnboardingTour({ onDone, onFinish, steps, finishLabel = "Get Started" }: Props) {
+export default function OnboardingTour({ onDone, onFinish, steps, finishLabel = "Get Started", initialStep = 0, onStepChange }: Props) {
   const STEPS = steps ?? STUDENT_STEPS;
-  const [step, setStep] = useState(0);
+  const [step, setStep] = useState(() => Math.min(Math.max(initialStep, 0), STEPS.length - 1));
   const [rect, setRect] = useState<DOMRect | null>(null);
 
   const current = STEPS[step];
@@ -108,6 +110,7 @@ export default function OnboardingTour({ onDone, onFinish, steps, finishLabel = 
   const isLast  = step === STEPS.length - 1;
 
   useLayoutEffect(() => {
+    onStepChange?.(step);
     current.onEnter?.();
     if (!current.target) { setRect(null); return; }
     const target = current.target;
